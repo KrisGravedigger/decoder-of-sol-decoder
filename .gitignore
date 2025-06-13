@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Data files and cache
+input/
+detailed_reports/
+price_cache/
+*.csv
+*.json
+*.xlsx
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
