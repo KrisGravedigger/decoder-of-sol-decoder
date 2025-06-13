@@ -15,6 +15,36 @@ The tool analyzes different combinations of:
 - **Distribution modes**: Spot vs Bid-Ask 
 - **Entry types**: 1-Sided vs Wide
 
+## ⚠️ Important: MVP Limitations & Proper Usage
+
+**This is an MVP (Minimum Viable Product)** designed for relative comparison of strategies, not precise financial predictions.
+
+### ✅ **What this tool IS good for:**
+- **Ranking strategies** for each position (which performed best)
+- **Identifying trends** across different market conditions
+- **Comparing within pairs**: Spot vs Bid-Ask for same entry type
+- **Data exploration** to guide further analysis
+- **Relative performance** assessment between similar strategies
+
+### ❌ **What this tool is NOT:**
+- A precise financial forecasting tool
+- Accurate for absolute PnL predictions  
+- Reliable for cross-category comparisons (Wide vs 1-Sided)
+- Suitable for high-stakes investment decisions
+
+### 🔬 **Known Technical Limitations:**
+- **Simplified IL calculations** for Wide strategies
+- **Basic fee distribution model** (actual fees depend on volume, not just liquidity)
+- **Static bin analysis** (doesn't account for price transitions over time)
+- **Estimated fee budgets** based on actual bot PnL assumptions
+
+### 📊 **Recommended Usage:**
+1. Use for **strategy ranking** within each position
+2. Look for **patterns** across multiple positions  
+3. Focus on **relative differences** between strategies
+4. Use results to **guide further research**, not as final decisions
+5. Combine with other analysis methods for investment decisions
+
 ## Features
 
 - 📊 **Automated Log Parsing**: Extracts position data from SOL Decoder bot logs
@@ -78,6 +108,8 @@ The tool will:
 - **Individual Reports**: Check `detailed_reports/` for position-specific analysis
 - **Summary Report**: Review `final_analysis_report.csv` for comparative results
 - **Logs**: Monitor console output for processing status and any issues
+
+**Remember**: Focus on **relative rankings** and **trends** rather than absolute PnL values. Use results to identify which strategies tend to perform better in different market conditions.
 
 ## Output Files
 
@@ -182,7 +214,15 @@ This project is licensed under the MIT License. Feel free to copy, modify, and u
 
 ## Disclaimer
 
-This tool is for educational and analytical purposes only. It analyzes past performance of SOL Decoder bot strategies and does not constitute financial advice. Always do your own research before making investment decisions.
+**This tool is an MVP for educational and exploratory analysis only.** 
+
+- The strategy simulations use simplified models and should not be considered precise financial predictions
+- Results are intended for **relative comparison** and **trend identification** only
+- Always conduct additional research and analysis before making investment decisions
+- The tool works with past performance data, which does not guarantee future results
+- SOL Decoder bot performance may vary significantly from these simplified simulations
+
+**Use responsibly**: This tool helps identify patterns and potential strategies for further investigation, not as a definitive trading signal.
 
 ## Support
 
