@@ -188,13 +188,31 @@ class LogParser:
         Returns:
             Final PnL amount in SOL or None
         """
+        result = self._parse_final_pnl_with_line_info(start_index, lookback)
+        return result['pnl']
+
+    def _parse_final_pnl_with_line_info(self, start_index: int, lookback: int) -> Dict[str, Any]:
+        """
+        Parse final PnL from log context with line number information.
+        
+        Args:
+            start_index: Starting line index
+            lookback: Number of lines to look back
+            
+        Returns:
+            Dictionary with 'pnl' (float or None) and 'line_number' (int or None)
+        """
         for i in range(start_index, max(-1, start_index - lookback), -1):
             line = self._clean_ansi(self.all_lines[i])
             if "PnL:" in line and "Return:" in line:
                 match = re.search(r'PnL:\s*(-?\d+\.?\d*)\s*SOL', line)
                 if match: 
-                    return round(float(match.group(1)), 5)
-        return None
+                    pnl_value = round(float(match.group(1)), 5)
+                    logger.debug(f"Found PnL value {pnl_value} at line {i + 1}: {line.strip()}")
+                    return {'pnl': pnl_value, 'line_number': i + 1}
+        
+        logger.debug(f"No PnL found in lookback range {start_index + 1} to {max(1, start_index - lookback + 2)}")
+        return {'pnl': None, 'line_number': None}
 
     def _process_open_event(self, timestamp: str, version: str, index: int):
         """
@@ -259,11 +277,13 @@ class LogParser:
             pos = matching_position
             pos.close_timestamp = timestamp
             pos.close_reason = close_reason_code
-            pos.final_pnl = self._parse_final_pnl(index, 20)
+            pnl_result = self._parse_final_pnl_with_line_info(index, 20)
+            pos.final_pnl = pnl_result['pnl']
             
             self.finalized_positions.append(pos)
             del self.active_positions[pos.position_id]
-            logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Reason: {pos.close_reason} | PnL: {pos.final_pnl}")
+            pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
+            logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
         else:
             logger.debug(f"Detected closing for {token_pair_in_context} at line {index + 1}, but no active position found.")
 
