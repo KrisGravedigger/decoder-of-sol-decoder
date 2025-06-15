@@ -19,7 +19,10 @@ logger = logging.getLogger('LogExtractor')
 # === Helper Classes ===
 
 class Position:
-    """Stores the state of a single, active trading position."""
+    """Stores the state of a single, active trading position.
+    
+    Note: Only one position per token pair can be active at any given time.
+    """
     
     def __init__(self, open_timestamp: str, bot_version: str, line_index: int):
         """
@@ -76,16 +79,6 @@ class Position:
 
 class LogParser:
     """Manages the entire log parsing process."""
-
-    CLOSE_REASONS = {
-        "take profit triggered": "TP", 
-        "closing position due to high token price increase": "OOR_high_price",
-        "price moved above position range": "OOR", 
-        "position out of range": "OOR",
-        "stop loss triggered": "SL", 
-        "successfully closed position": "manual/other",
-        "closed position": "manual/other"
-    }
 
     def __init__(self):
         """Initialize the log parser."""
@@ -252,31 +245,37 @@ class LogParser:
         """
         Process a position closing event.
         
+        Looks for the definitive closing pattern: "Closed" + "position and withdrew liquidity"
+        which unambiguously indicates that a position has been actually closed (not just warned).
+        
         Args:
             timestamp: Event timestamp
             index: Line index in log
         """
-        line_lower = self._clean_ansi(self.all_lines[index].lower())
+        logger.info(f"Processing close event at line {index + 1}")
+        line_clean = self._clean_ansi(self.all_lines[index])
+        logger.info(f"Cleaned line: {line_clean.strip()}")
         
-        close_reason_code = next((code for text, code in self.CLOSE_REASONS.items() if text in line_lower), None)
-        if not close_reason_code: 
+        # Check for definitive closing pattern
+        if not ("Closed" in line_clean and "position and withdrew liquidity" in line_clean):
             return
-
-        # Increased lookback for closing context to 20 lines
-        context_lines_str = " ".join(self.all_lines[max(0, index - 20):index + 1])
-        token_pair_in_context = self._normalize_token_pair(context_lines_str)
-
-        if not token_pair_in_context:
-            logger.debug(f"Detected closing at line {index + 1}, but no pair in context.")
+        
+        # Extract token pair directly from the closing line
+        token_match = re.search(r'Closed\s+([A-Za-z0-9\-_]+\-SOL)', line_clean)
+        if not token_match:
+            logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair.")
             return
-
-        matching_position = next((pos for pos_id, pos in reversed(list(self.active_positions.items())) 
-                                if pos.token_pair == token_pair_in_context), None)
+        
+        closed_pair = token_match.group(1)
+        
+        # Find matching active position for this token pair
+        matching_position = next((pos for pos_id, pos in self.active_positions.items() 
+                                if pos.token_pair == closed_pair), None)
         
         if matching_position:
             pos = matching_position
             pos.close_timestamp = timestamp
-            pos.close_reason = close_reason_code
+            pos.close_reason = "position_closed"  # Generic reason since we have definitive closing
             pnl_result = self._parse_final_pnl_with_line_info(index, 20)
             pos.final_pnl = pnl_result['pnl']
             
@@ -285,8 +284,46 @@ class LogParser:
             pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
             logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
         else:
-            logger.debug(f"Detected closing for {token_pair_in_context} at line {index + 1}, but no active position found.")
+            logger.debug(f"Found closing for {closed_pair} at line {index + 1}, but no active position found for this pair.")
 
+    def _process_close_event_without_timestamp(self, index: int):
+        """
+        Process a position closing event that doesn't have timestamp in the line.
+        
+        Args:
+            index: Line index in log
+        """
+        logger.info(f"Processing close event at line {index + 1}")
+        line_clean = self._clean_ansi(self.all_lines[index])
+        logger.info(f"Cleaned line: {line_clean.strip()}")
+        
+        # Extract token pair directly from the closing line
+        token_match = re.search(r'Closed\s+([A-Za-z0-9\-_]+\-SOL)', line_clean)
+        if not token_match:
+            logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair.")
+            return
+        
+        closed_pair = token_match.group(1)
+        
+        # Find matching active position for this token pair
+        matching_position = next((pos for pos_id, pos in self.active_positions.items() 
+                                if pos.token_pair == closed_pair), None)
+        
+        if matching_position:
+            pos = matching_position
+            # Use estimated timestamp based on surrounding lines or default
+            pos.close_timestamp = "UNKNOWN"  # We'll improve this later
+            pos.close_reason = "position_closed"
+            pnl_result = self._parse_final_pnl_with_line_info(index, 20)
+            pos.final_pnl = pnl_result['pnl']
+            
+            self.finalized_positions.append(pos)
+            del self.active_positions[pos.position_id]
+            pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
+            logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
+        else:
+            logger.debug(f"Found closing for {closed_pair} at line {index + 1}, but no active position found for this pair.")
+    
     def run(self, log_dir: str) -> List[Dict[str, Any]]:
         """
         Run the complete log parsing process.
@@ -307,6 +344,14 @@ class LogParser:
         logger.info(f"Processing {len(self.all_lines)} lines from {len(log_files)} log files.")
 
         for i, line_content in enumerate(self.all_lines):
+            # Check for closing pattern first (doesn't require timestamp)
+            if "Closed" in line_content and "position and withdrew liquidity" in line_content:
+                logger.info(f"Found closing pattern at line {i + 1}: {line_content.strip()}")
+                # For closing events, we'll extract timestamp differently or use a default
+                self._process_close_event_without_timestamp(i)
+                continue
+            
+            # Regular timestamp-based processing
             timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', self._clean_ansi(line_content))
             if not timestamp_match: 
                 continue
@@ -317,8 +362,6 @@ class LogParser:
 
             if "Creating a position" in line_content: 
                 self._process_open_event(timestamp, version, i)
-            else: 
-                self._process_close_event(timestamp, i)
 
         # Process remaining active positions
         for pos_id, pos in self.active_positions.items():
@@ -335,6 +378,10 @@ class LogParser:
             else:
                 logger.warning(f"Rejected position {pos.position_id} ({pos.token_pair}). Errors: {', '.join(errors)}")
         
+        # Debug: Count potential closing patterns
+        closing_pattern_count = sum(1 for line in self.all_lines if "Closed" in line and "position and withdrew liquidity" in line)
+        logger.info(f"Found {closing_pattern_count} lines matching closing pattern in total.")
+
         logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data for analysis.")
         return validated_positions
 
