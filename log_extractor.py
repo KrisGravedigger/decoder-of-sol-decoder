@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any
 # --- Configuration ---
 LOG_DIR = "input"
 OUTPUT_CSV = "positions_to_analyze.csv"
+MIN_PNL_THRESHOLD = 0.01  # Skip positions with PnL between -0.01 and +0.01 SOL
 
 # Logging configuration
 logging.basicConfig(
@@ -371,18 +372,27 @@ class LogParser:
 
         # Validate and filter positions
         validated_positions = []
+        skipped_low_pnl = 0
+        
         for pos in self.finalized_positions:
             errors = pos.get_validation_errors()
-            if not errors:
-                validated_positions.append(pos.to_csv_row())
-            else:
+            if errors:
                 logger.warning(f"Rejected position {pos.position_id} ({pos.token_pair}). Errors: {', '.join(errors)}")
+                continue
+                
+            # Skip positions with insignificant PnL
+            if pos.final_pnl is not None and abs(pos.final_pnl) < MIN_PNL_THRESHOLD:
+                logger.debug(f"Skipped position {pos.position_id} ({pos.token_pair}) - PnL {pos.final_pnl} SOL below threshold {MIN_PNL_THRESHOLD}")
+                skipped_low_pnl += 1
+                continue
+                
+            validated_positions.append(pos.to_csv_row())
         
         # Debug: Count potential closing patterns
         closing_pattern_count = sum(1 for line in self.all_lines if "Closed" in line and "position and withdrew liquidity" in line)
         logger.info(f"Found {closing_pattern_count} lines matching closing pattern in total.")
 
-        logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data for analysis.")
+        logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data for analysis. {skipped_low_pnl} skipped due to low PnL (< {MIN_PNL_THRESHOLD} SOL).")
         return validated_positions
 
 def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool:

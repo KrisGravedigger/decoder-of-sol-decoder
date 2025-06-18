@@ -123,6 +123,21 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **At 600+ lines:** gently suggest refactoring with each modification
 - **Don't block work** if you decide to continue
 
+## 📖 Session Management Rules
+
+### 🎯 Single Task Per Session
+- **One session = one task** (plus minor improvements if needed)
+- **Never use same chat** for multiple unrelated tasks
+- **If human tries to start new task:** remind about this rule (but don't force - not a hard stop)
+
+### 🔔 Task Completion Reminders
+- **When task seems complete:** remind human to test script and update CLAUDE.md
+- **When human confirms testing:** automatically suggest all CLAUDE.md updates needed
+
+### ✅ Session Closure Protocol
+- **Human confirms testing completed:** provide complete CLAUDE.md update suggestions
+- **Focus on:** Session History, Working Features, Project Status, any structural changes
+
 ## 📚 Domain Dictionary
 
 ### Data Sources & APIs
@@ -152,10 +167,11 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **Stop Loss (SL)** - automatic close when loss threshold exceeded
 - **Post-Exit Analysis** - forward-looking profitability analysis beyond historical close
 - **ML-Optimized Levels** - TP/SL levels determined by machine learning algorithms
+- **PnL Filtering** - exclusion of positions with insignificant profit/loss (< threshold)
 
 ## 🗂️ Project Structure
 - **main_analyzer.py** - main orchestrator (extraction → analysis → reporting)
-- **log_extractor.py** - SOL Decoder bot log parser, extracts position data
+- **log_extractor.py** - SOL Decoder bot log parser, extracts position data with PnL filtering
 - **strategy_analyzer.py** - LP strategy simulation engine for Meteora DLMM
 - **input/** - SOL Decoder bot log files (automatically processes newest)
   - **archive/** - processed logs (automatic archiving) [TODO]
@@ -171,13 +187,14 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **Reports:** individual text reports + collective CSV
 
 ## 🏃‍♂️ Project Status
-**Last Update:** [PLACEHOLDER - will be updated regularly]
+**Last Update:** 2025-06-18
 **Current Version:** MVP v1.0
 **Working Features:** 
 - Position extraction from SOL Decoder logs ✅
 - Historical price data fetching from Moralis API ✅
 - 4 LP strategy simulation (Spot/Bid-Ask × 1-Sided/Wide) ✅
 - Comparative report generation ✅
+- PnL-based position filtering (skips insignificant positions) ✅
 
 **In Progress:**
 - Fee calculation accuracy improvements 🔄
@@ -201,3 +218,9 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **Achieved:** CLAUDE.md template customization, roadmap clarification
 - **Issues:** -
 - **Next Steps:** Begin accuracy improvements and TP/SL optimization research
+
+### 2025-06-18: PnL Filtering Implementation
+- **Goal:** Skip positions with insignificant PnL (-0.01 to +0.01 SOL) from analysis
+- **Achieved:** Added MIN_PNL_THRESHOLD filter in log_extractor.py validation section
+- **Issues:** -
+- **Next Steps:** Improve close reason identification accuracy
