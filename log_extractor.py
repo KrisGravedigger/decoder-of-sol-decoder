@@ -4,14 +4,26 @@ import csv
 import logging
 from typing import Dict, List, Optional, Any
 
+# === MAIN DEBUG CONFIGURATION ===
+# AIDEV-NOTE-CLAUDE: Master debug controls - these override settings in debug_analyzer.py
+DEBUG_ENABLED = True                    # Master switch for all debug features
+DEBUG_LEVEL = "DEBUG"                   # "DEBUG" for detailed logs, "INFO" for standard logs
+CONTEXT_EXPORT_ENABLED = True          # Enable/disable context export completely
+DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event logging
+
+# Import debug functionality
+from debug_analyzer import DebugAnalyzer
+
 # --- Configuration ---
 LOG_DIR = "input"
 OUTPUT_CSV = "positions_to_analyze.csv"
+CONTEXT_EXPORT_FILE = "close_contexts_analysis.txt"
 MIN_PNL_THRESHOLD = 0.01  # Skip positions with PnL between -0.01 and +0.01 SOL
 
 # Logging configuration
+log_level = logging.DEBUG if (DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG") else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
@@ -45,6 +57,7 @@ class Position:
         self.close_timestamp: Optional[str] = None
         self.close_reason: Optional[str] = None
         self.final_pnl: Optional[float] = None
+        self.close_line_index: Optional[int] = None  # AIDEV-NOTE-CLAUDE: Added for context export
 
     def is_context_complete(self) -> bool:
         """Check if position has complete context information."""
@@ -86,6 +99,11 @@ class LogParser:
         self.all_lines: List[str] = []
         self.active_positions: Dict[str, Position] = {}
         self.finalized_positions: List[Position] = []
+        # AIDEV-NOTE-CLAUDE: Pass main debug settings to analyzer
+        self.debug_analyzer = DebugAnalyzer(
+            debug_enabled=DEBUG_ENABLED,
+            context_export_enabled=CONTEXT_EXPORT_ENABLED
+        )
 
     def _clean_ansi(self, text: str) -> str:
         """Remove ANSI escape sequences from text."""
@@ -150,7 +168,8 @@ class LogParser:
             if "PnL:" in line and "Start:" in line:
                 match = re.search(r'Start:\s*([\d\.]+)\s*SOL', line)
                 if match:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'PnL+Start' pattern at line {i+1}")
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found investment amount '{match.group(1)}' from 'PnL+Start' pattern at line {i+1}")
                     return round(float(match.group(1)), 4)
 
             # Pattern 2: PnL line with "Initial"
@@ -158,14 +177,16 @@ class LogParser:
             if "Pnl Calculation:" in line and "Initial" in line:
                 match = re.search(r'Initial\s*([\d\.]+)\s*SOL', line)
                 if match:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'Pnl Calculation+Initial' pattern at line {i+1}")
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found investment amount '{match.group(1)}' from 'Pnl Calculation+Initial' pattern at line {i+1}")
                     return round(float(match.group(1)), 4)
             
             # Pattern 3: Position opening line
             if "Creating a position" in line:
                 match = re.search(r'with\s*([\d\.]+)\s*SOL', line)
                 if match:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'Creating+with' pattern at line {i+1}")
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found investment amount '{match.group(1)}' from 'Creating+with' pattern at line {i+1}")
                     return round(float(match.group(1)), 4)
 
         logger.warning(f"Could not find investment amount for position opened at line {start_index + 1}")
@@ -202,10 +223,12 @@ class LogParser:
                 match = re.search(r'PnL:\s*(-?\d+\.?\d*)\s*SOL', line)
                 if match: 
                     pnl_value = round(float(match.group(1)), 5)
-                    logger.debug(f"Found PnL value {pnl_value} at line {i + 1}: {line.strip()}")
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found PnL value {pnl_value} at line {i + 1}: {line.strip()}")
                     return {'pnl': pnl_value, 'line_number': i + 1}
         
-        logger.debug(f"No PnL found in lookback range {start_index + 1} to {max(1, start_index - lookback + 2)}")
+        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+            logger.debug(f"No PnL found in lookback range {start_index + 1} to {max(1, start_index - lookback + 2)}")
         return {'pnl': None, 'line_number': None}
 
     def _process_open_event(self, timestamp: str, version: str, index: int):
@@ -221,7 +244,8 @@ class LogParser:
             self._find_context_value([r'TARGET POOL:\s*(.*-SOL)'], index, 50)
         )
         if not token_pair:
-            logger.debug(f"Skipped opening at line {index + 1}, missing token pair.")
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                logger.debug(f"Skipped opening at line {index + 1}, missing token pair.")
             return
 
         pos = Position(timestamp, version, index)
@@ -240,52 +264,9 @@ class LogParser:
         pos.initial_investment = self._parse_initial_investment(index, 0, 100)
         
         self.active_positions[pos.position_id] = pos
-        logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Inv: {pos.initial_investment} | Pool: {pos.pool_address}")
-
-    def _process_close_event(self, timestamp: str, index: int):
-        """
-        Process a position closing event.
         
-        Looks for the definitive closing pattern: "Closed" + "position and withdrew liquidity"
-        which unambiguously indicates that a position has been actually closed (not just warned).
-        
-        Args:
-            timestamp: Event timestamp
-            index: Line index in log
-        """
-        logger.info(f"Processing close event at line {index + 1}")
-        line_clean = self._clean_ansi(self.all_lines[index])
-        logger.info(f"Cleaned line: {line_clean.strip()}")
-        
-        # Check for definitive closing pattern
-        if not ("Closed" in line_clean and "position and withdrew liquidity" in line_clean):
-            return
-        
-        # Extract token pair directly from the closing line
-        token_match = re.search(r'Closed\s+([A-Za-z0-9\-_]+\-SOL)', line_clean)
-        if not token_match:
-            logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair.")
-            return
-        
-        closed_pair = token_match.group(1)
-        
-        # Find matching active position for this token pair
-        matching_position = next((pos for pos_id, pos in self.active_positions.items() 
-                                if pos.token_pair == closed_pair), None)
-        
-        if matching_position:
-            pos = matching_position
-            pos.close_timestamp = timestamp
-            pos.close_reason = "position_closed"  # Generic reason since we have definitive closing
-            pnl_result = self._parse_final_pnl_with_line_info(index, 20)
-            pos.final_pnl = pnl_result['pnl']
-            
-            self.finalized_positions.append(pos)
-            del self.active_positions[pos.position_id]
-            pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
-            logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
-        else:
-            logger.debug(f"Found closing for {closed_pair} at line {index + 1}, but no active position found for this pair.")
+        if DETAILED_POSITION_LOGGING:
+            logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Inv: {pos.initial_investment} | Pool: {pos.pool_address}")
 
     def _process_close_event_without_timestamp(self, index: int):
         """
@@ -294,14 +275,18 @@ class LogParser:
         Args:
             index: Line index in log
         """
-        logger.info(f"Processing close event at line {index + 1}")
+        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+            logger.info(f"Processing close event at line {index + 1}")
+            line_clean = self._clean_ansi(self.all_lines[index])
+            logger.info(f"Cleaned line: {line_clean.strip()}")
+        
         line_clean = self._clean_ansi(self.all_lines[index])
-        logger.info(f"Cleaned line: {line_clean.strip()}")
         
         # Extract token pair directly from the closing line
         token_match = re.search(r'Closed\s+([A-Za-z0-9\-_]+\-SOL)', line_clean)
         if not token_match:
-            logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair.")
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair.")
             return
         
         closed_pair = token_match.group(1)
@@ -315,15 +300,22 @@ class LogParser:
             # Use estimated timestamp based on surrounding lines or default
             pos.close_timestamp = "UNKNOWN"  # We'll improve this later
             pos.close_reason = "position_closed"
+            pos.close_line_index = index  # AIDEV-NOTE-CLAUDE: Store for context export
             pnl_result = self._parse_final_pnl_with_line_info(index, 20)
             pos.final_pnl = pnl_result['pnl']
             
+            # AIDEV-NOTE-CLAUDE: Process close event for debug analysis
+            self.debug_analyzer.process_close_event(pos, index)
+            
             self.finalized_positions.append(pos)
             del self.active_positions[pos.position_id]
-            pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
-            logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
+            
+            if DETAILED_POSITION_LOGGING:
+                pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
+                logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
         else:
-            logger.debug(f"Found closing for {closed_pair} at line {index + 1}, but no active position found for this pair.")
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                logger.debug(f"Found closing for {closed_pair} at line {index + 1}, but no active position found for this pair.")
     
     def run(self, log_dir: str) -> List[Dict[str, Any]]:
         """
@@ -344,10 +336,14 @@ class LogParser:
             self.all_lines.extend(open(os.path.join(log_dir, f), 'r', encoding='utf-8', errors='ignore'))
         logger.info(f"Processing {len(self.all_lines)} lines from {len(log_files)} log files.")
 
+        # AIDEV-NOTE-CLAUDE: Set log lines for debug analyzer
+        self.debug_analyzer.set_log_lines(self.all_lines)
+
         for i, line_content in enumerate(self.all_lines):
             # Check for closing pattern first (doesn't require timestamp)
             if "Closed" in line_content and "position and withdrew liquidity" in line_content:
-                logger.info(f"Found closing pattern at line {i + 1}: {line_content.strip()}")
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                    logger.info(f"Found closing pattern at line {i + 1}: {line_content.strip()}")
                 # For closing events, we'll extract timestamp differently or use a default
                 self._process_close_event_without_timestamp(i)
                 continue
@@ -382,15 +378,17 @@ class LogParser:
                 
             # Skip positions with insignificant PnL
             if pos.final_pnl is not None and abs(pos.final_pnl) < MIN_PNL_THRESHOLD:
-                logger.debug(f"Skipped position {pos.position_id} ({pos.token_pair}) - PnL {pos.final_pnl} SOL below threshold {MIN_PNL_THRESHOLD}")
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                    logger.debug(f"Skipped position {pos.position_id} ({pos.token_pair}) - PnL {pos.final_pnl} SOL below threshold {MIN_PNL_THRESHOLD}")
                 skipped_low_pnl += 1
                 continue
                 
             validated_positions.append(pos.to_csv_row())
         
         # Debug: Count potential closing patterns
-        closing_pattern_count = sum(1 for line in self.all_lines if "Closed" in line and "position and withdrew liquidity" in line)
-        logger.info(f"Found {closing_pattern_count} lines matching closing pattern in total.")
+        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+            closing_pattern_count = sum(1 for line in self.all_lines if "Closed" in line and "position and withdrew liquidity" in line)
+            logger.info(f"Found {closing_pattern_count} lines matching closing pattern in total.")
 
         logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data for analysis. {skipped_low_pnl} skipped due to low PnL (< {MIN_PNL_THRESHOLD} SOL).")
         return validated_positions
@@ -411,6 +409,11 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     
     parser = LogParser()
     extracted_data = parser.run(log_dir)
+    
+    # AIDEV-NOTE-CLAUDE: Export close contexts for analysis if enabled
+    if CONTEXT_EXPORT_ENABLED and parser.debug_analyzer.get_context_count() > 0:
+        context_stats = parser.debug_analyzer.export_analysis(CONTEXT_EXPORT_FILE)
+        logger.info(f"Context export statistics: {dict(context_stats)}")
     
     if not extracted_data:
         logger.error("Failed to extract any complete positions. CSV file will not be created.")

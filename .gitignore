@@ -17,6 +17,7 @@ price_cache/
 *.csv
 *.json
 *.xlsx
+*.txt
 
 # macOS
 .DS_Store
