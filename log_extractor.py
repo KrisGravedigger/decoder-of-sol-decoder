@@ -181,16 +181,25 @@ class LogParser:
                         logger.debug(f"Found investment amount '{match.group(1)}' from 'Pnl Calculation+Initial' pattern at line {i+1}")
                     return round(float(match.group(1)), 4)
             
-            # Pattern 3: Position opening line
-            if "Creating a position" in line:
+            # Pattern 3: Position opening line - more specific
+            if ("Creating a position and adding liquidity" in line or 
+                "Creating a position with" in line) and "Error" not in line:
                 match = re.search(r'with\s*([\d\.]+)\s*SOL', line)
                 if match:
                     if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
                         logger.debug(f"Found investment amount '{match.group(1)}' from 'Creating+with' pattern at line {i+1}")
                     return round(float(match.group(1)), 4)
+                
+            # Pattern 4: Direct liquidity addition line
+            if "adding liquidity of" in line and "SOL" in line and "Error" not in line:
+                match = re.search(r'and\s*([\d\.]+)\s*SOL', line)
+                if match:
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found investment amount '{match.group(1)}' from 'adding liquidity' pattern at line {i+1}")
+                    return round(float(match.group(1)), 4)
 
-        logger.warning(f"Could not find investment amount for position opened at line {start_index + 1}")
-        return None
+                    logger.warning(f"Could not find investment amount for position opened at line {start_index + 1}")
+                    return None
         
     def _parse_final_pnl(self, start_index: int, lookback: int) -> Optional[float]:
         """
@@ -247,7 +256,45 @@ class LogParser:
             if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
                 logger.debug(f"Skipped opening at line {index + 1}, missing token pair.")
             return
+        
+        # Check if position for this token pair already exists
+        existing_position = None
+        existing_position_id = None
+        for pos_id, pos in self.active_positions.items():
+            if pos.token_pair == token_pair:
+                existing_position = pos
+                existing_position_id = pos_id
+                break
 
+        if existing_position:
+            # Update existing position with new data but KEEP THE SAME OBJECT
+            # AIDEV-NOTE-CLAUDE: Track retry count for cleaner logging
+            if not hasattr(existing_position, 'retry_count'):
+                existing_position.retry_count = 1
+            existing_position.retry_count += 1
+            
+            # Update only the fields that might change with retry
+            existing_position.open_timestamp = timestamp
+            existing_position.bot_version = version
+            existing_position.open_line_index = index
+            
+            # Re-parse pool and strategy (might have changed)
+            existing_position.pool_address = self._find_context_value([
+                r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', 
+                r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
+            ], index, 50)
+            
+            existing_position.actual_strategy = self._find_context_value([
+                r'\[(Spot \(1-Sided\)|Bid-Ask \(1-Sided\)|Spot \(Wide\)|Bid-Ask \(Wide\))'
+            ], index, 50) or "UNKNOWN"
+            
+            # CRITICAL: Re-parse investment amount
+            existing_position.initial_investment = self._parse_initial_investment(index, 0, 100)
+            
+            # Don't log every retry, will log summary when position is finalized
+            return  # Don't create new position!
+            
+        # Only create new position if none exists
         pos = Position(timestamp, version, index)
         pos.token_pair = token_pair
         
@@ -266,7 +313,8 @@ class LogParser:
         self.active_positions[pos.position_id] = pos
         
         if DETAILED_POSITION_LOGGING:
-            logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Inv: {pos.initial_investment} | Pool: {pos.pool_address}")
+            retry_info = f" (succeeded after {pos.retry_count} retries)" if hasattr(pos, 'retry_count') else ""
+            logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Open detected at line {index + 1}{retry_info}")
 
     def _process_close_event_without_timestamp(self, index: int):
         """
@@ -282,14 +330,19 @@ class LogParser:
         
         line_clean = self._clean_ansi(self.all_lines[index])
         
-        # Extract token pair directly from the closing line
-        token_match = re.search(r'Closed\s+([A-Za-z0-9\-_]+\-SOL)', line_clean)
-        if not token_match:
+        # Extract token pair from "Removing positions in" line in lookback
+        closed_pair = None
+        for i in range(index, max(-1, index - 50), -1):
+            line = self._clean_ansi(self.all_lines[i])
+            remove_match = re.search(r'Removing positions in\s+([A-Za-z0-9\s\-_()]+\-SOL)', line)
+            if remove_match:
+                closed_pair = remove_match.group(1).strip()
+                break
+
+        if not closed_pair:
             if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
-                logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair.")
+                logger.debug(f"Found closing pattern at line {index + 1}, but could not extract token pair from 'Removing positions' lines.")
             return
-        
-        closed_pair = token_match.group(1)
         
         # Find matching active position for this token pair
         matching_position = next((pos for pos_id, pos in self.active_positions.items() 
@@ -301,7 +354,7 @@ class LogParser:
             pos.close_timestamp = "UNKNOWN"  # We'll improve this later
             pos.close_reason = self._classify_close_reason(index)
             pos.close_line_index = index  # AIDEV-NOTE-CLAUDE: Store for context export
-            pnl_result = self._parse_final_pnl_with_line_info(index, 20)
+            pnl_result = self._parse_final_pnl_with_line_info(index, 50)
             pos.final_pnl = pnl_result['pnl']
             
             # AIDEV-NOTE-CLAUDE: Process close event for debug analysis
@@ -341,7 +394,7 @@ class LogParser:
 
         for i, line_content in enumerate(self.all_lines):
             # Check for closing pattern first (doesn't require timestamp)
-            if "Closed" in line_content and "position and withdrew liquidity" in line_content:
+            if "position and withdrew liquidity" in line_content:
                 if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
                     logger.info(f"Found closing pattern at line {i + 1}: {line_content.strip()}")
                 # For closing events, we'll extract timestamp differently or use a default
@@ -357,8 +410,23 @@ class LogParser:
             version_match = re.search(r'(v[\d.]+)', self._clean_ansi(line_content))
             version = version_match.group(1) if version_match else "vUNKNOWN"
 
-            if "Creating a position" in line_content: 
-                self._process_open_event(timestamp, version, i)
+            if "Added liquidity of" in line_content and "SOL" in line_content:
+                # Now look back to find the corresponding "Creating a position" line
+                create_line_index = None
+                for j in range(i - 1, max(i - 100, -1), -1):  # Look back up to 100 lines
+                    if "Creating a position" in self.all_lines[j]:
+                        create_line_index = j
+                        break
+                
+                if create_line_index is not None:
+                    # Extract timestamp from the create line
+                    create_line = self.all_lines[create_line_index]
+                    timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', self._clean_ansi(create_line))
+                    if timestamp_match:
+                        timestamp = timestamp_match.group(1)
+                        version_match = re.search(r'(v[\d.]+)', self._clean_ansi(create_line))
+                        version = version_match.group(1) if version_match else "vUNKNOWN"
+                        self._process_open_event(timestamp, version, create_line_index)
 
         # Process remaining active positions
         for pos_id, pos in self.active_positions.items():
