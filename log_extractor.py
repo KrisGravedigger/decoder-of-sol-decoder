@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Any
 
 # === MAIN DEBUG CONFIGURATION ===
 # AIDEV-NOTE-CLAUDE: Master debug controls - these override settings in debug_analyzer.py
-DEBUG_ENABLED = True                    # Master switch for all debug features
+DEBUG_ENABLED = False                    # Master switch for all debug features
 DEBUG_LEVEL = "DEBUG"                   # "DEBUG" for detailed logs, "INFO" for standard logs
 CONTEXT_EXPORT_ENABLED = True          # Enable/disable context export completely
 DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event logging
@@ -299,7 +299,7 @@ class LogParser:
             pos = matching_position
             # Use estimated timestamp based on surrounding lines or default
             pos.close_timestamp = "UNKNOWN"  # We'll improve this later
-            pos.close_reason = "position_closed"
+            pos.close_reason = self._classify_close_reason(index)
             pos.close_line_index = index  # AIDEV-NOTE-CLAUDE: Store for context export
             pnl_result = self._parse_final_pnl_with_line_info(index, 20)
             pos.final_pnl = pnl_result['pnl']
@@ -392,6 +392,47 @@ class LogParser:
 
         logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data for analysis. {skipped_low_pnl} skipped due to low PnL (< {MIN_PNL_THRESHOLD} SOL).")
         return validated_positions
+    
+    def _classify_close_reason(self, close_line_index: int) -> str:
+        """
+        Classify close reason based on context around close event.
+        
+        Args:
+            close_line_index: Line index where close was detected
+            
+        Returns:
+            Close reason: TP, SL, LV, OOR, or other
+        """
+        # Extract context around close event
+        context_lines_before = 40  # Smaller window than debug export
+        context_lines_after = 5
+        
+        start_idx = max(0, close_line_index - context_lines_before)
+        end_idx = min(len(self.all_lines), close_line_index + context_lines_after + 1)
+        
+        context_text = " ".join(self.all_lines[start_idx:end_idx])
+        
+        # AIDEV-NOTE-CLAUDE: Business logic classification - always active
+        
+        # SL (Stop Loss) - highest priority as it's most specific
+        if "Stop loss triggered:" in context_text:
+            return "SL"
+        
+        # TP (Take Profit) - clear indicators
+        if "Take profit triggered:" in context_text or "TAKEPROFIT!" in context_text:
+            return "TP"
+        
+        # LV (Low Volume) - simplified pattern
+        if "due to low volume" in context_text:
+            return "LV"
+        
+        # OOR (Out of Range) - check after more specific ones
+        if ("Closing position due to price range:" in context_text and 
+            "Position was out of range for" in context_text):
+            return "OOR"
+        
+        # Everything else
+        return "other"
 
 def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool:
     """

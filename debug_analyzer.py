@@ -18,17 +18,16 @@ CONTEXT_CONFIG = {
     
     # Close reason filtering (True = include in context export)
     "include_close_reasons": {
-        "TP": True,           # Take Profit
-        "SL": True,           # Stop Loss  
-        "LV": True,           # Low Volume
-        "OOR": True,          # Out of Range
-        "manual": True,       # Manual close
-        "unknown": True       # Unidentified patterns
+        "TP": False,          # Take Profit - DISABLED, already identified
+        "SL": False,          # Stop Loss - DISABLED, already identified
+        "LV": False,          # Low Volume - DISABLED, already identified
+        "OOR": False,         # Out of Range - DISABLED, already identified
+        "other": True         # All other cases (manual, unknown, etc.)
     },
     
     # Analysis helpers
     "group_unknown_contexts": True,  # Group similar unknown patterns
-    "max_contexts_per_type": 50      # Limit contexts per close type
+    "max_contexts_per_type": 5      # Limit contexts per close type
 }
 
 # Get logger
@@ -54,29 +53,37 @@ class CloseContextAnalyzer:
     
     def guess_close_reason(self, context_lines: List[str]) -> str:
         """
-        Wstępnie klasyfikuj powód zamknięcia na podstawie słów kluczowych.
+        Klasyfikuj powód zamknięcia na podstawie precyzyjnych wzorców z analizy logów.
         
         Args:
             context_lines: Lines of context around the close event
             
         Returns:
-            Guessed close reason: TP, SL, LV, OOR, manual, or unknown
+            Guessed close reason: TP, SL, LV, OOR, or other
         """
-        context_text = " ".join(context_lines).lower()
+        context_text = " ".join(context_lines)
         
-        # AIDEV-NOTE-CLAUDE: Keyword-based classification - will be refined based on analysis results
-        if any(phrase in context_text for phrase in ["take profit", "tp reached", "profit target"]):
-            return "TP"
-        elif any(phrase in context_text for phrase in ["stop loss", "sl triggered", "loss limit"]):
+        # AIDEV-NOTE-CLAUDE: Simplified patterns based on analysis (2025-06-20)
+        
+        # SL (Stop Loss) - highest priority as it's most specific
+        if "Stop loss triggered:" in context_text:
             return "SL"
-        elif any(phrase in context_text for phrase in ["volume drop", "low volume", "volume threshold"]):
+        
+        # TP (Take Profit) - clear indicators
+        if "Take profit triggered:" in context_text or "TAKEPROFIT!" in context_text:
+            return "TP"
+        
+        # LV (Low Volume) - simplified pattern
+        if "due to low volume" in context_text:
             return "LV"
-        elif any(phrase in context_text for phrase in ["out of range", "oor", "price out of range"]):
+        
+        # OOR (Out of Range) - check after more specific ones
+        if ("Closing position due to price range:" in context_text and 
+            "Position was out of range for" in context_text):
             return "OOR"
-        elif any(phrase in context_text for phrase in ["manual close", "manually closed", "user closed"]):
-            return "manual"
-        else:
-            return "unknown"
+        
+        # Everything else goes to "other"
+        return "other"
     
     def add_context(self, position, context_lines: List[str], close_line_index: int):
         """
@@ -210,7 +217,7 @@ class CloseContextAnalyzer:
                 
                 # Summary
                 f.write(f"\n{'=' * 20} EXPORT SUMMARY {'=' * 20}\n")
-                for reason in ["TP", "SL", "LV", "OOR", "manual", "unknown"]:
+                for reason in ["TP", "SL", "LV", "OOR", "other"]:
                     total = reason_counts.get(reason, 0)
                     exported = exported_counts.get(reason, 0)
                     status = "✓" if CONTEXT_CONFIG["include_close_reasons"].get(reason, False) else "✗"
