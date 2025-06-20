@@ -89,6 +89,12 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **Separate layers** (data extraction, price fetching, strategy simulation, reporting)
 - **Add AIDEV-NOTE** about refactoring reason
 
+### Business Logic vs Debug Features
+- **Close reason classification**: Core business logic in `log_extractor.py` (always active)
+- **Context export**: Debug feature in `debug_analyzer.py` (configurable)
+- **Performance consideration**: Business logic uses smaller context window (25 lines) vs debug export (80 lines)
+- **Data completeness**: All CSV data should be available regardless of debug settings
+
 ## 🚦 Rules for Claude
 
 ### 🎯 You can do without asking
@@ -169,15 +175,24 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **ML-Optimized Levels** - TP/SL levels determined by machine learning algorithms
 - **PnL Filtering** - exclusion of positions with insignificant profit/loss (< threshold)
 
+### Close Reason Types
+- **TP (Take Profit)** - automatic close when profit target reached (patterns: "Take profit triggered:", "🎯 TAKEPROFIT!")
+- **SL (Stop Loss)** - automatic close when loss threshold exceeded (pattern: "Stop loss triggered:")
+- **LV (Low Volume)** - close due to volume drop below threshold (pattern: "due to low volume")
+- **OOR (Out of Range)** - close when price moved beyond bin range and exceeded timeout (pattern: "Closing position due to price range:")
+- **other** - all other close types (manual, unknown, system errors, etc.)
+
 ## 🗂️ Project Structure
 - **main_analyzer.py** - main orchestrator (extraction → analysis → reporting)
-- **log_extractor.py** - SOL Decoder bot log parser, extracts position data with PnL filtering
+- **log_extractor.py** - main parser with debug controls and close reason classification (430 lines)
+- **debug_analyzer.py** - context analysis and export system (280 lines)
 - **strategy_analyzer.py** - LP strategy simulation engine for Meteora DLMM
 - **input/** - SOL Decoder bot log files (automatically processes newest)
   - **archive/** - processed logs (automatic archiving) [TODO]
 - **output/** - analysis results
   - **detailed_reports/** - detailed per-position reports  
   - **final_analysis_report.csv** - summary with strategy rankings
+  - **close_contexts_analysis.txt** - exported close contexts for pattern analysis
 - **price_cache/** - cached price data from Moralis API
 - **.env** - API configuration (MORALIS_API_KEY)
 
@@ -187,21 +202,23 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **Reports:** individual text reports + collective CSV
 
 ## 🏃‍♂️ Project Status
-**Last Update:** 2025-06-18
-**Current Version:** MVP v1.0
+**Last Update:** 2025-06-20
+**Current Version:** MVP v1.2
 **Working Features:** 
 - Position extraction from SOL Decoder logs ✅
 - Historical price data fetching from Moralis API ✅
 - 4 LP strategy simulation (Spot/Bid-Ask × 1-Sided/Wide) ✅
 - Comparative report generation ✅
-- PnL-based position filtering (skips insignificant positions) ✅
+- PnL-based position filtering ✅
+- Debug system with configurable context export ✅
+- Close reason classification (TP/SL/LV/OOR/other) ✅
+- Business logic close reason detection (always active) ✅
 
 **In Progress:**
-- Fee calculation accuracy improvements 🔄
-- TP/SL optimization research 🔄
+- Financial simulation accuracy improvements 🔄
 
 **Next:**
-- Financial simulation accuracy improvements 📋
+- Strategy performance analysis by close reason type 📋
 - ML-driven TP/SL level optimization 📋
 - Post-exit analysis (forward-looking candle testing) 📋
 - Precise fee calculations per-candle 📋
@@ -224,3 +241,38 @@ def calculate_optimal_timeframe(duration_hours: float) -> str:
 - **Achieved:** Added MIN_PNL_THRESHOLD filter in log_extractor.py validation section
 - **Issues:** -
 - **Next Steps:** Improve close reason identification accuracy
+
+### 2025-06-19: Debug System & Context Export Implementation
+- **Goal:** Add comprehensive debug system with close context analysis capabilities
+- **Achieved:** 
+  - Refactored log_extractor.py (648→390 lines) + new debug_analyzer.py (280 lines)
+  - Added configurable debug system with master switches in log_extractor.py
+  - Implemented context export (70 lines before + 10 after close events)
+  - Added close reason classification system (TP/SL/LV/OOR/manual/unknown)
+  - Created filtered export with configurable limits per close type
+- **Technical Changes:**
+  - Separated debug functionality into dedicated module
+  - Added DEBUG_ENABLED, CONTEXT_EXPORT_ENABLED master switches
+  - Implemented CloseContextAnalyzer with pattern recognition
+  - Added close_line_index tracking for context extraction
+- **Files:** log_extractor.py (refactored), debug_analyzer.py (new)
+- **Issues:** -
+- **Next Steps:** Analyze generated contexts to develop precise close reason classification patterns
+
+### 2025-06-20: Close Reason Classification Integration
+- **Goal:** Move close reason classification from debug-only to core business logic
+- **Achieved:** 
+  - Analyzed 10 unknown contexts from new log batch (64 total closures)
+  - Identified TP patterns: "Take profit triggered:" and "🎯 TAKEPROFIT!"
+  - Simplified classification logic (TP/SL/LV/OOR/other)
+  - Moved classification from debug_analyzer.py to log_extractor.py core logic
+  - Added _classify_close_reason() method with optimized 25-line context window
+  - Close reasons now always populated in CSV regardless of debug settings
+- **Technical Changes:**
+  - Close reason classification active in all runs, not just debug mode
+  - Reduced context analysis window for performance (25 vs 80 lines)
+  - Simplified LV pattern to just "due to low volume"
+  - Consolidated manual/unknown cases into "other" category
+- **Files:** log_extractor.py (enhanced), debug_analyzer.py (patterns refined)
+- **Issues:** -
+- **Next Steps:** Distribution logic verification
