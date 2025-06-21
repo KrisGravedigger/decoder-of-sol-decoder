@@ -642,6 +642,8 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     Returns:
         True if extraction successful, False otherwise
     """
+    # AIDEV-TODO-CLAUDE: Future enhancement - add options for duplicate handling
+    # (skip, update, or prompt user choice) and custom sorting preferences
     logger.info("Starting data extraction from logs...")
     os.makedirs(log_dir, exist_ok=True)
     
@@ -658,14 +660,46 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
         return False
         
     try:
+        # Load existing data if CSV exists
+        existing_data = []
+        existing_position_ids = set()
+        
+        if os.path.exists(output_csv):
+            with open(output_csv, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                existing_data = list(reader)
+                existing_position_ids = {row['position_id'] for row in existing_data}
+            logger.info(f"Loaded {len(existing_data)} existing positions from {output_csv}")
+        
+        # Filter out duplicate position_ids from new data
+        new_data = [pos for pos in extracted_data if pos['position_id'] not in existing_position_ids]
+        skipped_duplicates = len(extracted_data) - len(new_data)
+        
+        if skipped_duplicates > 0:
+            logger.info(f"Skipped {skipped_duplicates} duplicate positions (already in CSV)")
+        
+        if not new_data and existing_data:
+            logger.info("No new positions to add. CSV file unchanged.")
+            return True
+        
+        # Combine existing + new data
+        all_data = existing_data + new_data
+        
+        # Sort by open_timestamp (chronological order)
+        all_data.sort(key=lambda x: x['open_timestamp'])
+        
+        # Write combined data
         with open(output_csv, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=extracted_data[0].keys())
-            writer.writeheader()
-            writer.writerows(extracted_data)
-        logger.info(f"Successfully saved {len(extracted_data)} positions to file {output_csv}")
+            if all_data:  # Safety check
+                writer = csv.DictWriter(f, fieldnames=all_data[0].keys())
+                writer.writeheader()
+                writer.writerows(all_data)
+        
+        logger.info(f"Successfully saved {len(all_data)} total positions ({len(new_data)} new, {len(existing_data)} existing) to {output_csv}")
         return True
+        
     except Exception as e:
-        logger.error(f"Error writing to CSV file {output_csv}: {e}")
+        logger.error(f"Error processing CSV file {output_csv}: {e}")
         return False
 
 if __name__ == "__main__":
