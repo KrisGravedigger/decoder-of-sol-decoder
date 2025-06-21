@@ -94,20 +94,21 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
     return "UNKNOWN"
 
 
-def parse_strategy_from_context(lines: List[str], start_index: int, lookback: int, lookahead: int = 30, debug_enabled: bool = False) -> str:
+def parse_strategy_from_context(lines: List[str], start_index: int, lookback: int, debug_enabled: bool = False) -> str:
     """
-    Parse strategy from log context with improved pattern matching.
+    Parse strategy from log context with step size detection.
     
     Args:
         lines: All log lines
         start_index: Starting line index
         lookback: Number of lines to look back
-        lookahead: Number of lines to look ahead
         debug_enabled: Whether debug logging is enabled
         
     Returns:
-        Strategy string: "Spot (1-Sided)", "Bid-Ask (Wide)", etc. or "UNKNOWN"
+        Strategy string with step size: "Spot (1-Sided) WIDE", "Bid-Ask (1-Sided) SIXTYNINE", etc. or "UNKNOWN"
     """
+    lookahead = 30  # Fixed lookahead value
+    
     if debug_enabled:
         logger.debug(f"Parsing strategy from line {start_index + 1}, looking back {lookback} lines and ahead {lookahead} lines")
     
@@ -115,25 +116,50 @@ def parse_strategy_from_context(lines: List[str], start_index: int, lookback: in
     search_start = max(0, start_index - lookback)
     search_end = min(len(lines), start_index + lookahead)
     
+    # FIRST PASS: Look for bracket format with step size (highest priority)
     for i in range(search_start, search_end):
         line = clean_ansi(lines[i])
         
-        # Pattern 1: [Spot (1-Sided)/... or [Bid-Ask (1-Sided)/...
+        # Pattern 1: [Spot (1-Sided)/... or [Bid-Ask (1-Sided)/... with step size detection
         strategy_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
         if strategy_match:
             strategy_type = strategy_match.group(1)  # "Spot" or "Bid-Ask"
+            base_strategy = f"{strategy_type} (1-Sided)"
             
-            # Check for WIDE in Step Size
-            if "Step Size:WIDE" in line:
-                result = f"{strategy_type} (Wide)"
+            if debug_enabled:
+                logger.debug(f"Found base strategy '{base_strategy}' at line {i + 1}")
+                logger.debug(f"Full line content: {line}")
+            
+            # Extract step size - try multiple patterns
+            step_size_patterns = [
+                r'Step Size:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)',  # with optional whitespace
+                r'/Step Size:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)/',  # with slashes
+                r'Step Size:\s*([A-Z]+)',  # any uppercase word after Step Size
+            ]
+            
+            step_size = None
+            for pattern in step_size_patterns:
+                step_size_match = re.search(pattern, line, re.IGNORECASE)
+                if step_size_match:
+                    step_size = step_size_match.group(1).upper()
+                    if debug_enabled:
+                        logger.debug(f"Found step size '{step_size}' using pattern: {pattern}")
+                    break
+            
+            if step_size and step_size in ['WIDE', 'SIXTYNINE', 'MEDIUM', 'NARROW']:
+                result = f"{base_strategy} {step_size}"
                 if debug_enabled:
-                    logger.debug(f"Found strategy '{result}' at line {i + 1} (bracket format)")
+                    logger.debug(f"Returning strategy with step size: '{result}'")
                 return result
             else:
-                result = f"{strategy_type} (1-Sided)"
+                # Found bracket format but no valid step size - still return it
                 if debug_enabled:
-                    logger.debug(f"Found strategy '{result}' at line {i + 1} (bracket format)")
-                return result
+                    logger.debug(f"Found bracket format but no valid step size, returning: '{base_strategy}'")
+                return base_strategy
+    
+    # SECOND PASS: Look for text format (fallback)
+    for i in range(search_start, search_end):
+        line = clean_ansi(lines[i])
         
         # Pattern 2: "using the spot-onesided strategy" or "using the bidask strategy"
         text_strategy_match = re.search(r'using the (spot-onesided|bidask|spot|bid-ask) strategy', line)
@@ -147,7 +173,7 @@ def parse_strategy_from_context(lines: List[str], start_index: int, lookback: in
                 result = "UNKNOWN"
             
             if debug_enabled:
-                logger.debug(f"Found strategy '{result}' at line {i + 1} (text format: '{strategy_text}')")
+                logger.debug(f"Found strategy '{result}' at line {i + 1} (text format: '{strategy_text}') - fallback")
             return result
         
         # Pattern 3: "spot-onesided:" or "bidask:" at start of summary line
@@ -162,7 +188,7 @@ def parse_strategy_from_context(lines: List[str], start_index: int, lookback: in
                 result = "UNKNOWN"
             
             if debug_enabled:
-                logger.debug(f"Found strategy '{result}' at line {i + 1} (summary format: '{strategy_text}')")
+                logger.debug(f"Found strategy '{result}' at line {i + 1} (summary format: '{strategy_text}') - fallback")
             return result
     
     if debug_enabled:
