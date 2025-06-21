@@ -3,11 +3,6 @@ import logging
 from typing import Dict, List, Optional, Any
 from collections import defaultdict, Counter
 
-import re
-import logging
-from typing import Dict, List, Optional, Any
-from collections import defaultdict, Counter
-
 # === CONTEXT EXPORT CONFIGURATION ===
 # AIDEV-NOTE-CLAUDE: Detailed export settings - main switches come from log_extractor.py
 CONTEXT_CONFIG = {
@@ -51,61 +46,26 @@ class CloseContextAnalyzer:
         self.close_contexts: List[Dict[str, Any]] = []
         self.pattern_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     
-    def guess_close_reason(self, context_lines: List[str]) -> str:
-        """
-        Klasyfikuj powód zamknięcia na podstawie precyzyjnych wzorców z analizy logów.
-        
-        Args:
-            context_lines: Lines of context around the close event
-            
-        Returns:
-            Guessed close reason: TP, SL, LV, OOR, or other
-        """
-        context_text = " ".join(context_lines)
-        
-        # AIDEV-NOTE-CLAUDE: Simplified patterns based on analysis (2025-06-20)
-        
-        # SL (Stop Loss) - highest priority as it's most specific
-        if "Stop loss triggered:" in context_text:
-            return "SL"
-        
-        # TP (Take Profit) - clear indicators
-        if "Take profit triggered:" in context_text or "TAKEPROFIT!" in context_text:
-            return "TP"
-        
-        # LV (Low Volume) - simplified pattern
-        if "due to low volume" in context_text:
-            return "LV"
-        
-        # OOR (Out of Range) - check after more specific ones
-        if ("Closing position due to price range:" in context_text and 
-            "Position was out of range for" in context_text):
-            return "OOR"
-        
-        # Everything else goes to "other"
-        return "other"
-    
     def add_context(self, position, context_lines: List[str], close_line_index: int):
         """
         Add a close context for analysis.
         
         Args:
-            position: Position that was closed
+            position: Position that was closed (already has close_reason from business logic)
             context_lines: Lines of context around the close
             close_line_index: Line index where close was detected
         """
-        guessed_reason = self.guess_close_reason(context_lines)
-        
+        # AIDEV-NOTE-CLAUDE: Use close_reason from position (set by business logic)
         context_data = {
             "position": position,
             "context_lines": context_lines,
             "close_line_index": close_line_index,
-            "guessed_reason": guessed_reason,
+            "close_reason": position.close_reason,  # Already classified by log_extractor
             "context_hash": self._calculate_context_hash(context_lines)
         }
         
         self.close_contexts.append(context_data)
-        self.pattern_groups[guessed_reason].append(context_data)
+        self.pattern_groups[position.close_reason].append(context_data)
     
     def _calculate_context_hash(self, context_lines: List[str]) -> str:
         """
@@ -135,21 +95,21 @@ class CloseContextAnalyzer:
         
         return "|".join(sorted(set(key_phrases)))
     
-    def should_export_context(self, guessed_reason: str, reason_counts: Dict[str, int]) -> bool:
+    def should_export_context(self, close_reason: str, reason_counts: Dict[str, int]) -> bool:
         """
         Determine if context should be exported based on configuration.
         
         Args:
-            guessed_reason: Guessed close reason
+            close_reason: Close reason from business logic
             reason_counts: Current counts of exported reasons
             
         Returns:
             True if context should be exported
         """
-        if not CONTEXT_CONFIG["include_close_reasons"].get(guessed_reason, False):
+        if not CONTEXT_CONFIG["include_close_reasons"].get(close_reason, False):
             return False
         
-        if reason_counts.get(guessed_reason, 0) >= CONTEXT_CONFIG["max_contexts_per_type"]:
+        if reason_counts.get(close_reason, 0) >= CONTEXT_CONFIG["max_contexts_per_type"]:
             return False
         
         return True
@@ -282,7 +242,7 @@ class DebugAnalyzer:
         Process a close event for debug analysis.
         
         Args:
-            position: Position that was closed
+            position: Position that was closed (with close_reason already set)
             close_line_index: Line index where close was detected
         """
         if not self.context_export_enabled:
