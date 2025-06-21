@@ -143,6 +143,49 @@ class LogParser:
         match = re.search(r'([\w\s().-]+-SOL)', self._clean_ansi(text))
         return match.group(1).strip() if match else None
 
+    def _extract_close_timestamp(self, close_line_index: int) -> str:
+        """
+        Extract timestamp from close event context.
+        
+        Args:
+            close_line_index: Line index where close was detected
+            
+        Returns:
+            Timestamp string or "UNKNOWN" if not found
+        """
+        # Try to extract timestamp from close line itself
+        close_line = self._clean_ansi(self.all_lines[close_line_index])
+        timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', close_line)
+        if timestamp_match:
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from close line {close_line_index + 1}")
+            return timestamp_match.group(1)
+        
+        # Look for timestamp in nearby lines (prefer lines before close)
+        search_range = 10  # Look 10 lines before and after
+        
+        # First search backwards (more likely to have relevant timestamp)
+        for i in range(close_line_index - 1, max(-1, close_line_index - search_range), -1):
+            line = self._clean_ansi(self.all_lines[i])
+            timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line)
+            if timestamp_match:
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                    logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from context line {i + 1} (backward search)")
+                return timestamp_match.group(1)
+        
+        # Then search forward if nothing found backward
+        for i in range(close_line_index + 1, min(len(self.all_lines), close_line_index + search_range)):
+            line = self._clean_ansi(self.all_lines[i])
+            timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line)
+            if timestamp_match:
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                    logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from context line {i + 1} (forward search)")
+                return timestamp_match.group(1)
+        
+        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+            logger.debug(f"No timestamp found in {search_range} lines around close at line {close_line_index + 1}")
+        return "UNKNOWN"
+
     def _parse_strategy_from_context(self, start_index: int, lookback: int, lookahead: int = 30) -> str:
         """
         Parse strategy from log context with improved pattern matching.
@@ -436,8 +479,8 @@ class LogParser:
         
         if matching_position:
             pos = matching_position
-            # Use estimated timestamp based on surrounding lines or default
-            pos.close_timestamp = "UNKNOWN"  # We'll improve this later
+            # Extract close timestamp from context
+            pos.close_timestamp = self._extract_close_timestamp(index)
             pos.close_reason = self._classify_close_reason(index)
             pos.close_line_index = index  # AIDEV-NOTE-CLAUDE: Store for context export
             pnl_result = self._parse_final_pnl_with_line_info(index, 50)
