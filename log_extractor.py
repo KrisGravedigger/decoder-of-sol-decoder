@@ -143,6 +143,96 @@ class LogParser:
         match = re.search(r'([\w\s().-]+-SOL)', self._clean_ansi(text))
         return match.group(1).strip() if match else None
 
+    def _parse_strategy_from_context(self, start_index: int, lookback: int, lookahead: int = 30) -> str:
+        """
+        Parse strategy from log context with improved pattern matching.
+        
+        Args:
+            start_index: Starting line index
+            lookback: Number of lines to look back
+            lookahead: Number of lines to look ahead
+            
+        Returns:
+            Strategy string: "Spot (1-Sided)", "Bid-Ask (Wide)", etc. or "UNKNOWN"
+        """
+        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+            logger.debug(f"Parsing strategy from line {start_index + 1}, looking back {lookback} lines and ahead {lookahead} lines")
+        
+        # Search both backward and forward
+        search_start = max(0, start_index - lookback)
+        search_end = min(len(self.all_lines), start_index + lookahead)
+        
+        for i in range(search_start, search_end):
+            line = self._clean_ansi(self.all_lines[i])
+            
+            # Dummy operation to maintain timing
+            if ("spot" in line.lower() or "bid" in line.lower() or "strategy" in line.lower()):
+                _ = line.strip()  # Force evaluation without logging
+            
+            # Pattern 1: [Spot (1-Sided)/... or [Bid-Ask (1-Sided)/...
+                strategy_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
+                if strategy_match:
+                    strategy_type = strategy_match.group(1)  # "Spot" or "Bid-Ask"
+                    
+                    # Check for WIDE in Step Size
+                    if "Step Size:WIDE" in line:
+                        result = f"{strategy_type} (Wide)"
+                        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                            logger.debug(f"Found strategy '{result}' at line {i + 1} (bracket format)")
+                        return result
+                    else:
+                        result = f"{strategy_type} (1-Sided)"
+                        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                            logger.debug(f"Found strategy '{result}' at line {i + 1} (bracket format)")
+                        return result
+                
+                # Pattern 2: "using the spot-onesided strategy" or "using the bidask strategy"
+                text_strategy_match = re.search(r'using the (spot-onesided|bidask|spot|bid-ask) strategy', line)
+                if text_strategy_match:
+                    strategy_text = text_strategy_match.group(1)
+                    if strategy_text == "spot-onesided" or strategy_text == "spot":
+                        result = "Spot (1-Sided)"
+                    elif strategy_text == "bidask" or strategy_text == "bid-ask":
+                        result = "Bid-Ask (1-Sided)"
+                    else:
+                        result = "UNKNOWN"
+                    
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found strategy '{result}' at line {i + 1} (text format: '{strategy_text}')")
+                    return result
+                
+                # Pattern 3: "spot-onesided:" or "bidask:" at start of summary line
+                summary_match = re.search(r'^.*?(spot-onesided|bidask|spot|bid-ask):', line)
+                if summary_match:
+                    strategy_text = summary_match.group(1)
+                    if strategy_text == "spot-onesided" or strategy_text == "spot":
+                        result = "Spot (1-Sided)"
+                    elif strategy_text == "bidask" or strategy_text == "bid-ask":
+                        result = "Bid-Ask (1-Sided)"
+                    else:
+                        result = "UNKNOWN"
+                    
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found strategy '{result}' at line {i + 1} (summary format: '{strategy_text}')")
+                    return result
+                else:
+                    result = f"{strategy_type} (1-Sided)"
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Found strategy '{result}' at line {i + 1}")
+                    return result
+                
+                # DEBUG: Test specific pattern for line 1001421
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG" and "using the" in line and "strategy" in line:
+                    logger.debug(f"TESTING Line {i + 1}: '{line.strip()}'")
+                    test_match = re.search(r'using the (spot-onesided|bidask|spot|bid-ask) strategy', line)
+                    logger.debug(f"Pattern 2 match result: {test_match}")
+                    if test_match:
+                        logger.debug(f"Matched group: '{test_match.group(1)}'")
+        
+        if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+            logger.debug(f"No strategy pattern found in {lookback} lines lookback + {lookahead} lines lookahead from line {start_index + 1}")
+        return "UNKNOWN"
+
     def _parse_initial_investment(self, start_index: int, lookback: int, lookahead: int) -> Optional[float]:
         """
         Parse initial investment amount from log context.
@@ -284,9 +374,7 @@ class LogParser:
                 r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
             ], index, 50)
             
-            existing_position.actual_strategy = self._find_context_value([
-                r'\[(Spot \(1-Sided\)|Bid-Ask \(1-Sided\)|Spot \(Wide\)|Bid-Ask \(Wide\))'
-            ], index, 50) or "UNKNOWN"
+            existing_position.actual_strategy = self._parse_strategy_from_context(index, 50)
             
             # CRITICAL: Re-parse investment amount
             existing_position.initial_investment = self._parse_initial_investment(index, 0, 100)
@@ -303,9 +391,7 @@ class LogParser:
             r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
         ], index, 50)
         
-        pos.actual_strategy = self._find_context_value([
-            r'\[(Spot \(1-Sided\)|Bid-Ask \(1-Sided\)|Spot \(Wide\)|Bid-Ask \(Wide\))'
-        ], index, 50) or "UNKNOWN"
+        pos.actual_strategy = self._parse_strategy_from_context(index, 50)
         
         # CRITICAL CHANGE: Search for investment in wider forward-looking window
         pos.initial_investment = self._parse_initial_investment(index, 0, 100)
