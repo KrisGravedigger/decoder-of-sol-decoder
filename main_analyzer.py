@@ -244,7 +244,23 @@ def main():
     os.makedirs(DETAILED_REPORTS_DIR, exist_ok=True)
     all_final_results = []
     
-    analyzer = StrategyAnalyzer(bin_step=100) 
+    # Extract step size and bin step from position data
+    step_size = "UNKNOWN"
+    bin_step = 100  # Default fallback
+
+    # Try to extract step size from actual_strategy_from_log
+    for index, position in positions_df.iterrows():
+        strategy_str = position.get('actual_strategy_from_log', '')
+        if any(size in strategy_str for size in ['WIDE', 'MEDIUM', 'NARROW', 'SIXTYNINE']):
+            # Extract step size from first position and use for all (assumes same pool type)
+            import re
+            step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', strategy_str)
+            if step_match:
+                step_size = step_match.group(1)
+            break
+
+    logger.info(f"Using strategy analyzer with step_size={step_size}, bin_step={bin_step}")
+    analyzer = StrategyAnalyzer(bin_step=bin_step, step_size=step_size) 
 
     for index, position in positions_df.iterrows():
         logger.info(f"\n--- Analyzing position {index+1}/{len(positions_df)}: {position['token_pair']} ---")
