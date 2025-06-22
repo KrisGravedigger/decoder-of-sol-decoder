@@ -189,3 +189,11 @@ class StrategyAnalyzer:
             'step_size': getattr(self, 'step_size', 'UNKNOWN'),
             'num_bins_used': self.num_bins
         }
+    # AIDEV-NOTE-CLAUDE: Wide vs 69 bins comparison INTENTIONALLY NOT IMPLEMENTED
+    # Reason: Wide creates 2-4 positions for bin step 50-125 (logged as single position)
+    # Implementation would require: multi-position simulation, liquidity distribution guessing, 
+    # complex bin step handling - all for post-factum analysis with limited business value.
+    # Anti-Sawtooth strategy also INTENTIONALLY IGNORED - it's position management (rebalancing),
+    # not bin distribution method. Our simulations assume bot chose optimal strategy already.
+    # Decision date: 2025-06-22. ROI: 20% benefit for 80% effort - rejected.
+    # Alternative priorities: ML TP/SL optimization, post-exit analysis.
