@@ -222,20 +222,22 @@ other - all other close types (manual, unknown, system errors, etc.)
 
 🗂️ Project Structure
 project/
-├── main_analyzer.py         - main orchestrator (extraction → analysis → reporting)
-├── log_extractor.py         - main parser with debug controls and close reason classification (~430 lines)
-├── debug_analyzer.py        - context analysis and export system (~200 lines)
-├── strategy_analyzer.py     - LP strategy simulation engine for Meteora DLMM (~250 lines)
-├── models.py               - Position class and data models (~50 lines)
-├── parsing_utils.py        - universal parsing utilities (~250 lines)
-├── input/                  - SOL Decoder bot log files (automatically processes newest)
-├── output/                 - analysis results
-│   ├── detailed_reports/   - detailed per-position reports
-│   └── final_analysis_report.csv - summary with strategy rankings
-├── close_contexts_analysis.txt - exported close contexts for pattern analysis
-├── price_cache/            - cached price data from Moralis API
-├── CLAUDE_Session_History.md - complete development session archive
-└── .env                    - API configuration (MORALIS_API_KEY)
+├── extraction/             - data extraction and processing
+│   ├── __init__.py
+│   ├── log_extractor.py   - main parser with debug controls and close reason classification (~430 lines)
+│   └── extraction_utils.py - utilities for extraction module
+├── reporting/              - analytics and strategy performance analysis
+│   ├── __init__.py
+│   ├── strategy_instance_detector.py - groups positions into strategy instances (~400 lines)
+│   ├── strategy_comparison_matrix.py - strategy ranking and comparison (planned)
+│   ├── daily_performance_tracker.py - performance tracking over time (planned)
+│   ├── performance_visualizer.py - charts and visualization (planned)
+│   └── reporting_utils.py - utilities for reporting module
+├── main_analyzer.py        - main orchestrator (extraction → analysis → reporting)
+├── strategy_analyzer.py    - LP strategy simulation engine for Meteora DLMM (~250 lines)
+├── models.py              - Position class and data models (~50 lines)
+├── parsing_utils.py       - universal parsing utilities (~250 lines)
+├── debug_analyzer.py      - context analysis and export system (~200 lines)
 
 File Handling Rules
 
@@ -265,6 +267,10 @@ Close timestamp extraction ✅
 CSV append mode with deduplication ✅
 Modular architecture with proper separation of concerns ✅
 Step size integration with bin count adjustment ✅
+Strategy instance detection and grouping ✅
+Multi-wallet support with subfolder organization ✅
+Strategy performance ranking with weighted scoring ✅
+Enhanced CSV structure with wallet_id and source_file tracking ✅
 
 Completed in v2.0:
 
@@ -274,11 +280,28 @@ Step size parsing and automatic bin count adjustment 🆕
 Removed risky 2-sided strategy simulations (placeholder only) 🆕
 Enhanced strategy naming and result structure 🆕
 
+Completed in Session 1 (2025-06-25):
+
+Strategy Instance Detection Module 🆕
+- Automated grouping of positions into strategy instances based on parameters 🆕
+- Investment tolerance handling (±0.005 SOL) for test variants 🆕
+- Weighted performance scoring with business-defined metrics 🆕
+- Multi-wallet support via subfolder organization (input/wallet_name/) 🆕
+- Enhanced Position model with wallet_id and source_file tracking 🆕
+- Backward-compatible CSV structure with automatic column addition 🆕
+- Strategy ranking system identifying top-performing configurations 🆕
+
 Next Priority Tasks:
 
-ML-driven TP/SL level optimization 📋
-Post-exit analysis (forward-looking candle testing) 📋
-Precise fee calculations per-candle 📋
+Strategy Analytics Module (Session 2):
+  - Strategy comparison matrix with detailed performance breakdown 📋
+  - Daily performance tracking and trend analysis 📋
+  - Performance visualization and charting 📋
+
+ML & Advanced Analytics:
+  - ML-driven TP/SL level optimization 📋
+  - Post-exit analysis (forward-looking candle testing) 📋
+  - Precise fee calculations per-candle 📋
 
 Future Roadmap:
 
@@ -354,3 +377,51 @@ Advanced Features:
 **Next Steps:** Focus on higher-ROI priorities: ML TP/SL optimization, post-exit analysis
 
 **System Status:** v2.0 stable, ready for next development phase ✅
+
+**2025-06-25: Strategy Instance Detection & Multi-Wallet Support**
+
+**Goal:** Build strategy instance detection system and enable multi-wallet analytics  
+**Achieved:**
+
+- **Modular Architecture Implementation:**
+  - Restructured project into extraction/ and reporting/ modules
+  - Created strategy_instance_detector.py as foundation for analytics module
+  - Enhanced import system for cross-module compatibility
+
+- **Multi-Wallet Support:**
+  - Enhanced log_extractor.py to support subfolder organization (input/wallet_name/)
+  - Added wallet_id and source_file tracking to Position model
+  - Enabled consolidation of logs from multiple wallets/machines
+
+- **Strategy Instance Detection:**
+  - Implemented automatic grouping of positions into strategy instances
+  - Investment tolerance logic (±0.005 SOL) for distinguishing test variants
+  - Business-defined weighted scoring: avg_pnl_percent(40%) + win_rate(40%) + efficiency metrics(20%)
+  - Generated 19 unique strategy instances from 71 positions in initial test
+
+- **Performance Analysis Results:**
+  - Top strategy: Bid-Ask MEDIUM 2.21 SOL (3.5% avg PnL, 100% win rate)
+  - Clear performance differentiation across investment amounts and strategies
+  - Successful ranking system identifying optimal configurations
+
+- **Enhanced Data Pipeline:**
+  - Backward-compatible CSV structure with automatic column addition
+  - strategy_instance_id assignment for position tracking
+  - Export to strategy_instances.csv with comprehensive metrics
+
+**Technical Changes:**
+- extraction/log_extractor.py: Added multi-wallet support and enhanced Position creation
+- models.py: Extended with wallet_id, source_file, and strategy_instance_id fields
+- reporting/strategy_instance_detector.py: Complete implementation with grouping and ranking
+- Enhanced import system for modular architecture
+
+**Files Modified:**
+- models.py (enhanced Position class)
+- extraction/log_extractor.py (multi-wallet support)
+- reporting/strategy_instance_detector.py (new module)
+- CLAUDE.md (architecture and progress updates)
+
+**Results:** Successfully detected 19 strategy instances with clear performance ranking ✅  
+**Next Steps:** Strategy comparison matrix and daily performance tracking modules
+
+**System Status:** Strategy analytics foundation complete, ready for advanced reporting ✅
