@@ -1,0 +1,31 @@
+# Portfolio Analytics Configuration
+# Generated: 2025-06-26
+
+portfolio_analysis:
+  risk_free_rates:
+    sol_staking: 0.04      # 4% APR SOL staking
+    usdc_staking: 0.05     # 5% APR USDC staking
+  cost_allocation_method: "daily_flat"
+  analysis_periods: [1, 7, 30, 90]  # days
+  min_position_threshold: 0.01       # SOL minimum for analysis
+
+infrastructure_costs:
+  monthly:
+    vps_cost: 8.54         # USD
+    rpc_endpoints: 20.0   # USD  
+    bot_subscription: 00.0 # USD
+    # Total: 28.54 USD/month = 0.95 USD/day
+
+currency_analysis:
+  primary_denomination: "sol"
+  include_usdc_view: true
+  sol_price_source: "moralis"
+
+visualization:
+  chart_types: ["equity_curve", "drawdown", "cost_impact", "strategy_heatmap"]
+  timestamp_format: "%Y%m%d_%H%M"
+  filters:
+    min_strategy_occurrences: 2  # minimum positions per strategy
+    top_strategies_only: 10      # show only top N strategies
+    exclude_outliers: false       # remove statistical outliers
+    date_range_filter: false      # custom date range selection
