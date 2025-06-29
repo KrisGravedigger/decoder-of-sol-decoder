@@ -407,7 +407,7 @@ class InfrastructureCostAnalyzer:
         gross_pnl_sol = positions_df['pnl_sol'].sum() if 'pnl_sol' in positions_df.columns else 0
         
         # Cost impact
-        cost_impact_percent = (total_cost_sol / gross_pnl_sol * 100) if gross_pnl_sol > 0 else 0
+        cost_impact_percent = (total_cost_sol / abs(gross_pnl_sol) * 100) if gross_pnl_sol != 0 else 0
         
         summary = {
             'period_days': period_days,
