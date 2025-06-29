@@ -118,6 +118,10 @@ Don't implement Moralis API optimizations without consent (only propose)
 Don't remove anchor comments without instructions
 Don't change fee calculation logic - this is core business logic
 
+**Session History Management**
+- **Maintain full history:** I will keep the detailed log of all recent sessions in this file.
+- **Await archival command:** I will not compress or archive the session history. You, the user, will give the command to archive when a major milestone is complete.
+
 📋 Change Implementation Process
 
 First skeleton/plan of changes for discussion
@@ -235,18 +239,27 @@ project/
 │   ├── __init__.py
 │   ├── log_extractor.py   - main parser with debug controls and close reason classification (~430 lines)
 │   └── extraction_utils.py - utilities for extraction module
-├── **reporting/**              - **analytics and portfolio performance analysis**
-│   ├── **__init__.py**
-│   ├── **config/**
-│   │   └── **portfolio_config.yaml** - **infrastructure costs, risk-free rates, filters** 🆕
-│   ├── **output/** - **generated reports and charts directory** 🆕
-│   │   ├── **charts/** - **timestamped PNG visualizations** 🆕
-│   │   └── **portfolio analysis logs** 🆕
-│   ├── **infrastructure_cost_analyzer.py** - **daily cost allocation and Moralis API (~400 lines)** 🆕
-│   ├── **portfolio_analytics.py** - **dual currency analysis engine (~500 lines)** 🆕
-│   ├── **chart_generator.py** - **4 chart types with strategy heatmap parsing (~600 lines)** 🆕
-│   ├── **portfolio_main.py** - **CLI orchestrator with multiple analysis modes (~400 lines)** 🆕
+├── reporting/              - analytics and portfolio performance analysis
+│   ├── __init__.py
+│   ├── config/
+│   │   └── portfolio_config.yaml - infrastructure costs, risk-free rates, filters
+│   ├── output/ - generated reports and charts directory
+│   │   ├── charts/ - timestamped PNG visualizations
+│   │   └── portfolio_analysis.log
+│   ├── visualizations/ - **chart plotting modules** 🆕
+│   │   ├── __init__.py 🆕
+│   │   ├── cost_impact.py 🆕
+│   │   ├── drawdown.py 🆕
+│   │   ├── equity_curve.py 🆕
+│   │   └── strategy_heatmap.py 🆕
+│   ├── infrastructure_cost_analyzer.py - daily cost allocation and Moralis API (~300 lines)
+│   ├── portfolio_analytics.py - **analysis orchestrator (~170 lines)** 🆕
+│   ├── chart_generator.py - **charting orchestrator (~180 lines)** 🆕
+│   ├── portfolio_main.py - CLI orchestrator with multiple analysis modes (~400 lines)
 │   ├── strategy_instance_detector.py - groups positions into strategy instances (~400 lines)
+│   ├── data_loader.py - **position data loading and cleaning** 🆕
+│   ├── metrics_calculator.py - **financial metrics calculation** 🆕
+│   └── text_reporter.py - **text report generation** 🆕
 │   ├── strategy_comparison_matrix.py - strategy ranking and comparison (planned)
 │   ├── daily_performance_tracker.py - performance tracking over time (planned)
 │   ├── performance_visualizer.py - charts and visualization (planned)
@@ -489,3 +502,37 @@ Advanced Features:
 **Next Steps:** Complete matplotlib orientation fix, integrate with existing pipeline
 
 **System Status:** 100% functional, production-ready for analysis and reporting ✅
+
+**2025-06-25: Strategy Instance Detection & Multi-Wallet Support**
+
+**Goal:** Build strategy instance detection system and enable multi-wallet analytics.
+**Achieved:**
+- **Modular Architecture Implementation:**
+  - Restructured project into extraction/ and reporting/ modules.
+  - Created `strategy_instance_detector.py` as foundation for analytics module.
+  - Enhanced import system for cross-module compatibility.
+- **Multi-Wallet Support:**
+  - Enhanced `log_extractor.py` to support subfolder organization (input/wallet_name/).
+  - Added `wallet_id` and `source_file` tracking to the `Position` model and CSV output.
+  - Enabled consolidation of logs from multiple wallets and machines.
+- **Strategy Instance Detection:**
+  - Implemented automatic grouping of positions into strategy instances based on parameters (strategy, TP, SL, investment).
+  - Added investment tolerance logic (±0.005 SOL) to distinguish test variants from stable configurations.
+  - Developed a business-defined weighted performance scoring system (avg_pnl_percent 40%, win_rate 40%, efficiency 20%).
+- **Performance Analysis Results:**
+  - Successfully detected and ranked 19 unique strategy instances from a test set of 71 positions.
+  - Exported a `strategy_instances.csv` with comprehensive metrics for each detected instance.
+**System Status:** Strategy analytics foundation complete, ready for advanced reporting. ✅
+
+**2025-06-29: Major Refactoring and Stability Fixes**
+**Goal:** Refactor oversized modules for maintainability and fix a critical data loading bug.
+**Achieved:**
+- **Major Refactoring:**
+  - `portfolio_analytics.py` and `chart_generator.py` were refactored into smaller, single-responsibility modules, adhering to the project's 600-line file limit.
+  - New modules created: `data_loader.py`, `metrics_calculator.py`, `text_reporter.py`, and the `visualizations/` directory with its own set of plotting modules.
+  - The project structure is now significantly cleaner, more scalable, and easier to maintain.
+- **Critical Bug Fix:**
+  - Resolved a timestamp parsing issue in `data_loader.py` that caused all 71 positions to be discarded. The logic now correctly handles mixed standard and custom date formats, unblocking the entire analysis pipeline.
+- **Metric Refinement:**
+  - Improved the "Cost Impact %" calculation in `infrastructure_cost_analyzer.py` to correctly handle cases with negative Gross PnL, providing more intuitive results in all scenarios.
+**System Status:** Portfolio Analytics v1.1 - Stable and Refactored. ✅
