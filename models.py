@@ -7,7 +7,7 @@ class Position:
     Note: Only one position per token pair can be active at any given time.
     """
     
-    def __init__(self, open_timestamp: str, bot_version: str, line_index: int):
+    def __init__(self, open_timestamp: str, bot_version: str, open_line_index: int, wallet_id: str = "unknown_wallet", source_file: str = "unknown_file"):
         """
         Initialize a new position.
         
@@ -18,8 +18,8 @@ class Position:
         """
         self.open_timestamp = open_timestamp
         self.bot_version = bot_version
-        self.open_line_index = line_index
-        self.position_id = f"pos_{open_timestamp.replace('/', '-').replace(':', '-')}_{line_index}"
+        self.open_line_index = open_line_index
+        self.position_id = f"pos_{open_timestamp.replace('/', '-').replace(':', '-')}_{open_line_index}"
         self.token_pair: Optional[str] = None
         self.pool_address: Optional[str] = None
         self.initial_investment: Optional[float] = None
@@ -29,6 +29,8 @@ class Position:
         self.final_pnl: Optional[float] = None
         self.close_line_index: Optional[int] = None
         self.retry_count: int = 0  # Track retry attempts
+        self.wallet_id = wallet_id
+        self.source_file = source_file
 
     def is_context_complete(self) -> bool:
         """Check if position has complete context information."""
@@ -58,4 +60,7 @@ class Position:
             "actual_strategy_from_log": self.actual_strategy,
             "close_reason": self.close_reason, 
             "bot_version": self.bot_version,
+            "wallet_id": self.wallet_id,
+            "source_file": self.source_file,
+            "strategy_instance_id": "",  # Empty, will be filled by strategy_instance_detector
         }

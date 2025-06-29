@@ -11,7 +11,7 @@ import shutil
 from typing import Dict, List, Optional, Any
 
 # Imports from our modules
-import log_extractor
+import extraction.log_extractor as log_extractor
 from strategy_analyzer import StrategyAnalyzer
 
 # --- Configuration ---

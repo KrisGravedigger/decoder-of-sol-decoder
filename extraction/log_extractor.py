@@ -3,6 +3,9 @@ import re
 import csv
 import logging
 from typing import Dict, List, Optional, Any
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
 
 # === MAIN DEBUG CONFIGURATION ===
 # AIDEV-NOTE-CLAUDE: Master debug controls - these override settings in debug_analyzer.py
@@ -11,7 +14,7 @@ DEBUG_LEVEL = "DEBUG"                   # "DEBUG" for detailed logs, "INFO" for 
 CONTEXT_EXPORT_ENABLED = True          # Enable/disable context export completely
 DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event logging
 
-# Import our modules
+# Import our modules - updated paths for extraction/ subfolder
 from models import Position
 from parsing_utils import (
     clean_ansi, find_context_value, normalize_token_pair,
@@ -106,8 +109,11 @@ class LogParser:
             # Don't log every retry, will log summary when position is finalized
             return  # Don't create new position!
             
+        # Determine wallet_id and source_file based on line index
+        wallet_id, source_file = self._get_file_info_for_line(index)
+
         # Only create new position if none exists
-        pos = Position(timestamp, version, index)
+        pos = Position(timestamp, version, index, wallet_id=wallet_id, source_file=source_file)
         pos.token_pair = token_pair
         
         pos.pool_address = find_context_value([
@@ -233,24 +239,80 @@ class LogParser:
         # Everything else
         return "other"
 
+    def _get_file_info_for_line(self, line_index: int) -> tuple:
+        """
+        Get wallet_id and source_file for a given line index.
+        
+        Args:
+            line_index: Index of line in all_lines
+            
+        Returns:
+            Tuple of (wallet_id, source_file)
+        """
+        # Find which file this line belongs to
+        for file_info in self.file_line_mapping:
+            if file_info['start'] <= line_index < file_info['end']:
+                return file_info['wallet_id'], file_info['source_file']
+        
+        # Fallback if not found
+        return "unknown_wallet", "unknown_file"
+
     def run(self, log_dir: str) -> List[Dict[str, Any]]:
         """
         Run the complete log parsing process.
         
         Args:
-            log_dir: Directory containing log files
+            log_dir: Directory containing log files or subdirectories with log files
             
         Returns:
             List of validated position dictionaries
         """
-        log_files = sorted([f for f in os.listdir(log_dir) if f.startswith("app") and ".log" in f])
-        if not log_files:
-            logger.warning(f"No log files found in {log_dir}")
+        # AIDEV-NOTE-CLAUDE: Enhanced to support wallet subdirectories
+        log_files_info = []  # List of tuples: (file_path, wallet_id, source_file)
+        
+        # Check for direct log files in log_dir
+        if os.path.exists(log_dir):
+            direct_files = [f for f in os.listdir(log_dir) if f.startswith("app") and ".log" in f]
+            for f in direct_files:
+                log_files_info.append((os.path.join(log_dir, f), "main_wallet", f))
+            
+            # Check for subdirectories (wallet folders)
+            for item in os.listdir(log_dir):
+                item_path = os.path.join(log_dir, item)
+                if os.path.isdir(item_path):
+                    wallet_id = item  # Subfolder name = wallet_id
+                    wallet_files = [f for f in os.listdir(item_path) if f.startswith("app") and ".log" in f]
+                    for f in wallet_files:
+                        full_path = os.path.join(item_path, f)
+                        source_file = f"{wallet_id}/{f}"  # Include wallet in source path
+                        log_files_info.append((full_path, wallet_id, source_file))
+        
+        if not log_files_info:
+            logger.warning(f"No log files found in {log_dir} or its subdirectories")
             return []
 
-        for f in log_files: 
-            self.all_lines.extend(open(os.path.join(log_dir, f), 'r', encoding='utf-8', errors='ignore'))
-        logger.info(f"Processing {len(self.all_lines)} lines from {len(log_files)} log files.")
+        # Process all log files and track their sources
+        file_line_mapping = []  # Track which lines come from which files
+        
+        for file_path, wallet_id, source_file in log_files_info:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                file_lines = f.readlines()
+                start_index = len(self.all_lines)
+                self.all_lines.extend(file_lines)
+                end_index = len(self.all_lines)
+                
+                # Track line ranges for this file
+                file_line_mapping.append({
+                    'start': start_index,
+                    'end': end_index,
+                    'wallet_id': wallet_id,
+                    'source_file': source_file
+                })
+        
+        logger.info(f"Processing {len(self.all_lines)} lines from {len(log_files_info)} log files across {len(set(info[1] for info in log_files_info))} wallets")
+        
+        # Store file mapping for position creation
+        self.file_line_mapping = file_line_mapping
 
         # AIDEV-NOTE-CLAUDE: Set log lines for debug analyzer
         self.debug_analyzer.set_log_lines(self.all_lines)
