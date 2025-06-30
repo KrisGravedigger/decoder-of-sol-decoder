@@ -365,6 +365,15 @@ Next Priority Tasks:
   - Post-exit analysis (forward-looking candle testing) 📋
   - Precise fee calculations per-candle 📋
 
+**Delta-Neutral LP Management (Planned Post TP/SL Optimization):**
+  - Funding rate analyzer with multi-DEX monitoring📋
+  - Real-time delta exposure calculator for active LP positions 📋
+  - Optimal hedge position sizing with leverage optimization 📋
+  - SOL-USDC trend correlation with funding rate analysis 📋
+  - Delta-neutral P&L reporting, performance analytics and simulations 📋
+  - Market regime detection (bull/bear/crab) for hedge timing 📋
+  - **Business rationale**: Isolate LP fee profits from directional SOL risk, enable larger LP exposure with controlled risk 📋
+
 Future Roadmap:
 
 Pipeline Optimization:
