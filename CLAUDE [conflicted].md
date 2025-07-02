@@ -215,15 +215,6 @@ Strategy Distribution Patterns:
   - Spot Distribution: Uniform liquidity across all bins
   - Bid-Ask Distribution: U-shaped distribution (more liquidity at edges, based on research formula)
 
-Market Analysis Terminology
-
-EMA Slope Trend Detection: 3-day percentage change in 50-period EMA (>0.1% = uptrend)
-Pearson Correlation: Linear correlation coefficient between portfolio and SOL daily returns
-Weekend Parameter: weekendSizePercentage configuration reducing position sizes on Sat/Sun UTC
-Position Scaling Simulation: 5x multiplier analysis (enlarge weekend positions, reduce weekday)
-Statistical Significance: p-value < 0.05 for correlation and trend difference testing
-Interactive HTML Reports: Plotly-based comprehensive reports with embedded visualizations
-
 Financial Metrics
 
 IL (Impermanent Loss) - loss due to relative price changes of assets
@@ -241,23 +232,6 @@ SL (Stop Loss) - automatic close when loss threshold exceeded (pattern: "Stop lo
 LV (Low Volume) - close due to volume drop below threshold (pattern: "due to low volume")
 OOR (Out of Range) - close when price moved beyond bin range and exceeded timeout (pattern: "Closing position due to price range:")
 other - all other close types (manual, unknown, system errors, etc.)
-
-## Custom Timestamp Handling
-
-**SOL Decoder Timestamp Format:** `MM/DD-HH:MM:SS` (non-standard format)
-**Example:** `05/12-20:57:08` = May 12, 20:57:08 (current year)
-**Special Case:** `24:XX:XX` = next day 00:XX:XX
-
-**Issue:** `pandas.to_datetime()` fails on this format
-**Solution:** Use `_parse_custom_timestamp()` from `data_loader.py`
-
-**Location:** reporting/data_loader.py::_parse_custom_timestamp()
-**Status:** Production-ready, handles edge cases (24:XX rollover)
-
-```python
-# AIDEV-NOTE-CLAUDE: Handle SOL Decoder custom timestamp format
-from data_loader import _parse_custom_timestamp
-positions_df['timestamp_column'] = positions_df['timestamp_column'].apply(_parse_custom_timestamp)
 
 🗂️ Project Structure
 project/
@@ -305,8 +279,8 @@ Cache: automatic Moralis API response caching (JSON files)
 Reports: individual text reports + collective CSV
 
 🏃‍♂️ Project Status
-Last Update: 2025-07-02
-Current Version: Market Analysis & Reporting Module v3.0 (Complete)
+Last Update: 2025-06-28
+Current Version: Portfolio Analytics v1.0 (Complete)
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved 33%)
@@ -376,18 +350,6 @@ Strategy Instance Detection Module 🆕
 - **Moralis API Integration**: working SOL/USDC price feeds with intelligent caching 🆕
 - **Robust Error Handling**: dual fallback system for chart generation 🆕
 - **Cost Impact Analysis**: daily allocation across active positions with break-even metrics 🆕
-
-Completed in v3.0
-**Market Analysis & Reporting Module:**
-- **Market correlation analysis**: Pearson correlation with SOL trends, EMA slope detection ✅
-- **Weekend parameter optimization**: weekendSizePercentage impact simulation with 5x scaling ✅  
-- **Interactive HTML reporting**: Plotly-based comprehensive reports with executive summaries ✅
-- **CLI analysis modes**: `--correlation`, `--weekend`, `--comprehensive` options ✅
-- **Performance optimization**: single CSV load for comprehensive analysis (3x faster) ✅
-- **Custom timestamp integration**: SOL Decoder format parsing in portfolio pipeline ✅
-- **Configuration-driven metrics**: risk-free rates from YAML, no hardcoded values ✅
-- **Statistical significance testing**: confidence intervals and p-values for correlations ✅
-
 
 Next Priority Tasks:
 
@@ -642,4 +604,6 @@ Advanced Features:
 - **Market Correlation**: SOL trend impact on LP strategy performance ✅
 - **Weekend Parameter**: Data-driven weekendSizePercentage optimization ✅
 - **Infrastructure Costs**: Significant 20.9% impact identified and quantified ✅
-- **Comprehe
+- **Comprehensive Reporting**: Executive-ready HTML reports with actionable recommendations ✅
+
+**System Status:** Market Analysis & Reporting Module v1.0 - Complete and Production-Ready ✅

@@ -15,10 +15,10 @@ import seaborn as sns
 from matplotlib.figure import Figure
 import yaml
 
-from reporting.visualizations.equity_curve import plot_equity_curve
-from reporting.visualizations.drawdown import plot_drawdown_analysis
-from reporting.visualizations.strategy_heatmap import plot_heatmap_from_instances, plot_heatmap_from_positions
-from reporting.visualizations.cost_impact import plot_cost_impact
+from visualizations.equity_curve import plot_equity_curve
+from visualizations.drawdown import plot_drawdown_analysis
+from visualizations.strategy_heatmap import plot_heatmap_from_instances, plot_heatmap_from_positions
+from visualizations.cost_impact import plot_cost_impact
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
