@@ -9,8 +9,9 @@ import logging
 import os
 import sys
 import json
+import yaml
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import pandas as pd
 
 # Add reporting module to path if not already there
@@ -50,10 +51,20 @@ class PortfolioAnalysisOrchestrator:
             config_path (str): Path to configuration file
         """
         self.config_path = config_path
+        self.config = self._load_config()
         self.analytics = None
         self.chart_generator = None
         self._initialize_components()
         logger.info("Portfolio Analysis Orchestrator initialized")
+        
+    def _load_config(self) -> Dict:
+        """Load YAML configuration with error handling."""
+        try:
+            with open(self.config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except FileNotFoundError:
+            logger.warning(f"Config file not found: {self.config_path}, using defaults")
+            return {}
         
     def _initialize_components(self):
         """Initialize analysis components."""
@@ -63,6 +74,21 @@ class PortfolioAnalysisOrchestrator:
         except Exception as e:
             logger.error(f"Component initialization failed: {e}")
             raise
+
+    def _should_skip_weekend_analysis(self) -> Tuple[bool, str]:
+        """
+        Check if weekend analysis should be skipped based on configuration.
+        
+        Returns:
+            Tuple[bool, str]: (should_skip, reason)
+        """
+        weekend_config = self.config.get('weekend_analysis', {})
+        size_reduction_percentage = weekend_config.get('size_reduction_percentage', 80)
+        
+        if size_reduction_percentage == 0:
+            return True, "size_reduction_percentage set to 0 in configuration"
+        
+        return False, ""
 
     def run_comprehensive_analysis(self, positions_file: str) -> Dict[str, Any]:
         """
@@ -102,8 +128,19 @@ class PortfolioAnalysisOrchestrator:
             correlation_result = correlation_analyzer.analyze_market_correlation(positions_df)
             
             logger.info("Step 3: Running weekend parameter analysis...")
-            weekend_analyzer = WeekendParameterAnalyzer() # AIDEV-NOTE: Assuming default weekend_size_percentage
-            weekend_result = weekend_analyzer.analyze_weekend_parameter_impact(positions_df)
+            # AIDEV-NOTE-CLAUDE: Check if weekend analysis should be skipped
+            skip_weekend, skip_reason = self._should_skip_weekend_analysis()
+            
+            if skip_weekend:
+                logger.warning(f"Weekend parameter analysis SKIPPED: {skip_reason}")
+                weekend_result = {
+                    'analysis_skipped': True,
+                    'reason': skip_reason,
+                    'message': 'Weekend parameter analysis was skipped due to configuration settings'
+                }
+            else:
+                weekend_analyzer = WeekendParameterAnalyzer(self.config_path)
+                weekend_result = weekend_analyzer.analyze_weekend_parameter_impact(positions_df)
 
             logger.info("Step 4: Generating comprehensive HTML report...")
             html_generator = HTMLReportGenerator()
@@ -132,6 +169,49 @@ class PortfolioAnalysisOrchestrator:
         except Exception as e:
             logger.error(f"Comprehensive analysis failed: {e}", exc_info=True)
             return {'status': 'ERROR', 'error': str(e)}
+
+    def run_weekend_analysis_only(self, positions_file: str) -> Dict[str, Any]:
+        """
+        Run only weekend parameter analysis.
+        
+        Args:
+            positions_file (str): Path to positions CSV file
+            
+        Returns:
+            Dict[str, Any]: Weekend analysis results
+        """
+        logger.info("Running weekend parameter analysis only...")
+        
+        try:
+            # Check if analysis should be skipped
+            skip_weekend, skip_reason = self._should_skip_weekend_analysis()
+            
+            if skip_weekend:
+                logger.warning(f"Weekend parameter analysis SKIPPED: {skip_reason}")
+                return {
+                    'analysis_skipped': True,
+                    'reason': skip_reason,
+                    'message': 'Weekend parameter analysis was skipped due to configuration settings'
+                }
+            
+            positions_df = load_and_prepare_positions(positions_file, self.analytics.min_threshold)
+            if positions_df.empty:
+                return {'error': f'No positions data after loading and preparing from {positions_file}'}
+                
+            weekend_analyzer = WeekendParameterAnalyzer(self.config_path)
+            result = weekend_analyzer.analyze_weekend_parameter_impact(positions_df)
+            
+            if 'error' not in result:
+                summary = weekend_analyzer.generate_weekend_analysis_summary(result)
+                logger.info("Weekend analysis summary:")
+                for line in summary.split('\n'):
+                    logger.info(line)
+                    
+            return result
+            
+        except Exception as e:
+            logger.error(f"Weekend analysis failed: {e}", exc_info=True)
+            return {'error': str(e)}
 
     def _analyze_dataframe(self, positions_df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -220,15 +300,19 @@ class PortfolioAnalysisOrchestrator:
             logger.info(f"  Portfolio PnL: {sol.get('total_pnl_sol', 0):+.3f} SOL, Sharpe: {sol.get('sharpe_ratio', 0):.2f}")
         
         correlation = result.get('correlation_analysis', {})
-        if 'error' not in correlation.get('error', 'error'):
+        if 'error' not in correlation:
             corr_metrics = correlation.get('correlation_metrics', {})
             logger.info(f"  SOL Correlation: {corr_metrics.get('pearson_correlation', 0):.3f} (significant: {corr_metrics.get('is_significant', False)})")
             
         weekend = result.get('weekend_analysis', {})
-        if 'error' not in weekend.get('error', 'error'):
+        if 'analysis_skipped' in weekend:
+            logger.info(f"  Weekend Analysis: SKIPPED ({weekend.get('reason', 'unknown reason')})")
+        elif 'error' not in weekend:
             recs = weekend.get('recommendations', {})
             impact = weekend.get('performance_comparison', {}).get('impact_analysis', {})
             logger.info(f"  Weekend Param: {recs.get('primary_recommendation', 'N/A')} ({impact.get('total_pnl_difference_sol', 0):+.3f} SOL impact)")
+        else:
+            logger.info(f"  Weekend Analysis: ERROR ({weekend.get('error', 'unknown error')})")
             
         logger.info(f"  HTML Report: {result.get('files_generated', {}).get('html_report', 'N/A')}")
         logger.info(f"  Execution Time: {result.get('execution_time_seconds', 0):.1f} seconds")

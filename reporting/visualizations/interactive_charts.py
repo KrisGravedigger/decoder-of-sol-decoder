@@ -138,18 +138,60 @@ def create_trend_performance_chart(correlation_analysis: Dict[str, Any]) -> str:
 def create_weekend_comparison_chart(weekend_analysis: Dict[str, Any]) -> str:
     """Create weekend parameter comparison chart."""
     try:
+        # AIDEV-NOTE-CLAUDE: Handle both analysis skipped and error cases
+        if 'analysis_skipped' in weekend_analysis:
+            return f"<p>Weekend analysis was skipped: {weekend_analysis.get('reason', 'unknown reason')}</p>"
+            
+        if 'error' in weekend_analysis:
+            return f"<p>Weekend analysis error: {weekend_analysis['error']}</p>"
+            
         comparison = weekend_analysis['performance_comparison']
-        original = comparison['original_scenario']['metrics']
-        simulated = comparison['simulated_scenario']['metrics']
         
-        metrics = ['Total PnL', 'Average ROI (%)', 'Win Rate (%)', 'Sharpe Ratio']
-        original_values = [original['total_pnl'], original['average_roi'] * 100, original['win_rate'] * 100, original['sharpe_ratio']]
-        simulated_values = [simulated['total_pnl'], simulated['average_roi'] * 100, simulated['win_rate'] * 100, simulated['sharpe_ratio']]
+        # AIDEV-NOTE-CLAUDE: Updated to use new structure (current_scenario/alternative_scenario)
+        current = comparison['current_scenario']['metrics']
+        alternative = comparison['alternative_scenario']['metrics']
+        
+        # AIDEV-NOTE-CLAUDE: Removed win_rate as it's not included in weekend analysis metrics
+        metrics = ['Total PnL', 'Average ROI (%)', 'Sharpe Ratio']
+        current_values = [
+            current['total_pnl'], 
+            current['average_roi'] * 100, 
+            current['sharpe_ratio']
+        ]
+        alternative_values = [
+            alternative['total_pnl'], 
+            alternative['average_roi'] * 100, 
+            alternative['sharpe_ratio']
+        ]
+        
+        # Get scenario names from the analysis
+        current_name = comparison['current_scenario']['name']
+        alternative_name = comparison['alternative_scenario']['name']
         
         fig = go.Figure()
-        fig.add_trace(go.Bar(name='Current (No Weekend Parameter)', x=metrics, y=original_values, marker_color='#FF6B35'))
-        fig.add_trace(go.Bar(name='With Weekend Parameter', x=metrics, y=simulated_values, marker_color='#004E89'))
-        fig.update_layout(title="Weekend Parameter Impact Comparison", xaxis_title="Metrics", yaxis_title="Value", barmode='group', template='plotly_white', height=500)
+        fig.add_trace(go.Bar(
+            name=current_name, 
+            x=metrics, 
+            y=current_values, 
+            marker_color='#FF6B35',
+            hovertemplate='%{x}<br>' + current_name + ': %{y:.3f}<extra></extra>'
+        ))
+        fig.add_trace(go.Bar(
+            name=alternative_name, 
+            x=metrics, 
+            y=alternative_values, 
+            marker_color='#004E89',
+            hovertemplate='%{x}<br>' + alternative_name + ': %{y:.3f}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title="Weekend Parameter Impact Comparison", 
+            xaxis_title="Metrics", 
+            yaxis_title="Value", 
+            barmode='group', 
+            template='plotly_white', 
+            height=500
+        )
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         
@@ -160,11 +202,31 @@ def create_weekend_comparison_chart(weekend_analysis: Dict[str, Any]) -> str:
 def create_weekend_distribution_chart(weekend_analysis: Dict[str, Any]) -> str:
     """Create weekend position distribution chart."""
     try:
+        # AIDEV-NOTE-CLAUDE: Handle analysis skipped case
+        if 'analysis_skipped' in weekend_analysis:
+            return f"<p>Weekend analysis was skipped: {weekend_analysis.get('reason', 'unknown reason')}</p>"
+            
+        if 'error' in weekend_analysis:
+            return f"<p>Weekend analysis error: {weekend_analysis['error']}</p>"
+            
         classification = weekend_analysis['position_classification']
         
         fig = go.Figure()
-        fig.add_trace(go.Pie(labels=['Weekend Opened', 'Weekday Opened'], values=[classification['weekend_opened']['count'], classification['weekday_opened']['count']], hole=0.3, marker_colors=['#FF6B35', '#004E89'], hovertemplate='%{label}<br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'))
-        fig.update_layout(title="Position Opening Distribution", template='plotly_white', height=400)
+        fig.add_trace(go.Pie(
+            labels=['Weekend Opened', 'Weekday Opened'], 
+            values=[
+                classification['weekend_opened']['count'], 
+                classification['weekday_opened']['count']
+            ], 
+            hole=0.3, 
+            marker_colors=['#FF6B35', '#004E89'], 
+            hovertemplate='%{label}<br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+        ))
+        fig.update_layout(
+            title="Position Opening Distribution", 
+            template='plotly_white', 
+            height=400
+        )
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         

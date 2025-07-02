@@ -1,3 +1,4 @@
+
 🌐 Language Policy
 CRITICAL RULE: Regardless of conversation language, ALL code updates and CLAUDE.md modifications must be in English. This ensures consistency in codebase and documentation.
 
@@ -220,7 +221,7 @@ Market Analysis Terminology
 EMA Slope Trend Detection: 3-day percentage change in 50-period EMA (>0.1% = uptrend)
 Pearson Correlation: Linear correlation coefficient between portfolio and SOL daily returns
 Weekend Parameter: weekendSizePercentage configuration reducing position sizes on Sat/Sun UTC
-Position Scaling Simulation: 5x multiplier analysis (enlarge weekend positions, reduce weekday)
+Weekend Parameter Analysis: Simulation comparing current vs alternative weekend position sizing
 Statistical Significance: p-value < 0.05 for correlation and trend difference testing
 Interactive HTML Reports: Plotly-based comprehensive reports with embedded visualizations
 
@@ -263,12 +264,11 @@ positions_df['timestamp_column'] = positions_df['timestamp_column'].apply(_parse
 project/
 ├── extraction/             - data extraction and processing
 │   ├── __init__.py
-│   ├── log_extractor.py   - main parser with debug controls and close reason classification
-│   └── extraction_utils.py - utilities for extraction module
+│   └── log_extractor.py   - main parser with debug controls and close reason classification
 ├── reporting/              - analytics and portfolio performance analysis
 │   ├── __init__.py
 │   ├── config/
-│   │   └── portfolio_config.yaml - infrastructure costs, risk-free rates, filters
+│   │   └── portfolio_config.yaml - infrastructure costs, risk-free rates, filters, weekend analysis
 │   ├── output/ - generated reports and charts directory
 │   │   ├── charts/ - timestamped PNG visualizations
 │   │   └── portfolio_analysis.log
@@ -290,7 +290,7 @@ project/
 │   ├── metrics_calculator.py - financial metrics calculation
 │   ├── text_reporter.py - text report generation
 │   ├── market_correlation_analyzer.py - analysis of portfolio vs market correlation
-│   ├── weekend_parameter_analyzer.py - analysis of weekend parameter impact
+│   ├── weekend_parameter_analyzer.py - **weekend parameter impact analysis** 🆕
 │   └── html_report_generator.py - **HTML report generation orchestrator** (refactored) 🆕
 ├── portfolio_main.py       - **Main CLI and interactive menu** 🆕
 ├── strategy_analyzer.py    - LP strategy simulation engine for Meteora DLMM
@@ -306,7 +306,7 @@ Reports: individual text reports + collective CSV
 
 🏃‍♂️ Project Status
 Last Update: 2025-07-02
-Current Version: Market Analysis & Reporting Module v3.2 (Complete)
+Current Version: Market Analysis & Reporting Module v3.3 (Complete)
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved 33%)
@@ -388,12 +388,20 @@ Completed in v3.0
 - **Configuration-driven metrics**: risk-free rates from YAML, no hardcoded values ✅
 - **Statistical significance testing**: confidence intervals and p-values for correlations ✅
 
+**Completed in v3.3 - Weekend Parameter Analysis v2.1:**
+- **Complete weekend parameter analysis logic**: CSV always represents actual positions ✅
+- **Dual scenario simulation**: current vs alternative weekend sizing with proper interpretation ✅
+- **YAML-driven configuration**: weekend_size_reduction and size_reduction_percentage parameters ✅
+- **Orchestrator-level skip logic**: analysis skipped when size_reduction_percentage=0 ✅
+- **Enhanced error handling**: proper handling of skipped analysis in HTML reports ✅
+- **Fixed interactive charts**: updated key mapping (current_scenario/alternative_scenario) ✅
+- **Business logic documentation**: clear assumptions about CSV data interpretation ✅
 
 Next Priority Tasks:
 
 **Immediate (Next Session):**
-- **Strategy Heatmap Orientation Fix**: resolve matplotlib PNG rotation issue (escalated to Gemini) 📋
-- **Portfolio Analytics Integration**: connect with existing strategy_analyzer.py pipeline 📋
+- **TP/SL Optimization Module**: ML-driven take profit and stop loss level optimization 📋
+- **Post-exit analysis**: forward-looking profitability analysis beyond historical close points 📋
 
 **Strategy Analytics Module Enhancement:**
   - Strategy comparison matrix with detailed performance breakdown 📋
@@ -642,7 +650,7 @@ Advanced Features:
 - **Market Correlation**: SOL trend impact on LP strategy performance ✅
 - **Weekend Parameter**: Data-driven weekendSizePercentage optimization ✅
 - **Infrastructure Costs**: Significant 20.9% impact identified and quantified ✅
-- **Comprehe
+- **Comprehensive Analysis**: All modules working together seamlessly ✅
 
 **2025-07-02: Major Refactoring and UI Enhancement**
 
@@ -662,4 +670,53 @@ Advanced Features:
 - **Improved Project Structure:**
   - The overall project structure is now cleaner and more aligned with the single-responsibility principle. The new files fit logically within the established directory layout (`templates/`, `visualizations/`).
 
-**System Status:** Portfolio Analytics v3.2 - Refactored and User-Friendly. The codebase is now more maintainable, scalable, and easier to use. ✅
+**2025-07-02: Weekend Parameter Analysis v2.1 - Final Implementation**
+
+**Goal:** Implement correct weekend parameter analysis logic with proper business assumptions and YAML configuration.
+
+**Achieved:**
+
+- **Corrected Business Logic:**
+  - **CSV Data Interpretation**: CSV always represents actual positions (regardless of weekend_size_reduction config) ✅
+  - **Dual Scenario Simulation**: 
+    - `weekend_size_reduction=1`: CSV has reduced weekend positions → simulate enlarged for comparison ✅
+    - `weekend_size_reduction=0`: CSV has normal positions → simulate reduced for comparison ✅
+  - **Weekend Position Focus**: Only positions opened during weekend (Sat/Sun UTC) are affected by simulation ✅
+  - **Weekday Positions**: Remain identical in both scenarios (no changes) ✅
+
+- **YAML Configuration Enhancement:**
+  - **Enhanced Configuration**: `weekend_analysis` section in `portfolio_config.yaml` ✅
+  - **Skip Logic**: `size_reduction_percentage: 0` = no analysis ✅
+  - **Business Documentation**: Clear comments explaining assumptions and logic ✅
+
+- **Orchestrator Integration:**
+  - **Skip Logic**: Moved from analyzer to orchestrator for better workflow control ✅
+  - **Enhanced Logging**: Proper warning and info messages for skipped analysis ✅
+  - **Error Handling**: Graceful handling of skipped analysis in HTML reports ✅
+
+- **Interactive Charts Fix:**
+  - **Key Mapping Update**: Fixed `original_scenario` → `current_scenario` mapping ✅
+  - **Removed Win Rate**: Eliminated win_rate from weekend analysis charts (business requirement) ✅
+  - **Dynamic Scenario Names**: Charts now use actual scenario names from analysis ✅
+  - **Skip Handling**: Proper display when analysis is skipped ✅
+
+**Technical Changes:**
+- **weekend_parameter_analyzer.py**: Complete rewrite with correct simulation logic ✅
+- **orchestrator.py**: Added `_should_skip_weekend_analysis()` and enhanced workflow ✅
+- **interactive_charts.py**: Fixed key mapping and removed win_rate from weekend charts ✅
+- **portfolio_config.yaml**: Added comprehensive weekend_analysis configuration ✅
+
+**Business Validation:**
+- **Test Results**: KEEP_DISABLED recommendation with -0.565 SOL impact ✅
+- **Scenario Names**: "ENABLED (80% weekend reduction)" vs "DISABLED (normal weekend sizes)" ✅
+- **Proper Metrics**: Focus on PnL, ROI, and Sharpe ratio (no win_rate) ✅
+
+**Files Modified:**
+- reporting/config/portfolio_config.yaml (enhanced with weekend_analysis section)
+- reporting/weekend_parameter_analyzer.py (complete rewrite)
+- reporting/orchestrator.py (skip logic and enhanced workflow)
+- reporting/visualizations/interactive_charts.py (fixed key mapping and charts)
+
+**System Status:** Weekend Parameter Analysis v2.1 - Fully Functional and Business-Correct ✅
+
+**Ready for Next Priority:** TP/SL Optimization Module - ML-driven take profit and stop loss level optimization 🚀

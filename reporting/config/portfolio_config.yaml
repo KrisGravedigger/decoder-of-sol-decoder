@@ -29,3 +29,16 @@ visualization:
     top_strategies_only: 10      # show only top N strategies
     exclude_outliers: false       # remove statistical outliers
     date_range_filter: false      # custom date range selection
+
+# Weekend Parameter Analysis Configuration
+weekend_analysis:
+  weekend_size_reduction: 0        # 0=disabled, 1=enabled for all positions
+  size_reduction_percentage: 80    # 80% reduction = 20% remains; 0 = no analysis
+  
+  # Analysis notes:
+  # - CSV always represents actual positions (regardless of weekend_size_reduction setting)
+  # - weekend_size_reduction=1: CSV has reduced positions, simulate enlarged for comparison
+  # - weekend_size_reduction=0: CSV has normal positions, simulate reduced for comparison
+  # - Only positions opened during weekend (Sat/Sun UTC) are affected by simulation
+  # - Weekday positions remain identical in both scenarios
+  # - Weekend classification based on open_timestamp, not duration
