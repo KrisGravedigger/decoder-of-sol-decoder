@@ -191,12 +191,14 @@ class LogParser:
         """
         log_files_info = []
         if os.path.exists(log_dir):
-            for item in os.listdir(log_dir):
+            # AIDEV-NOTE-CLAUDE: Sort files chronologically to handle cross-file positions properly
+            for item in sorted(os.listdir(log_dir)):
                 item_path = os.path.join(log_dir, item)
                 wallet_id = "main_wallet" if os.path.isfile(item_path) else item
                 
                 if os.path.isdir(item_path):
-                    files_to_scan = [os.path.join(item_path, f) for f in os.listdir(item_path) if f.startswith("app") and ".log" in f]
+                    # AIDEV-NOTE-CLAUDE: Sort files within subdirectories as well
+                    files_to_scan = [os.path.join(item_path, f) for f in sorted(os.listdir(item_path)) if f.startswith("app") and ".log" in f]
                 elif item.startswith("app") and ".log" in item:
                     files_to_scan = [item_path]
                 else:
@@ -261,7 +263,7 @@ class LogParser:
 
 def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool:
     """
-    Run the complete log extraction process.
+    Run the complete log extraction process with enhanced deduplication logic.
     
     Args:
         log_dir: Directory containing log files.
@@ -291,18 +293,78 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
                 reader = csv.DictReader(f)
                 existing_data = [row for row in reader]
         
+        # AIDEV-NOTE-CLAUDE: Enhanced deduplication using pool_address + open_timestamp
         existing_position_ids = {row['position_id'] for row in existing_data}
-        new_data = [pos for pos in extracted_data if pos['position_id'] not in existing_position_ids]
+        existing_universal_ids = {f"{row['pool_address']}_{row['open_timestamp']}" for row in existing_data if row['pool_address'] and row['open_timestamp']}
+
+        # Create mapping of existing positions for update logic
+        existing_positions_map = {f"{row['pool_address']}_{row['open_timestamp']}" : row 
+                                for row in existing_data 
+                                if row['pool_address'] and row['open_timestamp']}
+
+        processed_data = []
+        updated_count = 0
+        skipped_count = 0
+
+        for pos in extracted_data:
+            # Skip positions missing pool_address (these would fail validation anyway)
+            if not pos['pool_address'] or not pos['open_timestamp']:
+                logger.warning(f"Skipping position {pos['position_id']} - missing pool_address or open_timestamp")
+                continue
+                
+            universal_id = f"{pos['pool_address']}_{pos['open_timestamp']}"
+            
+            if pos['position_id'] in existing_position_ids:
+                # Skip exact duplicate
+                skipped_count += 1
+                continue
+            elif universal_id in existing_universal_ids:
+                # Found same position (pool_address + open_timestamp)
+                existing_pos = existing_positions_map[universal_id]
+                
+                # Check if we should update: existing is incomplete and new is complete
+                if (existing_pos['close_reason'] == 'active_at_log_end' and 
+                    pos['close_reason'] != 'active_at_log_end' and 
+                    pos['final_pnl_sol_from_log'] is not None):
+                    # Update existing position with complete data
+                    processed_data.append(pos)
+                    updated_count += 1
+                    logger.info(f"Updated position {universal_id}: {existing_pos['close_reason']} → {pos['close_reason']}")
+                else:
+                    # Skip duplicate (don't import second occurrence)
+                    skipped_count += 1
+                    logger.info(f"Skipped duplicate position {universal_id}")
+                    continue
+            else:
+                # New position
+                processed_data.append(pos)
+
+        new_data = processed_data
         
-        if new_data:
-            all_data = existing_data + new_data
+        if new_data or updated_count > 0:
+            # AIDEV-NOTE-CLAUDE: Merge existing + new data, removing positions that were updated
+            updated_universal_ids = {f"{pos['pool_address']}_{pos['open_timestamp']}" 
+                                   for pos in new_data 
+                                   if f"{pos['pool_address']}_{pos['open_timestamp']}" in existing_universal_ids}
+            
+            # Keep existing positions that weren't updated
+            filtered_existing = [pos for pos in existing_data 
+                                if not (pos['pool_address'] and pos['open_timestamp'] and 
+                                       f"{pos['pool_address']}_{pos['open_timestamp']}" in updated_universal_ids)]
+            
+            all_data = filtered_existing + new_data
             all_data.sort(key=lambda x: x['open_timestamp'])
             
             with open(output_csv, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=all_data[0].keys())
                 writer.writeheader()
                 writer.writerows(all_data)
-            logger.info(f"Successfully saved {len(all_data)} total positions ({len(new_data)} new) to {output_csv}")
+            
+            logger.info(f"Successfully processed {len(all_data)} total positions:")
+            logger.info(f"  - {len(filtered_existing)} existing positions retained")
+            logger.info(f"  - {len(new_data) - updated_count} new positions added")
+            logger.info(f"  - {updated_count} positions updated (incomplete → complete)")
+            logger.info(f"  - {skipped_count} duplicate positions skipped")
         else:
             logger.info("No new positions to add. CSV file unchanged.")
             

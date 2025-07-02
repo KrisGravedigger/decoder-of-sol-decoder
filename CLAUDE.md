@@ -243,6 +243,19 @@ LV (Low Volume) - close due to volume drop below threshold (pattern: "due to low
 OOR (Out of Range) - close when price moved beyond bin range and exceeded timeout (pattern: "Closing position due to price range:")
 other - all other close types (manual, unknown, system errors, etc.)
 
+## Enhanced Deduplication System
+
+**Universal Position ID** - Cross-file position identifier using `pool_address + open_timestamp`
+**Position Completion** - Process of updating incomplete positions (`active_at_log_end`) with complete data from subsequent files
+**Cross-File Position Tracking** - System capability to track positions that open in one log file and close in another
+**Chronological File Processing** - Files processed in sorted order to maintain proper event sequencing
+**Duplicate Handling Logic**:
+  - **Skip**: Exact duplicates (same position_id)
+  - **Update**: Incomplete position → complete position
+  - **Add**: New positions not seen before
+
+**File Processing Order**: Alphabetical sorting ensures consistent chronological processing of log files
+
 ## Custom Timestamp Handling
 
 **SOL Decoder Timestamp Format:** `MM/DD-HH:MM:SS` (non-standard format)
@@ -307,7 +320,7 @@ Reports: individual text reports + collective CSV
 
 🏃‍♂️ Project Status
 Last Update: 2025-07-03
-Current Version: v3.5 - Architecture Stabilization & Resiliency
+Current Version: v3.6 - Architecture Stabilization & Resiliency
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved 33%)
@@ -331,6 +344,14 @@ Strategy instance detection and grouping ✅
 Multi-wallet support with subfolder organization ✅
 Strategy performance ranking with weighted scoring ✅
 Enhanced CSV structure with wallet_id and source_file tracking ✅
+Enhanced position deduplication with cross-file tracking ✅
+Universal position identification (pool_address + open_timestamp) ✅
+Automatic position completion (active_at_log_end → complete positions) ✅
+Chronological file processing for proper position sequencing ✅
+Intelligent duplicate handling with update/skip logic ✅
+Enhanced position deduplication with universal identification ✅
+Cross-file position tracking and completion ✅
+Chronological file processing with intelligent duplicate handling ✅
 
 **Portfolio Analytics Module:**
 - **Complete analysis pipeline**: dual SOL/USDC currency analysis with infrastructure cost impact ✅
@@ -743,3 +764,44 @@ Advanced Features:
 - **Unified User Interface:** Translated all UI elements and prompts in `main.py` to English, adhering to the project's critical rules.
 
 **Status:** Architecture stabilized. The application is fully functional, robust, and resilient to common errors from missing cache data. It is ready for further development. ✅
+
+**2025-07-03: Enhanced Deduplication & Cross-File Position Tracking**
+
+**Goal:** Implement robust position deduplication system to handle overlapping log files and cross-file position tracking.
+
+**Achieved:**
+
+- **Universal Position Identification:**
+  - Implemented `universal_position_id` property in Position model using `pool_address + open_timestamp` ✅
+  - Added `is_position_complete()` method to detect incomplete vs complete positions ✅
+  - Enhanced validation to require `pool_address` as mandatory field ✅
+
+- **Enhanced Deduplication Logic:**
+  - **Cross-file position tracking**: Positions can open in one file and close in another ✅
+  - **Intelligent update system**: Incomplete positions (`active_at_log_end`) are updated with complete data ✅
+  - **Duplicate prevention**: True duplicates are skipped, avoiding data pollution ✅
+  - **Chronological processing**: Files sorted alphabetically for consistent event sequencing ✅
+
+- **Improved Processing Pipeline:**
+  - Enhanced CSV merge logic with filtered existing data to prevent conflicts ✅
+  - Detailed logging of processing statistics (new/updated/skipped positions) ✅
+  - Robust error handling for positions missing critical identifiers ✅
+
+**Technical Implementation:**
+- **models.py**: Added `universal_position_id` property and `is_position_complete()` method
+- **log_extractor.py**: Complete rewrite of deduplication logic in `run_extraction()` function
+- **File processing**: Alphabetical sorting in both main directory and subdirectories
+
+**Business Impact:**
+- **Eliminates duplicate positions** from overlapping log files
+- **Enables cross-file position tracking** for positions spanning multiple logs  
+- **Provides position completion** when close events appear in different files
+- **Maintains data integrity** through intelligent update/skip logic
+
+**Test Results:** Successfully processed overlapping log files with proper deduplication and position completion ✅
+
+**Files Modified:**
+- core/models.py (enhanced Position class with universal identification)
+- extraction/log_extractor.py (complete deduplication logic rewrite)
+
+**System Status:** Enhanced Deduplication v1.0 - Production Ready ✅
