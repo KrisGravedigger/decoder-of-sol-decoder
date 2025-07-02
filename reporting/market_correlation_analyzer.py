@@ -18,8 +18,12 @@ import sys
 import os
 
 # Add reporting module to path for imports
-sys.path.append('reporting')
-from infrastructure_cost_analyzer import InfrastructureCostAnalyzer
+# Corrected path logic
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+    
+from reporting.infrastructure_cost_analyzer import InfrastructureCostAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,15 +38,17 @@ class MarketCorrelationAnalyzer:
     measuring relationship strength between portfolio returns and SOL price movements.
     """
     
-    def __init__(self, config_path: str = "reporting/config/portfolio_config.yaml"):
+    def __init__(self, config_path: str = "reporting/config/portfolio_config.yaml", api_key: Optional[str] = None):
         """
         Initialize market correlation analyzer.
         
         Args:
             config_path (str): Path to configuration file
+            api_key (Optional[str]): Moralis API key
         """
         self.config_path = config_path
-        self.cost_analyzer = InfrastructureCostAnalyzer(config_path)
+        # AIDEV-NOTE-CLAUDE: Pass API key down to the cost analyzer.
+        self.cost_analyzer = InfrastructureCostAnalyzer(config_path, api_key=api_key)
         
         # Analysis parameters
         self.ema_period = 50
@@ -77,7 +83,7 @@ class MarketCorrelationAnalyzer:
             sol_rates = self.cost_analyzer.get_sol_usdc_rates(start_date, end_date)
             
             if not sol_rates:
-                return {'error': f'No SOL price data available for period {start_date} to {end_date}'}
+                return {'error': f'No SOL price data available for period {start_date} to {end_date}. Check cache or API connection.'}
                 
             # Step 3: Process SOL price data
             sol_daily = self._process_sol_price_data(sol_rates)
@@ -115,8 +121,12 @@ class MarketCorrelationAnalyzer:
             logger.info("Market correlation analysis completed successfully")
             return analysis_result
             
+        except ValueError as ve:
+             # Catch API key errors from cost_analyzer
+            logger.error(f"Market correlation analysis failed due to a configuration error: {ve}")
+            return {'error': str(ve)}
         except Exception as e:
-            logger.error(f"Market correlation analysis failed: {e}")
+            logger.error(f"Market correlation analysis failed: {e}", exc_info=True)
             return {'error': str(e)}
             
     def _calculate_portfolio_daily_returns(self, positions_df: pd.DataFrame) -> pd.Series:
@@ -153,17 +163,22 @@ class MarketCorrelationAnalyzer:
         Returns:
             pd.DataFrame: Processed SOL data with indicators
         """
+        if not sol_rates:
+            return pd.DataFrame()
         # Convert to DataFrame
         sol_df = pd.DataFrame([
             {'date': pd.to_datetime(date), 'close': price}
-            for date, price in sol_rates.items()
+            for date, price in sol_rates.items() if price is not None
         ]).set_index('date').sort_index()
         
+        if sol_df.empty:
+            return pd.DataFrame()
+
         # Calculate daily returns
         sol_df['daily_return'] = sol_df['close'].pct_change()
         
         # Calculate EMA 50
-        sol_df['ema_50'] = sol_df['close'].ewm(span=self.ema_period).mean()
+        sol_df['ema_50'] = sol_df['close'].ewm(span=self.ema_period, min_periods=min(self.ema_period, len(sol_df))).mean()
         
         # Calculate EMA slope (3-day percentage change)
         sol_df['ema_slope'] = sol_df['ema_50'].pct_change(periods=self.slope_period)
@@ -176,7 +191,7 @@ class MarketCorrelationAnalyzer:
         )
         
         # Clean data (remove NaN values)
-        sol_df = sol_df.dropna()
+        sol_df = sol_df.dropna(subset=['daily_return', 'ema_slope'])
         
         logger.info(f"Processed SOL price data for {len(sol_df)} days")
         return sol_df
@@ -192,12 +207,17 @@ class MarketCorrelationAnalyzer:
         Returns:
             Dict[str, Any]: Correlation analysis results
         """
+        if sol_daily.empty:
+            return {'error': 'SOL daily data is empty.'}
+
         # Align data by common dates
         common_dates = portfolio_daily.index.intersection(sol_daily.index)
         
         if len(common_dates) < 10:
             logger.warning(f"Only {len(common_dates)} common dates - correlation may be unreliable")
-            
+            if len(common_dates) < 2:
+                return {'error': 'Less than 2 common data points for correlation.'}
+
         portfolio_aligned = portfolio_daily.loc[common_dates]
         sol_aligned = sol_daily.loc[common_dates, 'daily_return']
         
@@ -230,6 +250,8 @@ class MarketCorrelationAnalyzer:
         Returns:
             Dict[str, Any]: Trend-based performance analysis
         """
+        if sol_daily.empty:
+            return {'error': 'SOL daily data is empty for trend analysis.'}
         # Align data by common dates
         common_dates = portfolio_daily.index.intersection(sol_daily.index)
         portfolio_aligned = portfolio_daily.loc[common_dates]
@@ -261,9 +283,9 @@ class MarketCorrelationAnalyzer:
         }
         
         # Performance difference analysis
-        if len(uptrend_returns) > 0 and len(downtrend_returns) > 0:
+        if len(uptrend_returns) > 1 and len(downtrend_returns) > 1:
             # Statistical test for difference in means
-            t_stat, t_p_value = stats.ttest_ind(uptrend_returns, downtrend_returns)
+            t_stat, t_p_value = stats.ttest_ind(uptrend_returns, downtrend_returns, equal_var=False) # Welch's t-test
             
             trend_analysis['performance_difference'] = {
                 'uptrend_vs_downtrend_mean_diff': trend_analysis['uptrend']['mean_return'] - trend_analysis['downtrend']['mean_return'],
@@ -298,19 +320,25 @@ class MarketCorrelationAnalyzer:
         Returns:
             Dict[str, Any]: Statistical significance test results
         """
+        if sol_daily.empty:
+            return {'error': 'SOL daily data is empty for significance testing.'}
         # Align data
         common_dates = portfolio_daily.index.intersection(sol_daily.index)
+        
+        if len(common_dates) < 3:
+            return {'error': 'Insufficient data for statistical testing (< 3 points)'}
+            
         portfolio_aligned = portfolio_daily.loc[common_dates]
         sol_aligned = sol_daily.loc[common_dates, 'daily_return']
         
-        if len(common_dates) < 3:
-            return {'error': 'Insufficient data for statistical testing'}
-            
         # Pearson correlation with confidence interval
         pearson_corr, pearson_p = stats.pearsonr(portfolio_aligned, sol_aligned)
         
         # Calculate confidence interval for correlation (Fisher z-transform)
         n = len(common_dates)
+        if n <= 3:
+             return {'error': f'Sample size ({n}) too small for confidence interval.'}
+        
         z = np.arctanh(pearson_corr)
         se = 1 / np.sqrt(n - 3)
         z_crit = stats.norm.ppf(0.975)  # 95% confidence
@@ -345,65 +373,37 @@ class MarketCorrelationAnalyzer:
         if 'error' in analysis_result:
             return f"Correlation Analysis Error: {analysis_result['error']}"
             
-        corr = analysis_result['correlation_metrics']
-        trend = analysis_result['trend_analysis']
-        sig = analysis_result['statistical_significance']
+        corr = analysis_result.get('correlation_metrics', {})
+        trend = analysis_result.get('trend_analysis', {})
         
+        if not corr or not trend or 'pearson_correlation' not in corr:
+            return "Correlation Analysis Summary: Incomplete data."
+
         summary = []
         summary.append("MARKET CORRELATION ANALYSIS SUMMARY")
         summary.append("=" * 50)
         
         # Overall correlation
-        summary.append(f"Overall SOL Correlation: {corr['pearson_correlation']:.3f}")
-        summary.append(f"Statistical Significance: {'Yes' if corr['is_significant'] else 'No'} (p={corr['pearson_p_value']:.3f})")
-        summary.append(f"Sample Size: {corr['common_days']} days")
+        summary.append(f"Overall SOL Correlation: {corr.get('pearson_correlation', 0):.3f}")
+        summary.append(f"Statistical Significance: {'Yes' if corr.get('is_significant') else 'No'} (p={corr.get('pearson_p_value', 1):.3f})")
+        summary.append(f"Sample Size: {corr.get('common_days', 0)} days")
         
         # Trend analysis
-        summary.append("\nTREND-BASED PERFORMANCE:")
-        summary.append(f"Uptrend Days: {trend['uptrend']['days']} ({trend['trend_distribution']['uptrend_percentage']:.1f}%)")
-        summary.append(f"Uptrend Avg Return: {trend['uptrend']['mean_return']:+.4f} SOL/day")
-        summary.append(f"Uptrend Win Rate: {trend['uptrend']['win_rate']*100:.1f}%")
+        uptrend_data = trend.get('uptrend', {})
+        downtrend_data = trend.get('downtrend', {})
+        trend_dist = trend.get('trend_distribution', {})
         
-        summary.append(f"Downtrend Days: {trend['downtrend']['days']} ({trend['trend_distribution']['downtrend_percentage']:.1f}%)")
-        summary.append(f"Downtrend Avg Return: {trend['downtrend']['mean_return']:+.4f} SOL/day")
-        summary.append(f"Downtrend Win Rate: {trend['downtrend']['win_rate']*100:.1f}%")
+        summary.append("\nTREND-BASED PERFORMANCE:")
+        summary.append(f"Uptrend Days: {uptrend_data.get('days',0)} ({trend_dist.get('uptrend_percentage',0):.1f}%)")
+        summary.append(f"Uptrend Avg Return: {uptrend_data.get('mean_return',0):+.4f} SOL/day")
+        
+        summary.append(f"Downtrend Days: {downtrend_data.get('days',0)} ({trend_dist.get('downtrend_percentage',0):.1f}%)")
+        summary.append(f"Downtrend Avg Return: {downtrend_data.get('mean_return',0):+.4f} SOL/day")
         
         # Performance difference
         if 'performance_difference' in trend:
             diff = trend['performance_difference']
-            summary.append(f"\nPerformance Difference: {diff['uptrend_vs_downtrend_mean_diff']:+.4f} SOL/day")
-            summary.append(f"Difference Significant: {'Yes' if diff['difference_is_significant'] else 'No'}")
-            
-        # Recommendation
-        summary.append("\nRECOMMENDATION:")
-        if corr['pearson_correlation'] > 0.3 and corr['is_significant']:
-            summary.append("Strong positive correlation with SOL - strategy performs well in SOL uptrends")
-        elif corr['pearson_correlation'] < -0.3 and corr['is_significant']:
-            summary.append("Strong negative correlation with SOL - strategy performs well in SOL downtrends")
-        elif corr['is_significant']:
-            summary.append(f"Weak but significant correlation - monitor SOL trends")
-        else:
-            summary.append("No significant correlation with SOL market trends")
+            summary.append(f"\nPerformance Difference: {diff.get('uptrend_vs_downtrend_mean_diff', 0):+.4f} SOL/day")
+            summary.append(f"Difference Significant: {'Yes' if diff.get('difference_is_significant') else 'No'}")
             
         return "\n".join(summary)
-
-
-if __name__ == "__main__":
-    # Test market correlation analyzer
-    import pandas as pd
-    
-    # Create sample positions data for testing
-    test_positions = pd.DataFrame({
-        'close_timestamp': pd.date_range('2024-01-01', periods=30, freq='D'),
-        'pnl_sol': np.random.normal(0.1, 0.5, 30),
-        'investment_sol': np.random.uniform(1, 5, 30)
-    })
-    
-    analyzer = MarketCorrelationAnalyzer()
-    result = analyzer.analyze_market_correlation(test_positions)
-    
-    if 'error' not in result:
-        summary = analyzer.generate_correlation_summary(result)
-        print(summary)
-    else:
-        print(f"Analysis failed: {result['error']}")

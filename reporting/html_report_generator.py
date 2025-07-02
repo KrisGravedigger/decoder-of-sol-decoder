@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 import plotly.offline as pyo
 from jinja2 import Environment, FileSystemLoader
 
-from visualizations import interactive_charts
+from .visualizations import interactive_charts
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,29 +25,19 @@ logger = logging.getLogger(__name__)
 class HTMLReportGenerator:
     """
     Generates comprehensive HTML reports with interactive charts.
-    
-    Combines portfolio analytics, market correlation, and weekend analysis
-    into professional HTML reports using Plotly for interactivity.
     """
     
     def __init__(self, output_dir: str = "reporting/output"):
         """
         Initialize HTML report generator.
-        
-        Args:
-            output_dir (str): Directory for output files
         """
         self.output_dir = output_dir
-        self.templates_dir = os.path.join("reporting", "templates")
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.templates_dir = os.path.join(base_dir, "templates")
         self.timestamp_format = "%Y%m%d_%H%M"
         
-        # Ensure directories exist
         os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.templates_dir, exist_ok=True)
-        
-        # Setup Jinja2 environment
-        self.jinja_env = Environment(loader=FileSystemLoader(self.templates_dir))
-
+        self.jinja_env = Environment(loader=FileSystemLoader(self.templates_dir), autoescape=True)
         logger.info("HTML Report Generator initialized")
         
     def generate_comprehensive_report(self, 
@@ -56,14 +46,6 @@ class HTMLReportGenerator:
                                     weekend_analysis: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate comprehensive HTML report combining all analyses.
-        
-        Args:
-            portfolio_analysis (Dict[str, Any]): Portfolio analytics results
-            correlation_analysis (Optional[Dict[str, Any]]): Market correlation results
-            weekend_analysis (Optional[Dict[str, Any]]): Weekend parameter results
-            
-        Returns:
-            str: Path to generated HTML report
         """
         logger.info("Generating comprehensive HTML report...")
         
@@ -99,14 +81,6 @@ class HTMLReportGenerator:
                                    weekend_analysis: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """
         Generate interactive Plotly charts for the report.
-        
-        Args:
-            portfolio_analysis (Dict[str, Any]): Portfolio analytics
-            correlation_analysis (Optional[Dict[str, Any]]): Correlation analysis
-            weekend_analysis (Optional[Dict[str, Any]]): Weekend analysis
-            
-        Returns:
-            Dict[str, str]: Dictionary of chart names to HTML strings
         """
         charts = {}
         
@@ -117,10 +91,11 @@ class HTMLReportGenerator:
             charts['correlation_analysis'] = interactive_charts.create_correlation_chart(correlation_analysis)
             charts['trend_performance'] = interactive_charts.create_trend_performance_chart(correlation_analysis)
             
-        if weekend_analysis and 'error' not in weekend_analysis:
-            charts['weekend_comparison'] = interactive_charts.create_weekend_comparison_chart(weekend_analysis)
-            charts['weekend_distribution'] = interactive_charts.create_weekend_distribution_chart(weekend_analysis)
-            
+        if weekend_analysis and not weekend_analysis.get('analysis_skipped'):
+             if 'error' not in weekend_analysis:
+                charts['weekend_comparison'] = interactive_charts.create_weekend_comparison_chart(weekend_analysis)
+                charts['weekend_distribution'] = interactive_charts.create_weekend_distribution_chart(weekend_analysis)
+        
         return charts
             
     def _prepare_template_data(self, 
@@ -130,16 +105,37 @@ class HTMLReportGenerator:
                              charts: Dict[str, str]) -> Dict[str, Any]:
         """Prepare data for HTML template."""
         
+        # AIDEV-NOTE-CLAUDE: Added helper to format weekend data for the template
+        formatted_weekend_data = self._format_weekend_data(weekend_analysis)
+
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'portfolio_analysis': portfolio_analysis,
             'correlation_analysis': correlation_analysis,
-            'weekend_analysis': weekend_analysis,
+            'weekend_analysis': formatted_weekend_data, # Use formatted data
             'charts': charts,
             'plotly_js': pyo.get_plotlyjs()
         }
         
         return template_data
+
+    def _format_weekend_data(self, weekend_analysis: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Formats the weekend analysis dictionary for easier rendering in Jinja2."""
+        if not weekend_analysis or weekend_analysis.get('analysis_skipped') or 'error' in weekend_analysis:
+            return {'is_valid': False, 'raw': weekend_analysis}
+        
+        # Extracting nested dictionaries for easier access in the template
+        comparison = weekend_analysis.get('performance_comparison', {})
+        return {
+            'is_valid': True,
+            'raw': weekend_analysis, # Keep raw data for flexibility
+            'metadata': weekend_analysis.get('analysis_metadata', {}),
+            'recommendations': weekend_analysis.get('recommendations', {}),
+            'classification': weekend_analysis.get('position_classification', {}),
+            'current_scenario': comparison.get('current_scenario', {}),
+            'alternative_scenario': comparison.get('alternative_scenario', {}),
+            'impact_analysis': comparison.get('impact_analysis', {}),
+        }
         
     def _render_html_template(self, template_data: Dict[str, Any]) -> str:
         """Render HTML template with data."""
@@ -148,10 +144,4 @@ class HTMLReportGenerator:
             return template.render(**template_data)
         except Exception as e:
             logger.error(f"Failed to render HTML template: {e}")
-            # AIDEV-NOTE-CLAUDE: Fallback to inline template is removed for clarity.
-            # Production code should handle this gracefully.
             raise
-
-
-if __name__ == "__main__":
-    print("HTML Report Generator module ready for integration")

@@ -90,22 +90,34 @@ def create_metrics_summary_chart(portfolio_analysis: Dict[str, Any]) -> str:
 def create_correlation_chart(correlation_analysis: Dict[str, Any]) -> str:
     """Create market correlation visualization."""
     try:
-        raw_data = correlation_analysis['raw_data']
-        portfolio_daily = raw_data['portfolio_daily_returns']
-        sol_daily = raw_data['sol_daily_data']
-        
+        # AIDEV-NOTE-CLAUDE: Deeper check for nested errors or missing data.
+        corr_metrics = correlation_analysis.get('correlation_metrics', {})
+        if not correlation_analysis or correlation_analysis.get('error') or corr_metrics.get('error'):
+            return "" # Return empty string, template handles the message.
+
+        raw_data = correlation_analysis.get('raw_data', {})
+        portfolio_daily = raw_data.get('portfolio_daily_returns')
+        sol_daily = raw_data.get('sol_daily_data')
+
+        if portfolio_daily is None or sol_daily is None or portfolio_daily.empty or sol_daily.empty:
+            return "<div class='skipped'>Insufficient raw data for correlation chart.</div>"
+            
         common_dates = portfolio_daily.index.intersection(sol_daily.index)
+        if len(common_dates) < 2:
+            return "<div class='skipped'>Insufficient common dates for correlation chart.</div>"
+            
         portfolio_aligned = portfolio_daily.loc[common_dates]
         sol_aligned = sol_daily.loc[common_dates, 'daily_return']
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=sol_aligned, y=portfolio_aligned, mode='markers', name='Daily Returns', marker=dict(size=8, color=portfolio_aligned, colorscale='RdYlGn', showscale=True, colorbar=dict(title="Portfolio Return")), hovertemplate='SOL Return: %{x:.2%}<br>Portfolio Return: %{y:.3f} SOL<extra></extra>'))
         
-        z = np.polyfit(sol_aligned, portfolio_aligned, 1)
-        p = np.poly1d(z)
-        fig.add_trace(go.Scatter(x=sol_aligned, y=p(sol_aligned), mode='lines', name='Trend Line', line=dict(color='red', width=2, dash='dash')))
+        # Check for sufficient points for trend line
+        if len(sol_aligned.dropna()) > 1:
+            z = np.polyfit(sol_aligned, portfolio_aligned, 1)
+            p = np.poly1d(z)
+            fig.add_trace(go.Scatter(x=sol_aligned, y=p(sol_aligned), mode='lines', name='Trend Line', line=dict(color='red', width=2, dash='dash')))
         
-        corr_metrics = correlation_analysis['correlation_metrics']
         fig.update_layout(title=f"Portfolio vs SOL Correlation (r={corr_metrics['pearson_correlation']:.3f}, p={corr_metrics['pearson_p_value']:.3f})", xaxis_title="SOL Daily Return", yaxis_title="Portfolio Daily Return (SOL)", template='plotly_white', height=500)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
@@ -117,7 +129,12 @@ def create_correlation_chart(correlation_analysis: Dict[str, Any]) -> str:
 def create_trend_performance_chart(correlation_analysis: Dict[str, Any]) -> str:
     """Create trend-based performance chart."""
     try:
-        trend_analysis = correlation_analysis['trend_analysis']
+        # AIDEV-NOTE-CLAUDE: Deeper check for nested errors and required keys like 'uptrend'.
+        trend_analysis = correlation_analysis.get('trend_analysis', {})
+        if (not correlation_analysis or correlation_analysis.get('error') or 
+            trend_analysis.get('error') or 'uptrend' not in trend_analysis):
+            return "" # Return empty string, template handles the message.
+
         trends = ['Uptrend', 'Downtrend']
         returns = [trend_analysis['uptrend']['mean_return'], trend_analysis['downtrend']['mean_return']]
         win_rates = [trend_analysis['uptrend']['win_rate'] * 100, trend_analysis['downtrend']['win_rate'] * 100]

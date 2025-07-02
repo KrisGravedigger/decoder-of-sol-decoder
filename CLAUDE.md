@@ -262,41 +262,42 @@ positions_df['timestamp_column'] = positions_df['timestamp_column'].apply(_parse
 
 🗂️ Project Structure
 project/
-├── extraction/             - data extraction and processing
+├── main.py                     # Main application entry point with interactive menu
+├── main_analyzer.py            # (Legacy) Alternative analysis entry point
+├── core/
+│   └── models.py               # Position class and other data models
+├── extraction/                 # Data extraction from logs
 │   ├── __init__.py
-│   └── log_extractor.py   - main parser with debug controls and close reason classification
-├── reporting/              - analytics and portfolio performance analysis
+│   ├── log_extractor.py        # Main parser with multi-wallet support
+│   └── parsing_utils.py        # Universal parsing utilities
+├── reporting/                  # Analytics and portfolio performance analysis
 │   ├── __init__.py
 │   ├── config/
-│   │   └── portfolio_config.yaml - infrastructure costs, risk-free rates, filters, weekend analysis
-│   ├── output/ - generated reports and charts directory
-│   │   ├── charts/ - timestamped PNG visualizations
-│   │   └── portfolio_analysis.log
-│   ├── templates/ - **HTML templates for reports** 🆕
-│   │   └── comprehensive_report.html 🆕
-│   ├── visualizations/ - **chart plotting modules**
+│   │   └── portfolio_config.yaml
+│   ├── templates/
+│   │   └── comprehensive_report.html
+│   ├── visualizations/         # Chart plotting modules
 │   │   ├── __init__.py
 │   │   ├── cost_impact.py
 │   │   ├── drawdown.py
 │   │   ├── equity_curve.py
-│   │   ├── interactive_charts.py - **Plotly charts for HTML report** 🆕
+│   │   ├── interactive_charts.py # Plotly charts for HTML report
 │   │   └── strategy_heatmap.py
-│   ├── infrastructure_cost_analyzer.py - daily cost allocation and Moralis API
-│   ├── portfolio_analytics.py - analysis engine for portfolio data
-│   ├── chart_generator.py - charting orchestrator for static PNGs
-│   ├── orchestrator.py - **Main workflow orchestrator** 🆕
-│   ├── strategy_instance_detector.py - groups positions into strategy instances
-│   ├── data_loader.py - position data loading and cleaning
-│   ├── metrics_calculator.py - financial metrics calculation
-│   ├── text_reporter.py - text report generation
-│   ├── market_correlation_analyzer.py - analysis of portfolio vs market correlation
-│   ├── weekend_parameter_analyzer.py - **weekend parameter impact analysis** 🆕
-│   └── html_report_generator.py - **HTML report generation orchestrator** (refactored) 🆕
-├── portfolio_main.py       - **Main CLI and interactive menu** 🆕
-├── strategy_analyzer.py    - LP strategy simulation engine for Meteora DLMM
-├── models.py              - Position class and data models
-├── parsing_utils.py       - universal parsing utilities
-└── debug_analyzer.py      - context analysis and export system
+│   ├── orchestrator.py         # Core logic engine for the reporting workflow
+│   ├── analysis_runner.py      # Runs Spot vs. Bid-Ask simulation for all positions
+│   ├── data_loader.py          # Position data loading and cleaning
+│   ├── html_report_generator.py # HTML report generation orchestrator
+│   ├── infrastructure_cost_analyzer.py # Daily cost allocation and Moralis API
+│   ├── market_correlation_analyzer.py  # Analysis of portfolio vs market correlation
+│   ├── metrics_calculator.py   # Financial metrics calculation
+│   ├── strategy_instance_detector.py # Groups positions into strategy instances
+│   └── text_reporter.py        # Text report generation
+├── simulations/                # "What-if" simulation engines
+│   ├── spot_vs_bidask_simulator.py # Simulates Spot vs Bid-Ask strategies
+│   └── weekend_simulator.py    # Simulates weekend parameter impact
+└── tools/                      # Developer and utility tools
+    ├── api_checker.py          # Checks Moralis API connectivity
+    └── debug_analyzer.py       # Context analysis and export system
 
 File Handling Rules
 
@@ -305,8 +306,8 @@ Cache: automatic Moralis API response caching (JSON files)
 Reports: individual text reports + collective CSV
 
 🏃‍♂️ Project Status
-Last Update: 2025-07-02
-Current Version: Market Analysis & Reporting Module v3.3 (Complete)
+Last Update: 2025-07-03
+Current Version: v3.5 - Architecture Stabilization & Resiliency
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved 33%)
@@ -340,6 +341,12 @@ Enhanced CSV structure with wallet_id and source_file tracking ✅
 - **Moralis API integration**: historical SOL/USDC price data with caching ✅
 - **Custom timestamp parsing**: handles non-standard formats (MM/DD-HH:MM:SS, 24:XX:XX) ✅
 - **Robust error handling**: fallback mechanisms for missing data and CSV structure variations ✅
+
+**Architecture Stabilization & Resiliency:**
+- **Centralized Entry Point**: `main.py` provides a single, interactive menu to run all parts of the pipeline ✅
+- **Robust API Key Handling**: Dependency injection ensures the API key is passed securely and used only when needed ✅
+- **Cache-Only Mode**: Full application support for running in an offline/cached mode for testing and cost savings ✅
+- **Error Resiliency (Graceful Degradation)**: The HTML report generation no longer crashes on missing data (e.g., from market analysis in cache-only mode), instead displaying informative messages ✅
 
 Completed in v2.0:
 
@@ -720,3 +727,19 @@ Advanced Features:
 **System Status:** Weekend Parameter Analysis v2.1 - Fully Functional and Business-Correct ✅
 
 **Ready for Next Priority:** TP/SL Optimization Module - ML-driven take profit and stop loss level optimization 🚀
+
+**2025-07-03: Post-Refactoring Stabilization & Error Resiliency**
+
+**Goal:** Fully stabilize the application after a major architectural refactoring, ensure correct data flow, and implement error resiliency mechanisms for missing API data.
+
+**Achieved:**
+- **Centralized Architecture:** Refactored the application to use `main.py` as the single entry point with an interactive menu, orchestrating the entire analysis pipeline.
+- **Fixed API Access:** Implemented a dependency injection pattern for the Moralis API key, eliminating `401 Unauthorized` errors and stabilizing connections.
+- **Implemented "Cache-Only" Mode:** Added an `api_settings.cache_only` option in `portfolio_config.yaml`, allowing the application to run entirely from cached data for testing and saving API credits.
+- **Restored Full Analysis Pipeline:** Reintegrated the previously omitted `strategy_instance_detector` module into the main workflow, ensuring the `strategy_instances.csv` file is generated correctly.
+- **Implemented "Graceful Degradation":**
+  - The reporting module (`html_report_generator`, `interactive_charts`) is now resilient to failures caused by missing data (e.g., market correlation analysis in cache-only mode).
+  - Instead of a crash, the application now successfully generates the full HTML report, displaying "Data Unavailable" messages in sections where analysis could not be completed.
+- **Unified User Interface:** Translated all UI elements and prompts in `main.py` to English, adhering to the project's critical rules.
+
+**Status:** Architecture stabilized. The application is fully functional, robust, and resilient to common errors from missing cache data. It is ready for further development. ✅

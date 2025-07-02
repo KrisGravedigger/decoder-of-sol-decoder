@@ -2,27 +2,28 @@
 Text Reporter for Portfolio Analytics
 
 Generates formatted, human-readable text summaries of the portfolio
-analysis, including performance metrics and cost impact.
+analysis, including performance metrics, cost impact, and simulation results.
 """
 
 from datetime import datetime
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
-def generate_text_reports(analysis_result: Dict[str, Any]) -> Tuple[str, str]:
+def generate_portfolio_and_cost_reports(analysis_result: Dict[str, Any]) -> Tuple[str, str]:
     """
-    Generate formatted text reports from analysis results.
+    Generate portfolio summary and infrastructure impact reports.
+    This function replaces the old generate_text_reports.
 
     Args:
-        analysis_result (Dict[str, Any]): Complete analysis results.
+        analysis_result (Dict[str, Any]): Portfolio analysis results.
 
     Returns:
         Tuple[str, str]: (portfolio_summary, infrastructure_impact) report content.
     """
-    metadata = analysis_result['analysis_metadata']
-    sol = analysis_result['sol_denomination']
-    usdc = analysis_result['usdc_denomination']
-    currency = analysis_result['currency_comparison']
-    costs = analysis_result['infrastructure_cost_impact']
+    metadata = analysis_result.get('analysis_metadata', {})
+    sol = analysis_result.get('sol_denomination', {})
+    usdc = analysis_result.get('usdc_denomination', {})
+    currency = analysis_result.get('currency_comparison', {})
+    costs = analysis_result.get('infrastructure_cost_impact', {})
 
     portfolio_summary = f"""=== PORTFOLIO ANALYTICS REPORT ===
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -41,11 +42,6 @@ USDC DENOMINATION ANALYSIS:
 - Sharpe Ratio: {usdc.get('sharpe_ratio', 0):.2f}
 - Max Drawdown: {usdc.get('max_drawdown_percent', 0):.1f}%
 - Net PnL After Costs: {usdc.get('net_pnl_after_costs', 0):+,.2f} USDC
-
-INFRASTRUCTURE COST IMPACT:
-- Period Cost: ${costs.get('total_cost_usd', 0):,.2f} USD ({metadata.get('analysis_period_days', 0)} days × ${costs.get('daily_cost_usd', 0):.2f})
-- Cost as % of Gross PnL: {costs.get('cost_impact_percent', 0):.1f}%
-- Break-even Days: {costs.get('break_even_days', 0):.0f} days
 
 CURRENCY COMPARISON:
 - SOL Price Change: {currency.get('sol_price_change_period', 0):+.1f}%
@@ -70,12 +66,6 @@ COST STRUCTURE:
 - Total Period Cost: ${costs.get('total_cost_usd', 0):,.2f} USD
 - Total Period Cost: {costs.get('total_cost_sol', 0):.3f} SOL
 
-COST BREAKDOWN:
-- VPS Hosting: $50.00/month
-- RPC Endpoints: $100.00/month
-- Bot Subscription: $200.00/month
-- Monthly Total: ${monthly_total_cost:,.2f} USD
-
 PERFORMANCE IMPACT:
 - Gross PnL (SOL): {costs.get('gross_pnl_sol', 0):+.3f} SOL
 - Infrastructure Costs: -{costs.get('total_cost_sol', 0):.3f} SOL
@@ -86,11 +76,70 @@ EFFICIENCY METRICS:
 - Break-even Period: {costs.get('break_even_days', 0):.0f} days
 - Positions Analyzed: {costs.get('positions_analyzed', 0)}
 - Average Cost per Position: ${costs.get('total_cost_usd', 0) / max(costs.get('positions_analyzed', 1), 1):.2f} USD
-
-ROI ANALYSIS:
-- Monthly Infrastructure: ${monthly_total_cost:,.2f} USD
-- Monthly Net Profit: ${monthly_net_profit_usdc:,.2f} USDC (projected)
-- Infrastructure ROI: {infrastructure_roi:.1f}% monthly
 """
 
     return portfolio_summary, infrastructure_impact
+
+
+def generate_weekend_simulation_report(weekend_analysis: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Generate a detailed text report for the weekend parameter simulation.
+
+    Args:
+        weekend_analysis (Optional[Dict[str, Any]]): The results from WeekendSimulator.
+
+    Returns:
+        Optional[str]: A formatted text report, or None if analysis was skipped or failed.
+    """
+    if not weekend_analysis or weekend_analysis.get('analysis_skipped') or 'error' in weekend_analysis:
+        return None
+
+    meta = weekend_analysis.get('analysis_metadata', {})
+    classification = weekend_analysis.get('position_classification', {})
+    comparison = weekend_analysis.get('performance_comparison', {})
+    recommendations = weekend_analysis.get('recommendations', {})
+    
+    if not all([meta, classification, comparison, recommendations]):
+        return "Weekend analysis data is incomplete."
+        
+    current_scenario = comparison.get('current_scenario', {})
+    alternative_scenario = comparison.get('alternative_scenario', {})
+    impact = comparison.get('impact_analysis', {})
+
+    summary = [
+        "=== WEEKEND PARAMETER SIMULATION REPORT ===",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+        
+        "--- CONFIGURATION ---",
+        f"Weekend Parameter: {'ENABLED' if meta.get('weekend_size_reduction', 0) else 'DISABLED'}",
+        f"Size Reduction: {meta.get('size_reduction_percentage', 0)}%",
+        f"Size Multiplier: {meta.get('size_multiplier', 1.0):.2f}x\n",
+
+        "--- POSITION CLASSIFICATION ---",
+        f"Total Positions Analyzed: {meta.get('total_positions', 0)}",
+        f"Weekend-Opened Positions: {classification.get('weekend_opened', {}).get('count', 0)} ({classification.get('weekend_opened', {}).get('percentage', 0):.1f}%)",
+        f"Weekday-Opened Positions: {classification.get('weekday_opened', {}).get('count', 0)} ({classification.get('weekday_opened', {}).get('percentage', 0):.1f}%)\n",
+
+        "--- SCENARIO COMPARISON ---",
+        f"CURRENT SCENARIO: {current_scenario.get('name', 'N/A')}",
+        f"  - Total PnL: {current_scenario.get('metrics', {}).get('total_pnl', 0):+.3f} SOL",
+        f"  - Average ROI: {current_scenario.get('metrics', {}).get('average_roi', 0)*100:+.2f}%",
+        f"  - Sharpe Ratio: {current_scenario.get('metrics', {}).get('sharpe_ratio', 0):.3f}\n",
+
+        f"ALTERNATIVE SCENARIO: {alternative_scenario.get('name', 'N/A')}",
+        f"  - Total PnL: {alternative_scenario.get('metrics', {}).get('total_pnl', 0):+.3f} SOL",
+        f"  - Average ROI: {alternative_scenario.get('metrics', {}).get('average_roi', 0)*100:+.2f}%",
+        f"  - Sharpe Ratio: {alternative_scenario.get('metrics', {}).get('sharpe_ratio', 0):.3f}\n",
+
+        "--- IMPACT ANALYSIS (Alternative vs. Current) ---",
+        f"PnL Difference: {impact.get('total_pnl_difference_sol', 0):+.3f} SOL ({impact.get('pnl_improvement_percent', 0):+.1f}%)",
+        f"ROI Difference: {impact.get('roi_difference', 0)*100:+.2f}%",
+        f"Sharpe Difference: {impact.get('sharpe_difference', 0):+.3f}\n",
+
+        "--- RECOMMENDATION ---",
+        f"Primary Recommendation: {recommendations.get('primary_recommendation', 'N/A')}",
+        f"Confidence Level: {recommendations.get('confidence_level', 'N/A')}",
+        f"Justification: {recommendations.get('explanation', 'N/A')}"
+    ]
+    
+    return "\n".join(summary)

@@ -8,100 +8,68 @@ analysis components and generating comprehensive reports.
 import logging
 import os
 import sys
-import json
 import yaml
 from datetime import datetime
-from typing import Dict, Any, Tuple
-import pandas as pd
+from typing import Dict, Any, Tuple, List, Optional
 
-# Add reporting module to path if not already there
-# AIDEV-NOTE-CLAUDE: This ensures modules can be found when run from project root
-script_dir = os.path.dirname(os.path.abspath(__file__))
-if script_dir not in sys.path:
-    sys.path.append(script_dir)
+# AIDEV-NOTE-CLAUDE: This ensures project root is on the path for module resolution
+# Corrected path to handle nested structure
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-from portfolio_analytics import PortfolioAnalytics
-from chart_generator import ChartGenerator
-from market_correlation_analyzer import MarketCorrelationAnalyzer
-from weekend_parameter_analyzer import WeekendParameterAnalyzer
-from html_report_generator import HTMLReportGenerator
-from data_loader import load_and_prepare_positions
-from metrics_calculator import (
-    calculate_daily_returns,
-    calculate_sol_metrics,
-    calculate_usdc_metrics,
-    calculate_currency_comparison
-)
+from reporting.portfolio_analytics import PortfolioAnalytics
+from reporting.chart_generator import ChartGenerator
+from reporting.market_correlation_analyzer import MarketCorrelationAnalyzer
+from reporting.html_report_generator import HTMLReportGenerator
+from reporting.data_loader import load_and_prepare_positions
+from reporting.text_reporter import generate_portfolio_and_cost_reports, generate_weekend_simulation_report
+from simulations.weekend_simulator import WeekendSimulator
+from reporting.strategy_instance_detector import run_instance_detection
 
 logger = logging.getLogger(__name__)
 
 class PortfolioAnalysisOrchestrator:
-    """
-    Main orchestrator for complete portfolio analysis workflow.
+    """Main orchestrator for complete portfolio analysis workflow."""
     
-    Coordinates data loading, analysis, reporting, and visualization
-    to provide comprehensive portfolio performance insights.
-    """
-    
-    def __init__(self, config_path: str = "reporting/config/portfolio_config.yaml"):
-        """
-        Initialize portfolio analysis orchestrator.
-        
-        Args:
-            config_path (str): Path to configuration file
-        """
+    def __init__(self, config_path: str = "reporting/config/portfolio_config.yaml", api_key: Optional[str] = None):
+        """Initialize orchestrator."""
         self.config_path = config_path
         self.config = self._load_config()
-        self.analytics = None
-        self.chart_generator = None
-        self._initialize_components()
+        # AIDEV-NOTE-CLAUDE: API key is now passed during initialization.
+        self.api_key = api_key
+        if not self.api_key:
+            logger.warning("API key not provided to orchestrator. API-dependent features may fail.")
+        
+        # AIDEV-NOTE-CLAUDE: Pass the API key to downstream analytics modules.
+        self.analytics = PortfolioAnalytics(self.config_path, api_key=self.api_key)
+        self.chart_generator = ChartGenerator(self.config_path)
+        self.output_dir = "reporting/output"
         logger.info("Portfolio Analysis Orchestrator initialized")
         
     def _load_config(self) -> Dict:
-        """Load YAML configuration with error handling."""
+        """Load YAML configuration."""
         try:
             with open(self.config_path, 'r') as f:
                 return yaml.safe_load(f)
         except FileNotFoundError:
             logger.warning(f"Config file not found: {self.config_path}, using defaults")
             return {}
-        
-    def _initialize_components(self):
-        """Initialize analysis components."""
-        try:
-            self.analytics = PortfolioAnalytics(self.config_path)
-            self.chart_generator = ChartGenerator(self.config_path)
-        except Exception as e:
-            logger.error(f"Component initialization failed: {e}")
-            raise
 
     def _should_skip_weekend_analysis(self) -> Tuple[bool, str]:
-        """
-        Check if weekend analysis should be skipped based on configuration.
-        
-        Returns:
-            Tuple[bool, str]: (should_skip, reason)
-        """
+        """Check if weekend analysis should be skipped."""
         weekend_config = self.config.get('weekend_analysis', {})
         size_reduction_percentage = weekend_config.get('size_reduction_percentage', 80)
         
         if size_reduction_percentage == 0:
             return True, "size_reduction_percentage set to 0 in configuration"
-        
         return False, ""
 
     def run_comprehensive_analysis(self, positions_file: str) -> Dict[str, Any]:
-        """
-        Run comprehensive analysis including portfolio, correlation, weekend analysis and HTML report.
-        
-        AIDEV-NOTE-CLAUDE: Optimized to load CSV only once - major performance improvement
-        
-        Args:
-            positions_file (str): Path to positions CSV file
-            
-        Returns:
-            Dict[str, Any]: Complete comprehensive analysis results
-        """
+        """Run comprehensive analysis including portfolio, correlation, weekend, and HTML report."""
+        if not self.api_key and not self.config.get('api_settings', {}).get('cache_only', False):
+            return {'status': 'ERROR', 'error': 'API key is missing and not in cache-only mode.'}
+
         logger.info("=" * 60)
         logger.info("STARTING COMPREHENSIVE ANALYSIS")
         logger.info("=" * 60)
@@ -109,38 +77,39 @@ class PortfolioAnalysisOrchestrator:
         start_time = datetime.now()
         
         try:
-            logger.info("Step 0: Loading and preparing positions data...")
+            # AIDEV-NOTE-CLAUDE: Ensure strategy instances are up-to-date before reporting.
+            logger.info("Step 0: Running strategy instance detection...")
+            run_instance_detection()
+
             positions_df = load_and_prepare_positions(positions_file, self.analytics.min_threshold)
             if positions_df.empty:
-                return {'error': f'No positions data after loading and preparing from {positions_file}'}
+                return {'status': 'ERROR', 'error': 'No positions data after loading'}
 
             logger.info("Step 1: Running portfolio analysis...")
-            portfolio_result = self._analyze_dataframe(positions_df)
-            if 'error' in portfolio_result:
-                return portfolio_result
-
+            portfolio_result = self.analytics.analyze_dataframe(positions_df)
+            if 'error' in portfolio_result: return {'status': 'ERROR', **portfolio_result}
+            
+            # --- Text and Chart Generation (Portfolio) ---
             logger.info("Step 1a: Generating portfolio reports and charts...")
-            saved_files = self.analytics.generate_and_save_reports(portfolio_result)
+            report_files, timestamp = self._generate_portfolio_reports(portfolio_result)
             chart_files = self.chart_generator.generate_all_charts(portfolio_result)
 
             logger.info("Step 2: Running market correlation analysis...")
-            correlation_analyzer = MarketCorrelationAnalyzer(self.config_path)
+            correlation_analyzer = MarketCorrelationAnalyzer(self.config_path, api_key=self.api_key)
             correlation_result = correlation_analyzer.analyze_market_correlation(positions_df)
             
-            logger.info("Step 3: Running weekend parameter analysis...")
-            # AIDEV-NOTE-CLAUDE: Check if weekend analysis should be skipped
+            logger.info("Step 3: Running weekend parameter simulation...")
             skip_weekend, skip_reason = self._should_skip_weekend_analysis()
             
             if skip_weekend:
-                logger.warning(f"Weekend parameter analysis SKIPPED: {skip_reason}")
-                weekend_result = {
-                    'analysis_skipped': True,
-                    'reason': skip_reason,
-                    'message': 'Weekend parameter analysis was skipped due to configuration settings'
-                }
+                logger.warning(f"Weekend simulation SKIPPED: {skip_reason}")
+                weekend_result = {'analysis_skipped': True, 'reason': skip_reason}
             else:
-                weekend_analyzer = WeekendParameterAnalyzer(self.config_path)
-                weekend_result = weekend_analyzer.analyze_weekend_parameter_impact(positions_df)
+                weekend_simulator = WeekendSimulator(self.config_path)
+                weekend_result = weekend_simulator.run_simulation(positions_df)
+                weekend_report_path = self._generate_weekend_report(weekend_result, timestamp)
+                if weekend_report_path:
+                    report_files['weekend_simulation'] = weekend_report_path
 
             logger.info("Step 4: Generating comprehensive HTML report...")
             html_generator = HTMLReportGenerator()
@@ -152,16 +121,10 @@ class PortfolioAnalysisOrchestrator:
 
             execution_time = (datetime.now() - start_time).total_seconds()
             comprehensive_result = {
-                'status': 'SUCCESS',
-                'execution_time_seconds': execution_time,
-                'portfolio_analysis': portfolio_result,
-                'correlation_analysis': correlation_result,
+                'status': 'SUCCESS', 'execution_time_seconds': execution_time,
+                'portfolio_analysis': portfolio_result, 'correlation_analysis': correlation_result,
                 'weekend_analysis': weekend_result,
-                'files_generated': {
-                    'html_report': html_file,
-                    'portfolio_reports': saved_files,
-                    'portfolio_charts': chart_files,
-                }
+                'files_generated': {'html_report': html_file, 'text_reports': report_files, 'charts': chart_files}
             }
             self._log_comprehensive_summary(comprehensive_result)
             return comprehensive_result
@@ -170,149 +133,80 @@ class PortfolioAnalysisOrchestrator:
             logger.error(f"Comprehensive analysis failed: {e}", exc_info=True)
             return {'status': 'ERROR', 'error': str(e)}
 
-    def run_weekend_analysis_only(self, positions_file: str) -> Dict[str, Any]:
-        """
-        Run only weekend parameter analysis.
+    def _generate_portfolio_reports(self, analysis_result: Dict[str, Any]) -> Tuple[Dict[str, str], str]:
+        """Generate and save portfolio and cost text reports."""
+        timestamp = datetime.now().strftime(self.config.get('visualization', {}).get('timestamp_format', '%Y%m%d_%H%M%S'))
+        portfolio_summary, infrastructure_impact = generate_portfolio_and_cost_reports(analysis_result)
         
-        Args:
-            positions_file (str): Path to positions CSV file
-            
-        Returns:
-            Dict[str, Any]: Weekend analysis results
-        """
-        logger.info("Running weekend parameter analysis only...")
-        
+        saved_files = {}
         try:
-            # Check if analysis should be skipped
-            skip_weekend, skip_reason = self._should_skip_weekend_analysis()
+            portfolio_file = os.path.join(self.output_dir, f"portfolio_summary_{timestamp}.txt")
+            with open(portfolio_file, 'w') as f: f.write(portfolio_summary)
+            saved_files['portfolio_summary'] = portfolio_file
             
-            if skip_weekend:
-                logger.warning(f"Weekend parameter analysis SKIPPED: {skip_reason}")
-                return {
-                    'analysis_skipped': True,
-                    'reason': skip_reason,
-                    'message': 'Weekend parameter analysis was skipped due to configuration settings'
-                }
-            
-            positions_df = load_and_prepare_positions(positions_file, self.analytics.min_threshold)
-            if positions_df.empty:
-                return {'error': f'No positions data after loading and preparing from {positions_file}'}
-                
-            weekend_analyzer = WeekendParameterAnalyzer(self.config_path)
-            result = weekend_analyzer.analyze_weekend_parameter_impact(positions_df)
-            
-            if 'error' not in result:
-                summary = weekend_analyzer.generate_weekend_analysis_summary(result)
-                logger.info("Weekend analysis summary:")
-                for line in summary.split('\n'):
-                    logger.info(line)
-                    
-            return result
-            
+            infra_file = os.path.join(self.output_dir, f"infrastructure_impact_{timestamp}.txt")
+            with open(infra_file, 'w') as f: f.write(infrastructure_impact)
+            saved_files['infrastructure_impact'] = infra_file
+
+            logger.info("Successfully saved portfolio and cost reports.")
+            return saved_files, timestamp
         except Exception as e:
-            logger.error(f"Weekend analysis failed: {e}", exc_info=True)
-            return {'error': str(e)}
-
-    def _analyze_dataframe(self, positions_df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Perform analysis on a DataFrame directly (internal helper).
-        """
-        if positions_df.empty:
-            return {'error': 'No positions data available for analysis'}
-
-        positions_df = self.analytics.cost_analyzer.allocate_costs_to_positions(positions_df)
-        
-        min_date = positions_df['open_timestamp'].min().strftime("%Y-%m-%d")
-        max_date = positions_df['close_timestamp'].max().strftime("%Y-%m-%d")
-        period_days = (positions_df['close_timestamp'].max() - positions_df['open_timestamp'].min()).days
-        
-        sol_rates = self.analytics.cost_analyzer.get_sol_usdc_rates(min_date, max_date)
-        daily_df = calculate_daily_returns(positions_df)
-        
-        risk_free_rates = self.analytics.config['portfolio_analysis']['risk_free_rates']
-        sol_metrics = calculate_sol_metrics(positions_df, daily_df, risk_free_rates['sol_staking'])
-        usdc_metrics = calculate_usdc_metrics(positions_df, sol_rates, risk_free_rates['usdc_staking'])
-        currency_comparison = calculate_currency_comparison(sol_rates, sol_metrics, usdc_metrics, positions_df)
-        cost_summary = self.analytics.cost_analyzer.generate_cost_summary(positions_df, period_days)
-        
-        return {
-            'analysis_metadata': {
-                'generated_timestamp': datetime.now().isoformat(),
-                'analysis_period_days': period_days, 'start_date': min_date,
-                'end_date': max_date, 'positions_analyzed': len(positions_df)
-            },
-            'sol_denomination': sol_metrics,
-            'usdc_denomination': usdc_metrics,
-            'currency_comparison': currency_comparison,
-            'infrastructure_cost_impact': cost_summary,
-            'raw_data': {'positions_df': positions_df, 'daily_returns_df': daily_df, 'sol_rates': sol_rates}
-        }
+            logger.error(f"Failed to save main reports: {e}")
+            return {}, timestamp
+            
+    def _generate_weekend_report(self, weekend_result: Dict[str, Any], timestamp: str) -> Optional[str]:
+        """Generate and save the weekend simulation text report."""
+        report_content = generate_weekend_simulation_report(weekend_result)
+        if report_content:
+            try:
+                filepath = os.path.join(self.output_dir, f"weekend_simulation_{timestamp}.txt")
+                with open(filepath, 'w') as f: f.write(report_content)
+                logger.info(f"Successfully saved weekend simulation report: {filepath}")
+                return filepath
+            except Exception as e:
+                logger.error(f"Failed to save weekend report: {e}")
+        return None
 
     def run_quick_analysis(self, positions_file: str) -> Dict[str, Any]:
-        """Run quick analysis without chart generation for faster results."""
+        """Run quick analysis without chart generation."""
+        if not self.api_key:
+            return {'status': 'ERROR', 'error': 'API key is missing, cannot run quick analysis.'}
         logger.info("Running quick portfolio analysis (no charts)...")
         try:
-            return self.analytics.analyze_and_report(positions_file)
+            positions_df = load_and_prepare_positions(positions_file, self.analytics.min_threshold)
+            analysis_result = self.analytics.analyze_dataframe(positions_df)
+            if 'error' in analysis_result:
+                return {'status': 'ERROR', **analysis_result}
+            
+            saved_files, _ = self._generate_portfolio_reports(analysis_result)
+            return {'status': 'SUCCESS', 'files_generated': saved_files}
+
         except Exception as e:
             logger.error(f"Quick analysis failed: {e}", exc_info=True)
-            return {'error': str(e)}
-
-    def analyze_specific_period(self, start_date: str, end_date: str, positions_file: str) -> Dict[str, Any]:
-        """Analyze portfolio for specific date range."""
-        logger.info(f"Analyzing portfolio for period: {start_date} to {end_date}")
-        try:
-            positions_df = load_and_prepare_positions(positions_file, self.analytics.min_threshold)
+            return {'status': 'ERROR', 'error': str(e)}
             
-            start_dt = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            
-            filtered_positions = positions_df[
-                (positions_df['close_timestamp'] >= start_dt) & 
-                (positions_df['close_timestamp'] <= end_dt)
-            ].copy()
-            
-            logger.info(f"Filtered to {len(filtered_positions)} positions in specified period")
-            if filtered_positions.empty:
-                return {'error': f'No positions found for period {start_date} to {end_date}'}
-            
-            analysis_result = self._analyze_dataframe(filtered_positions)
-            if 'error' in analysis_result:
-                return analysis_result
-                
-            saved_files = self.analytics.generate_and_save_reports(analysis_result)
-            chart_files = self.chart_generator.generate_all_charts(analysis_result)
-            
-            analysis_result.pop('raw_data', None) # Don't return raw data
-            analysis_result['files_generated'] = {'reports': saved_files, 'charts': chart_files}
-            return analysis_result
-
-        except Exception as e:
-            logger.error(f"Period analysis failed: {e}", exc_info=True)
-            return {'error': str(e)}
+    def analyze_specific_period(self, start_date_str: str, end_date_str: str, positions_file: str):
+        """Placeholder for period-specific analysis."""
+        logger.info(f"Analyzing from {start_date_str} to {end_date_str}. This feature is not fully implemented yet.")
+        # Future implementation would filter positions_df by date and run analysis.
+        pass
 
     def _log_comprehensive_summary(self, result: Dict[str, Any]):
-        """Log comprehensive analysis summary."""
+        """Log a summary of the comprehensive analysis."""
         logger.info("COMPREHENSIVE ANALYSIS SUMMARY:")
+        sol_metrics = result.get('portfolio_analysis', {}).get('sol_denomination', {})
+        logger.info(f"  Portfolio PnL: {sol_metrics.get('total_pnl_sol', 0):+.3f} SOL, Sharpe: {sol_metrics.get('sharpe_ratio', 0):.2f}")
         
-        portfolio = result.get('portfolio_analysis', {})
-        if portfolio.get('sol_denomination'):
-            sol = portfolio['sol_denomination']
-            logger.info(f"  Portfolio PnL: {sol.get('total_pnl_sol', 0):+.3f} SOL, Sharpe: {sol.get('sharpe_ratio', 0):.2f}")
-        
-        correlation = result.get('correlation_analysis', {})
-        if 'error' not in correlation:
-            corr_metrics = correlation.get('correlation_metrics', {})
-            logger.info(f"  SOL Correlation: {corr_metrics.get('pearson_correlation', 0):.3f} (significant: {corr_metrics.get('is_significant', False)})")
+        corr_metrics = result.get('correlation_analysis', {}).get('correlation_metrics', {})
+        if corr_metrics:
+            logger.info(f"  SOL Correlation: {corr_metrics.get('pearson_correlation', 0):.3f}")
             
-        weekend = result.get('weekend_analysis', {})
-        if 'analysis_skipped' in weekend:
-            logger.info(f"  Weekend Analysis: SKIPPED ({weekend.get('reason', 'unknown reason')})")
-        elif 'error' not in weekend:
-            recs = weekend.get('recommendations', {})
-            impact = weekend.get('performance_comparison', {}).get('impact_analysis', {})
-            logger.info(f"  Weekend Param: {recs.get('primary_recommendation', 'N/A')} ({impact.get('total_pnl_difference_sol', 0):+.3f} SOL impact)")
-        else:
-            logger.info(f"  Weekend Analysis: ERROR ({weekend.get('error', 'unknown error')})")
+        weekend_result = result.get('weekend_analysis', {})
+        if weekend_result.get('analysis_skipped'):
+            logger.info(f"  Weekend Simulation: SKIPPED ({weekend_result.get('reason')})")
+        elif 'error' not in weekend_result:
+            rec = weekend_result.get('recommendations', {})
+            logger.info(f"  Weekend Param Rec: {rec.get('primary_recommendation', 'N/A')}")
             
         logger.info(f"  HTML Report: {result.get('files_generated', {}).get('html_report', 'N/A')}")
         logger.info(f"  Execution Time: {result.get('execution_time_seconds', 0):.1f} seconds")

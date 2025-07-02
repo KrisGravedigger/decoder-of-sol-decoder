@@ -42,3 +42,8 @@ weekend_analysis:
   # - Only positions opened during weekend (Sat/Sun UTC) are affected by simulation
   # - Weekday positions remain identical in both scenarios
   # - Weekend classification based on open_timestamp, not duration
+
+api_settings:
+  # set 'true' to turn off all the API queries and use only /price_cache/ files.
+  # set 'false'to turn on API queries.
+  cache_only: true
