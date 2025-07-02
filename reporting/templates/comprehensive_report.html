@@ -1,0 +1,163 @@
+<!-- FILE: reporting/templates/comprehensive_report.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comprehensive Portfolio Analysis Report</title>
+    <script>{{ plotly_js | safe }}</script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f8f9fa; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        h1, h2, h3 { color: #2c3e50; border-bottom: 2px solid #eef2f5; padding-bottom: 10px; margin-top: 40px; }
+        h1 { font-size: 2.2em; text-align: center; border: none; margin-bottom: 0;}
+        h2 { font-size: 1.8em; }
+        h3 { font-size: 1.4em; }
+        .report-meta { text-align: center; color: #7f8c8d; margin-bottom: 40px; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .metric-card { background: #ecf0f1; padding: 20px; border-radius: 5px; }
+        .metric-card h3 { margin-top: 0; }
+        .metric-card .value { font-size: 2em; font-weight: bold; color: #34495e; }
+        .metric-card .label { font-size: 1em; color: #7f8c8d; }
+        .positive { color: #27ae60; }
+        .negative { color: #c0392b; }
+        .plotly-chart { width: 100%; min-height: 450px; }
+        .section { margin-bottom: 40px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f2f2f2; font-weight: bold; }
+        .recommendation { padding: 20px; border-radius: 5px; margin-top: 20px; }
+        .rec-enable, .rec-disable, .rec-keep { color: #fff; }
+        .rec-enable { background-color: #27ae60; } /* Green */
+        .rec-disable { background-color: #e67e22; } /* Orange */
+        .rec-keep { background-color: #3498db; } /* Blue */
+        .skipped { background-color: #bdc3c7; color: #7f8c8d; padding: 15px; border-radius: 5px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Comprehensive Portfolio Analysis</h1>
+        <p class="report-meta">Generated on: {{ timestamp }}</p>
+
+        <!-- Executive Summary -->
+        <div class="section">
+            <h2>Executive Summary</h2>
+            <div class="grid-container">
+                <div class="metric-card">
+                    <h3>Net PnL (SOL)</h3>
+                    <p class="value {% if portfolio_analysis.sol_denomination.net_pnl_after_costs > 0 %}positive{% else %}negative{% endif %}">
+                        {{ "%.3f"|format(portfolio_analysis.sol_denomination.net_pnl_after_costs) }}
+                    </p>
+                    <p class="label">After infrastructure costs</p>
+                </div>
+                <div class="metric-card">
+                    <h3>Sharpe Ratio (SOL)</h3>
+                    <p class="value">{{ "%.2f"|format(portfolio_analysis.sol_denomination.sharpe_ratio) }}</p>
+                    <p class="label">Risk-adjusted return</p>
+                </div>
+                <div class="metric-card">
+                    <h3>SOL Correlation</h3>
+                    {# AIDEV-NOTE-CLAUDE: Robust check for nested data before rendering #}
+                    {% if correlation_analysis and not correlation_analysis.get('error') and correlation_analysis.get('correlation_metrics') and not correlation_analysis.get('correlation_metrics').get('error') %}
+                        <p class="value">{{ "%.3f"|format(correlation_analysis.correlation_metrics.pearson_correlation) }}</p>
+                        <p class="label">Pearson correlation with SOL market</p>
+                    {% else %}
+                        <p class="value">N/A</p>
+                        <p class="label">Data unavailable</p>
+                    {% endif %}
+                </div>
+                <div class="metric-card">
+                    <h3>Weekend Param Rec.</h3>
+                    {% if weekend_analysis.is_valid %}
+                    <p class="value">{{ weekend_analysis.recommendations.primary_recommendation | replace('_', ' ') }}</p>
+                    <p class="label">Impact: {{ "%.2f"|format(weekend_analysis.impact_analysis.total_pnl_difference_sol) }} SOL</p>
+                    {% else %}
+                    <p class="value">N/A</p>
+                    <p class="label">Analysis skipped or failed</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Portfolio Performance -->
+        <div class="section">
+            <h2>Portfolio Performance</h2>
+            <div id="equity_curve" class="plotly-chart">{{ charts.equity_curve | safe }}</div>
+            <div id="metrics_summary" class="plotly-chart">{{ charts.metrics_summary | safe }}</div>
+        </div>
+
+        <!-- Market Correlation Analysis -->
+        <div class="section">
+            <h2>Market Correlation Analysis</h2>
+            {# AIDEV-NOTE-CLAUDE: Robust check for nested data before rendering the entire section #}
+            {% if correlation_analysis and not correlation_analysis.get('error') and charts.get('correlation_analysis') %}
+                <div id="correlation_analysis" class="plotly-chart">{{ charts.correlation_analysis | safe }}</div>
+                <div id="trend_performance" class="plotly-chart">{{ charts.trend_performance | safe }}</div>
+            {% else %}
+                <div class="skipped">Market Correlation analysis was not performed or failed. Reason: {{ (correlation_analysis.get('error') or correlation_analysis.get('correlation_metrics', {}).get('error')) | default('Cache data unavailable') }}</div>
+            {% endif %}
+        </div>
+
+        <!-- Weekend Parameter Analysis -->
+        <div class="section">
+            <h2>Weekend Parameter Simulation</h2>
+            {% if weekend_analysis.is_valid %}
+                <div class="recommendation
+                    {% if 'ENABLE' in weekend_analysis.recommendations.primary_recommendation %}rec-enable
+                    {% elif 'DISABLE' in weekend_analysis.recommendations.primary_recommendation %}rec-disable
+                    {% else %}rec-keep
+                    {% endif %}">
+                    <h3>Recommendation: {{ weekend_analysis.recommendations.primary_recommendation | replace('_', ' ') }}</h3>
+                    <p>{{ weekend_analysis.recommendations.explanation }}</p>
+                </div>
+
+                <h3>Scenario Comparison</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>{{ weekend_analysis.current_scenario.name }} (Current)</th>
+                            <th>{{ weekend_analysis.alternative_scenario.name }} (Simulated)</th>
+                            <th>Impact</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Total PnL (SOL)</td>
+                            <td>{{ "%.3f"|format(weekend_analysis.current_scenario.metrics.total_pnl) }}</td>
+                            <td>{{ "%.3f"|format(weekend_analysis.alternative_scenario.metrics.total_pnl) }}</td>
+                            <td class="{% if weekend_analysis.impact_analysis.total_pnl_difference_sol > 0 %}positive{% else %}negative{% endif %}">
+                                {{ "%+.3f"|format(weekend_analysis.impact_analysis.total_pnl_difference_sol) }}
+                                ({{ "%+.1f"|format(weekend_analysis.impact_analysis.pnl_improvement_percent) }}%)
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Average ROI</td>
+                            <td>{{ "%.2f"|format(weekend_analysis.current_scenario.metrics.average_roi * 100) }}%</td>
+                            <td>{{ "%.2f"|format(weekend_analysis.alternative_scenario.metrics.average_roi * 100) }}%</td>
+                            <td class="{% if weekend_analysis.impact_analysis.roi_difference > 0 %}positive{% else %}negative{% endif %}">
+                                {{ "%+.2f"|format(weekend_analysis.impact_analysis.roi_difference * 100) }}%
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Sharpe Ratio</td>
+                            <td>{{ "%.3f"|format(weekend_analysis.current_scenario.metrics.sharpe_ratio) }}</td>
+                            <td>{{ "%.3f"|format(weekend_analysis.alternative_scenario.metrics.sharpe_ratio) }}</td>
+                            <td class="{% if weekend_analysis.impact_analysis.sharpe_difference > 0 %}positive{% else %}negative{% endif %}">
+                                {{ "%+.3f"|format(weekend_analysis.impact_analysis.sharpe_difference) }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div id="weekend_comparison" class="plotly-chart">{{ charts.weekend_comparison | safe }}</div>
+                <div id="weekend_distribution" class="plotly-chart">{{ charts.weekend_distribution | safe }}</div>
+            {% else %}
+                <div class="skipped">
+                    Weekend Parameter analysis was skipped.
+                    Reason: {{ weekend_analysis.raw.reason | default('Unknown') }}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

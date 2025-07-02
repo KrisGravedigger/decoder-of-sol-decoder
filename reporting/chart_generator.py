@@ -9,16 +9,16 @@ import logging
 import os
 from datetime import datetime
 from typing import Dict, Any
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.figure import Figure
 import yaml
 
-from reporting.visualizations.equity_curve import plot_equity_curve
-from reporting.visualizations.drawdown import plot_drawdown_analysis
-from reporting.visualizations.strategy_heatmap import plot_heatmap_from_instances, plot_heatmap_from_positions
-from reporting.visualizations.cost_impact import plot_cost_impact
+# AIDEV-NOTE-CLAUDE: Corrected to relative imports for modules within the same package.
+from .visualizations.equity_curve import plot_equity_curve
+from .visualizations.drawdown import plot_drawdown_analysis
+from .visualizations.strategy_heatmap import plot_heatmap_from_instances, plot_heatmap_from_positions
+from .visualizations.cost_impact import plot_cost_impact
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -66,9 +66,11 @@ class ChartGenerator:
         try:
             fig.savefig(filepath, dpi=300, facecolor='white', edgecolor='none')
             logger.info(f"Saved chart: {filepath}")
+            plt.close(fig) # AIDEV-NOTE-CLAUDE: Close figure after saving to free up memory.
             return filepath
         except Exception as e:
             logger.error(f"Failed to save chart {filename}: {e}")
+            plt.close(fig) # Ensure figure is closed even on error
             raise
     
     def _create_empty_chart(self, title: str, chart_name: str, timestamp: str) -> str:
@@ -119,7 +121,6 @@ class ChartGenerator:
                 plot_heatmap_from_positions(fig, axes, analysis_result['raw_data']['positions_df'], self.config)
             except Exception as fallback_e:
                 logger.error(f"Fallback heatmap also failed: {fallback_e}")
-                plt.close(fig) # Close again
                 return self._create_empty_chart(f'Heatmap Failed: {fallback_e}', 'strategy_heatmap', timestamp)
 
         plt.tight_layout(rect=[0, 0, 1, 0.93])
@@ -150,6 +151,7 @@ class ChartGenerator:
                 logger.error(f"Failed to generate {name} chart: {e}", exc_info=True)
                 chart_files[name] = f"ERROR: {e}"
         
-        plt.close('all')
+        # AIDEV-NOTE-CLAUDE: This call was outside the loop, now handled in _save_chart
+        # plt.close('all') 
         logger.info(f"Generated {len([f for f in chart_files.values() if not f.startswith('ERROR')])} charts successfully.")
         return chart_files

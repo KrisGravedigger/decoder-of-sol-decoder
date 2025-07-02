@@ -32,19 +32,47 @@ class Position:
         self.wallet_id = wallet_id
         self.source_file = source_file
 
+    @property
+    def universal_position_id(self) -> str:
+        """
+        Universal position identifier across files based on pool_address + open_timestamp.
+        
+        This identifier allows tracking the same position across multiple log files,
+        enabling proper deduplication and position completion tracking.
+        
+        Returns:
+            str: Universal identifier in format "pool_address_open_timestamp"
+        """
+        return f"{self.pool_address}_{self.open_timestamp}"
+
     def is_context_complete(self) -> bool:
         """Check if position has complete context information."""
         return bool(self.token_pair and self.token_pair != "UNKNOWN-SOL")
+    
+    def is_position_complete(self) -> bool:
+        """
+        Check if position is complete (has close information).
+        
+        Returns:
+            bool: True if position has close_timestamp and close_reason != "active_at_log_end"
+        """
+        return (self.close_timestamp is not None and 
+                self.close_reason is not None and 
+                self.close_reason != "active_at_log_end")
 
     def get_validation_errors(self) -> List[str]:
         """Get list of validation errors for this position."""
         errors = []
+        if not self.token_pair: 
+            errors.append("Missing token_pair")
+        if not self.open_timestamp: 
+            errors.append("Missing open_timestamp")
         if not self.pool_address: 
             errors.append("Missing pool_address")
         if not self.initial_investment: 
             errors.append("Missing initial_investment_sol")
-        if not self.close_timestamp: 
-            errors.append("Missing close_timestamp (position still active)")
+        if self.close_reason != "active_at_log_end" and not self.close_timestamp: 
+            errors.append("Missing close_timestamp")
         return errors
 
     def to_csv_row(self) -> Dict[str, Any]:

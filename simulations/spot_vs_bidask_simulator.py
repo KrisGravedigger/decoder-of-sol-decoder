@@ -1,12 +1,15 @@
 import math
 from typing import List, Dict, Tuple, Optional
 
-class StrategyAnalyzer:
-    """Runs strategy simulations based on historical data."""
+class SpotVsBidAskSimulator: # AIDEV-NOTE-CLAUDE: Renamed class from StrategyAnalyzer
+    """
+    Runs Spot vs. Bid-Ask strategy simulations based on historical data.
+    Formerly known as StrategyAnalyzer.
+    """
     
     def __init__(self, bin_step: int, num_bins: int = 69, step_size: str = "UNKNOWN"):
         """
-        Initialize the strategy analyzer.
+        Initialize the strategy simulator.
         
         Args:
             bin_step: Price step between bins in basis points (from pool data)
@@ -86,7 +89,7 @@ class StrategyAnalyzer:
 
     def run_all_simulations(self, position_data: Dict, price_history: List[Dict]) -> Dict:
         """
-        Run all 4 simulations for given position and price history.
+        Run all 1-sided simulations for a given position and price history.
         
         Args:
             position_data: Dictionary containing position information
@@ -103,32 +106,19 @@ class StrategyAnalyzer:
         final_price = price_history[-1]['close']
         price_ratio = final_price / initial_price
 
-        # Fee estimation based on actual PnL and IL
-        # Actual_PnL = PnL_from_fees + PnL_from_price_change (IL)
-        # For 1-Sided, IL is zero when price drops, and when it rises, it's opportunity cost
-        # (we held SOL instead of token which gained value).
-        # For simplification, we assume PnL from price change for 1-sided is 0.
-        # Then all profit/loss (except SL/TP) is from fees. This is simplified but sufficient for comparison.
-        # In your case, actual strategy was 1-Sided, so:
         actual_pnl_from_log = position_data.get('final_pnl_sol_from_log')
-        # If no PnL available, assume 0.5% fees from investment as baseline
         estimated_total_fees = actual_pnl_from_log if actual_pnl_from_log is not None else initial_sol * 0.005
 
         results = {}
         spot_distribution = self._calculate_spot_distribution(initial_sol)
         bidask_distribution = self._calculate_bidask_distribution(initial_sol)
 
-        # Run simulations
         results['1-Sided Spot'] = self._simulate_1sided(
             spot_distribution, price_ratio, initial_price, final_price, initial_sol, estimated_total_fees
         )
         results['1-Sided Bid-Ask'] = self._simulate_1sided(
             bidask_distribution, price_ratio, initial_price, final_price, initial_sol, estimated_total_fees
         )
-        # PLACEHOLDER: 2-sided strategies not implemented (too risky for current use)
-        # Can be developed later if needed for comparison purposes
-        # results['Spot (2-Sided)'] = self._simulate_2sided(...)
-        # results['Bid-Ask (2-Sided)'] = self._simulate_2sided(...)
         
         return results
 
@@ -151,15 +141,11 @@ class StrategyAnalyzer:
         """
         active_bin_index = self._get_active_bin_from_price_ratio(price_ratio)
         
-        # PnL from asset value change (IL)
-        # We sell SOL for tokens as price rises
         sol_converted = sum(distribution[:active_bin_index])
         
-        # Average purchase price of tokens
         tokens_bought = 0
         if sol_converted > 0:
             for i in range(active_bin_index):
-                # Improved average price calculation
                 bin_start_price = initial_price * (self.price_factor ** i)
                 bin_end_price = initial_price * (self.price_factor ** (i + 1))
                 avg_bin_price = (bin_start_price + bin_end_price) / 2
@@ -169,11 +155,8 @@ class StrategyAnalyzer:
         final_asset_value = (tokens_bought * final_price) + remaining_sol
         pnl_from_assets = final_asset_value - initial_sol
 
-        # PnL from fees
-        # Fees are proportional to liquidity in active bin
         spot_liquidity_per_bin = initial_sol / self.num_bins
         active_bin_liquidity = distribution[min(active_bin_index, len(distribution)-1)]
-        # Avoid division by zero if spot_liquidity_per_bin is 0
         liquidity_ratio = active_bin_liquidity / spot_liquidity_per_bin if spot_liquidity_per_bin > 0 else 1.0
         
         pnl_from_fees = fee_budget * liquidity_ratio

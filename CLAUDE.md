@@ -1,3 +1,4 @@
+
 🌐 Language Policy
 CRITICAL RULE: Regardless of conversation language, ALL code updates and CLAUDE.md modifications must be in English. This ensures consistency in codebase and documentation.
 
@@ -215,6 +216,15 @@ Strategy Distribution Patterns:
   - Spot Distribution: Uniform liquidity across all bins
   - Bid-Ask Distribution: U-shaped distribution (more liquidity at edges, based on research formula)
 
+Market Analysis Terminology
+
+EMA Slope Trend Detection: 3-day percentage change in 50-period EMA (>0.1% = uptrend)
+Pearson Correlation: Linear correlation coefficient between portfolio and SOL daily returns
+Weekend Parameter: weekendSizePercentage configuration reducing position sizes on Sat/Sun UTC
+Weekend Parameter Analysis: Simulation comparing current vs alternative weekend position sizing
+Statistical Significance: p-value < 0.05 for correlation and trend difference testing
+Interactive HTML Reports: Plotly-based comprehensive reports with embedded visualizations
+
 Financial Metrics
 
 IL (Impermanent Loss) - loss due to relative price changes of assets
@@ -233,42 +243,74 @@ LV (Low Volume) - close due to volume drop below threshold (pattern: "due to low
 OOR (Out of Range) - close when price moved beyond bin range and exceeded timeout (pattern: "Closing position due to price range:")
 other - all other close types (manual, unknown, system errors, etc.)
 
+## Enhanced Deduplication System
+
+**Universal Position ID** - Cross-file position identifier using `pool_address + open_timestamp`
+**Position Completion** - Process of updating incomplete positions (`active_at_log_end`) with complete data from subsequent files
+**Cross-File Position Tracking** - System capability to track positions that open in one log file and close in another
+**Chronological File Processing** - Files processed in sorted order to maintain proper event sequencing
+**Duplicate Handling Logic**:
+  - **Skip**: Exact duplicates (same position_id)
+  - **Update**: Incomplete position → complete position
+  - **Add**: New positions not seen before
+
+**File Processing Order**: Alphabetical sorting ensures consistent chronological processing of log files
+
+## Custom Timestamp Handling
+
+**SOL Decoder Timestamp Format:** `MM/DD-HH:MM:SS` (non-standard format)
+**Example:** `05/12-20:57:08` = May 12, 20:57:08 (current year)
+**Special Case:** `24:XX:XX` = next day 00:XX:XX
+
+**Issue:** `pandas.to_datetime()` fails on this format
+**Solution:** Use `_parse_custom_timestamp()` from `data_loader.py`
+
+**Location:** reporting/data_loader.py::_parse_custom_timestamp()
+**Status:** Production-ready, handles edge cases (24:XX rollover)
+
+```python
+# AIDEV-NOTE-CLAUDE: Handle SOL Decoder custom timestamp format
+from data_loader import _parse_custom_timestamp
+positions_df['timestamp_column'] = positions_df['timestamp_column'].apply(_parse_custom_timestamp)
+
 🗂️ Project Structure
 project/
-├── extraction/             - data extraction and processing
+├── main.py                     # Main application entry point with interactive menu
+├── main_analyzer.py            # (Legacy) Alternative analysis entry point
+├── core/
+│   └── models.py               # Position class and other data models
+├── extraction/                 # Data extraction from logs
 │   ├── __init__.py
-│   ├── log_extractor.py   - main parser with debug controls and close reason classification (~430 lines)
-│   └── extraction_utils.py - utilities for extraction module
-├── reporting/              - analytics and portfolio performance analysis
+│   ├── log_extractor.py        # Main parser with multi-wallet support
+│   └── parsing_utils.py        # Universal parsing utilities
+├── reporting/                  # Analytics and portfolio performance analysis
 │   ├── __init__.py
 │   ├── config/
-│   │   └── portfolio_config.yaml - infrastructure costs, risk-free rates, filters
-│   ├── output/ - generated reports and charts directory
-│   │   ├── charts/ - timestamped PNG visualizations
-│   │   └── portfolio_analysis.log
-│   ├── visualizations/ - **chart plotting modules** 🆕
-│   │   ├── __init__.py 🆕
-│   │   ├── cost_impact.py 🆕
-│   │   ├── drawdown.py 🆕
-│   │   ├── equity_curve.py 🆕
-│   │   └── strategy_heatmap.py 🆕
-│   ├── infrastructure_cost_analyzer.py - daily cost allocation and Moralis API (~300 lines)
-│   ├── portfolio_analytics.py - **analysis orchestrator (~170 lines)** 🆕
-│   ├── chart_generator.py - **charting orchestrator (~180 lines)** 🆕
-│   ├── portfolio_main.py - CLI orchestrator with multiple analysis modes (~400 lines)
-│   ├── strategy_instance_detector.py - groups positions into strategy instances (~400 lines)
-│   ├── data_loader.py - **position data loading and cleaning** 🆕
-│   ├── metrics_calculator.py - **financial metrics calculation** 🆕
-│   └── text_reporter.py - **text report generation** 🆕
-│   ├── strategy_comparison_matrix.py - strategy ranking and comparison (planned)
-│   ├── daily_performance_tracker.py - performance tracking over time (planned)
-│   ├── performance_visualizer.py - charts and visualization (planned)
-│   └── reporting_utils.py - utilities for reporting module
-├── main_analyzer.py        - main orchestrator (extraction → analysis → reporting)
-├── strategy_analyzer.py    - LP strategy simulation engine for Meteora DLMM (~250 lines)
-├── models.py              - Position class and data models (~50 lines)
-├── parsing_utils.py       - universal parsing utilities (~250 lines)
-├── debug_analyzer.py      - context analysis and export system (~200 lines)
+│   │   └── portfolio_config.yaml
+│   ├── templates/
+│   │   └── comprehensive_report.html
+│   ├── visualizations/         # Chart plotting modules
+│   │   ├── __init__.py
+│   │   ├── cost_impact.py
+│   │   ├── drawdown.py
+│   │   ├── equity_curve.py
+│   │   ├── interactive_charts.py # Plotly charts for HTML report
+│   │   └── strategy_heatmap.py
+│   ├── orchestrator.py         # Core logic engine for the reporting workflow
+│   ├── analysis_runner.py      # Runs Spot vs. Bid-Ask simulation for all positions
+│   ├── data_loader.py          # Position data loading and cleaning
+│   ├── html_report_generator.py # HTML report generation orchestrator
+│   ├── infrastructure_cost_analyzer.py # Daily cost allocation and Moralis API
+│   ├── market_correlation_analyzer.py  # Analysis of portfolio vs market correlation
+│   ├── metrics_calculator.py   # Financial metrics calculation
+│   ├── strategy_instance_detector.py # Groups positions into strategy instances
+│   └── text_reporter.py        # Text report generation
+├── simulations/                # "What-if" simulation engines
+│   ├── spot_vs_bidask_simulator.py # Simulates Spot vs Bid-Ask strategies
+│   └── weekend_simulator.py    # Simulates weekend parameter impact
+└── tools/                      # Developer and utility tools
+    ├── api_checker.py          # Checks Moralis API connectivity
+    └── debug_analyzer.py       # Context analysis and export system
 
 File Handling Rules
 
@@ -277,8 +319,8 @@ Cache: automatic Moralis API response caching (JSON files)
 Reports: individual text reports + collective CSV
 
 🏃‍♂️ Project Status
-Last Update: 2025-06-28
-Current Version: Portfolio Analytics v1.0 (Complete)
+Last Update: 2025-07-03
+Current Version: v3.6 - Architecture Stabilization & Resiliency
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved 33%)
@@ -302,6 +344,14 @@ Strategy instance detection and grouping ✅
 Multi-wallet support with subfolder organization ✅
 Strategy performance ranking with weighted scoring ✅
 Enhanced CSV structure with wallet_id and source_file tracking ✅
+Enhanced position deduplication with cross-file tracking ✅
+Universal position identification (pool_address + open_timestamp) ✅
+Automatic position completion (active_at_log_end → complete positions) ✅
+Chronological file processing for proper position sequencing ✅
+Intelligent duplicate handling with update/skip logic ✅
+Enhanced position deduplication with universal identification ✅
+Cross-file position tracking and completion ✅
+Chronological file processing with intelligent duplicate handling ✅
 
 **Portfolio Analytics Module:**
 - **Complete analysis pipeline**: dual SOL/USDC currency analysis with infrastructure cost impact ✅
@@ -312,6 +362,12 @@ Enhanced CSV structure with wallet_id and source_file tracking ✅
 - **Moralis API integration**: historical SOL/USDC price data with caching ✅
 - **Custom timestamp parsing**: handles non-standard formats (MM/DD-HH:MM:SS, 24:XX:XX) ✅
 - **Robust error handling**: fallback mechanisms for missing data and CSV structure variations ✅
+
+**Architecture Stabilization & Resiliency:**
+- **Centralized Entry Point**: `main.py` provides a single, interactive menu to run all parts of the pipeline ✅
+- **Robust API Key Handling**: Dependency injection ensures the API key is passed securely and used only when needed ✅
+- **Cache-Only Mode**: Full application support for running in an offline/cached mode for testing and cost savings ✅
+- **Error Resiliency (Graceful Degradation)**: The HTML report generation no longer crashes on missing data (e.g., from market analysis in cache-only mode), instead displaying informative messages ✅
 
 Completed in v2.0:
 
@@ -349,11 +405,31 @@ Strategy Instance Detection Module 🆕
 - **Robust Error Handling**: dual fallback system for chart generation 🆕
 - **Cost Impact Analysis**: daily allocation across active positions with break-even metrics 🆕
 
+Completed in v3.0
+**Market Analysis & Reporting Module:**
+- **Market correlation analysis**: Pearson correlation with SOL trends, EMA slope detection ✅
+- **Weekend parameter optimization**: weekendSizePercentage impact simulation with 5x scaling ✅  
+- **Interactive HTML reporting**: Plotly-based comprehensive reports with executive summaries ✅
+- **CLI analysis modes**: `--correlation`, `--weekend`, `--comprehensive` options ✅
+- **Performance optimization**: single CSV load for comprehensive analysis (3x faster) ✅
+- **Custom timestamp integration**: SOL Decoder format parsing in portfolio pipeline ✅
+- **Configuration-driven metrics**: risk-free rates from YAML, no hardcoded values ✅
+- **Statistical significance testing**: confidence intervals and p-values for correlations ✅
+
+**Completed in v3.3 - Weekend Parameter Analysis v2.1:**
+- **Complete weekend parameter analysis logic**: CSV always represents actual positions ✅
+- **Dual scenario simulation**: current vs alternative weekend sizing with proper interpretation ✅
+- **YAML-driven configuration**: weekend_size_reduction and size_reduction_percentage parameters ✅
+- **Orchestrator-level skip logic**: analysis skipped when size_reduction_percentage=0 ✅
+- **Enhanced error handling**: proper handling of skipped analysis in HTML reports ✅
+- **Fixed interactive charts**: updated key mapping (current_scenario/alternative_scenario) ✅
+- **Business logic documentation**: clear assumptions about CSV data interpretation ✅
+
 Next Priority Tasks:
 
 **Immediate (Next Session):**
-- **Strategy Heatmap Orientation Fix**: resolve matplotlib PNG rotation issue (escalated to Gemini) 📋
-- **Portfolio Analytics Integration**: connect with existing strategy_analyzer.py pipeline 📋
+- **TP/SL Optimization Module**: ML-driven take profit and stop loss level optimization 📋
+- **Post-exit analysis**: forward-looking profitability analysis beyond historical close points 📋
 
 **Strategy Analytics Module Enhancement:**
   - Strategy comparison matrix with detailed performance breakdown 📋
@@ -545,3 +621,187 @@ Advanced Features:
 - **Metric Refinement:**
   - Improved the "Cost Impact %" calculation in `infrastructure_cost_analyzer.py` to correctly handle cases with negative Gross PnL, providing more intuitive results in all scenarios.
 **System Status:** Portfolio Analytics v1.1 - Stable and Refactored. ✅
+
+**2025-07-02: Market Correlation & Weekend Analysis Implementation (Session 3)**
+
+**Goal:** Complete reporting module with market correlation analysis, weekend parameter optimization, and comprehensive HTML reporting system.
+
+**Achieved:**
+
+- **Market Correlation Analysis Module:**
+  - Complete `market_correlation_analyzer.py` with Pearson correlation analysis ✅
+  - EMA 50 slope-based trend detection (3-day slope, 0.1% threshold) ✅
+  - SOL market trend segmentation (uptrend vs downtrend performance) ✅
+  - Statistical significance testing with confidence intervals ✅
+  - Moralis API integration for SOL/USDC price data ✅
+
+- **Weekend Parameter Analysis Module:**
+  - Complete `weekend_parameter_analyzer.py` with weekendSizePercentage simulation ✅
+  - 5x position scaling logic (weekend positions enlarged, weekday reduced) ✅
+  - UTC weekend classification (Saturday-Sunday) ✅
+  - Performance comparison with ENABLE/DISABLE recommendations ✅
+  - Comprehensive metrics analysis (PnL, ROI, Win Rate, Sharpe) ✅
+
+- **Interactive HTML Report System:**
+  - Complete `html_report_generator.py` with Plotly interactive charts ✅
+  - Professional HTML template with embedded visualizations ✅
+  - Comprehensive report combining all analysis modules ✅
+  - Executive summary with key metrics and recommendations ✅
+  - Pure Python implementation (Jinja2 + Plotly, no external dependencies) ✅
+
+- **Portfolio Main Optimization:**
+  - Major performance optimization: CSV loaded only once in comprehensive analysis ✅
+  - New CLI modes: `--correlation`, `--weekend`, `--comprehensive` ✅
+  - Enhanced error handling and backward compatibility ✅
+  - Configuration-driven risk-free rates (no hardcoded values) ✅
+  - Refactored methods integration with `metrics_calculator.py` modules ✅
+
+**Technical Achievements:**
+- **Performance Optimization**: 3x faster comprehensive analysis (single CSV load) ✅
+- **Custom Timestamp Handling**: integrated SOL Decoder format parsing (`MM/DD-HH:MM:SS`) ✅
+- **Column Mapping**: automatic CSV structure adaptation (`final_pnl_sol_from_log` → `pnl_sol`) ✅
+- **Gemini Code Review**: implementation received "very high quality" rating with 100% compliance ✅
+
+**Files Generated:**
+- reporting/market_correlation_analyzer.py (300 lines) ✅
+- reporting/weekend_parameter_analyzer.py (280 lines) ✅  
+- reporting/html_report_generator.py (450 lines) ✅
+- reporting/portfolio_main.py (enhanced with new modules) ✅
+
+**Integration Results:**
+- **Test Analysis**: 70 positions over 36 days successfully processed ✅
+- **Performance Metrics**: 85.7% win rate, -0.861 SOL PnL, 20.9% infrastructure cost impact ✅
+- **Files Generated**: 2 text reports + 4 PNG charts in 1.6 seconds ✅
+- **New CLI Modes**: All analysis types working (correlation, weekend, comprehensive) ✅
+
+**Business Insights Enabled:**
+- **Market Correlation**: SOL trend impact on LP strategy performance ✅
+- **Weekend Parameter**: Data-driven weekendSizePercentage optimization ✅
+- **Infrastructure Costs**: Significant 20.9% impact identified and quantified ✅
+- **Comprehensive Analysis**: All modules working together seamlessly ✅
+
+**2025-07-02: Major Refactoring and UI Enhancement**
+
+**Goal:** Refactor oversized modules (`portfolio_main.py`, `html_report_generator.py`) to adhere to project standards and add an interactive user menu for ease of use.
+**Achieved:**
+
+- **Major Refactoring (Code Modularity):**
+  - `html_report_generator.py` was refactored by extracting its large HTML template into `reporting/templates/comprehensive_report.html` and moving all Plotly chart creation logic to a new, dedicated module: `reporting/visualizations/interactive_charts.py`. This significantly improved maintainability.
+  - `portfolio_main.py` was split into two distinct files, separating the user interface from the core logic:
+    - `orchestrator.py`: Now contains the `PortfolioAnalysisOrchestrator` class, serving as the pure logic engine for the analysis workflow.
+    - `portfolio_main.py`: Re-created as the main command-line entry point, featuring an interactive menu and argument parsing. It now imports and uses the `PortfolioAnalysisOrchestrator`.
+
+- **UI Enhancement (Interactive Menu):**
+  - Implemented a user-friendly interactive menu in the new `portfolio_main.py`. This allows users to select analysis modes (comprehensive, quick, period-specific) without needing to memorize command-line arguments, improving accessibility.
+  - Retained the command-line argument functionality for automation and power-user workflows.
+
+- **Improved Project Structure:**
+  - The overall project structure is now cleaner and more aligned with the single-responsibility principle. The new files fit logically within the established directory layout (`templates/`, `visualizations/`).
+
+**2025-07-02: Weekend Parameter Analysis v2.1 - Final Implementation**
+
+**Goal:** Implement correct weekend parameter analysis logic with proper business assumptions and YAML configuration.
+
+**Achieved:**
+
+- **Corrected Business Logic:**
+  - **CSV Data Interpretation**: CSV always represents actual positions (regardless of weekend_size_reduction config) ✅
+  - **Dual Scenario Simulation**: 
+    - `weekend_size_reduction=1`: CSV has reduced weekend positions → simulate enlarged for comparison ✅
+    - `weekend_size_reduction=0`: CSV has normal positions → simulate reduced for comparison ✅
+  - **Weekend Position Focus**: Only positions opened during weekend (Sat/Sun UTC) are affected by simulation ✅
+  - **Weekday Positions**: Remain identical in both scenarios (no changes) ✅
+
+- **YAML Configuration Enhancement:**
+  - **Enhanced Configuration**: `weekend_analysis` section in `portfolio_config.yaml` ✅
+  - **Skip Logic**: `size_reduction_percentage: 0` = no analysis ✅
+  - **Business Documentation**: Clear comments explaining assumptions and logic ✅
+
+- **Orchestrator Integration:**
+  - **Skip Logic**: Moved from analyzer to orchestrator for better workflow control ✅
+  - **Enhanced Logging**: Proper warning and info messages for skipped analysis ✅
+  - **Error Handling**: Graceful handling of skipped analysis in HTML reports ✅
+
+- **Interactive Charts Fix:**
+  - **Key Mapping Update**: Fixed `original_scenario` → `current_scenario` mapping ✅
+  - **Removed Win Rate**: Eliminated win_rate from weekend analysis charts (business requirement) ✅
+  - **Dynamic Scenario Names**: Charts now use actual scenario names from analysis ✅
+  - **Skip Handling**: Proper display when analysis is skipped ✅
+
+**Technical Changes:**
+- **weekend_parameter_analyzer.py**: Complete rewrite with correct simulation logic ✅
+- **orchestrator.py**: Added `_should_skip_weekend_analysis()` and enhanced workflow ✅
+- **interactive_charts.py**: Fixed key mapping and removed win_rate from weekend charts ✅
+- **portfolio_config.yaml**: Added comprehensive weekend_analysis configuration ✅
+
+**Business Validation:**
+- **Test Results**: KEEP_DISABLED recommendation with -0.565 SOL impact ✅
+- **Scenario Names**: "ENABLED (80% weekend reduction)" vs "DISABLED (normal weekend sizes)" ✅
+- **Proper Metrics**: Focus on PnL, ROI, and Sharpe ratio (no win_rate) ✅
+
+**Files Modified:**
+- reporting/config/portfolio_config.yaml (enhanced with weekend_analysis section)
+- reporting/weekend_parameter_analyzer.py (complete rewrite)
+- reporting/orchestrator.py (skip logic and enhanced workflow)
+- reporting/visualizations/interactive_charts.py (fixed key mapping and charts)
+
+**System Status:** Weekend Parameter Analysis v2.1 - Fully Functional and Business-Correct ✅
+
+**Ready for Next Priority:** TP/SL Optimization Module - ML-driven take profit and stop loss level optimization 🚀
+
+**2025-07-03: Post-Refactoring Stabilization & Error Resiliency**
+
+**Goal:** Fully stabilize the application after a major architectural refactoring, ensure correct data flow, and implement error resiliency mechanisms for missing API data.
+
+**Achieved:**
+- **Centralized Architecture:** Refactored the application to use `main.py` as the single entry point with an interactive menu, orchestrating the entire analysis pipeline.
+- **Fixed API Access:** Implemented a dependency injection pattern for the Moralis API key, eliminating `401 Unauthorized` errors and stabilizing connections.
+- **Implemented "Cache-Only" Mode:** Added an `api_settings.cache_only` option in `portfolio_config.yaml`, allowing the application to run entirely from cached data for testing and saving API credits.
+- **Restored Full Analysis Pipeline:** Reintegrated the previously omitted `strategy_instance_detector` module into the main workflow, ensuring the `strategy_instances.csv` file is generated correctly.
+- **Implemented "Graceful Degradation":**
+  - The reporting module (`html_report_generator`, `interactive_charts`) is now resilient to failures caused by missing data (e.g., market correlation analysis in cache-only mode).
+  - Instead of a crash, the application now successfully generates the full HTML report, displaying "Data Unavailable" messages in sections where analysis could not be completed.
+- **Unified User Interface:** Translated all UI elements and prompts in `main.py` to English, adhering to the project's critical rules.
+
+**Status:** Architecture stabilized. The application is fully functional, robust, and resilient to common errors from missing cache data. It is ready for further development. ✅
+
+**2025-07-03: Enhanced Deduplication & Cross-File Position Tracking**
+
+**Goal:** Implement robust position deduplication system to handle overlapping log files and cross-file position tracking.
+
+**Achieved:**
+
+- **Universal Position Identification:**
+  - Implemented `universal_position_id` property in Position model using `pool_address + open_timestamp` ✅
+  - Added `is_position_complete()` method to detect incomplete vs complete positions ✅
+  - Enhanced validation to require `pool_address` as mandatory field ✅
+
+- **Enhanced Deduplication Logic:**
+  - **Cross-file position tracking**: Positions can open in one file and close in another ✅
+  - **Intelligent update system**: Incomplete positions (`active_at_log_end`) are updated with complete data ✅
+  - **Duplicate prevention**: True duplicates are skipped, avoiding data pollution ✅
+  - **Chronological processing**: Files sorted alphabetically for consistent event sequencing ✅
+
+- **Improved Processing Pipeline:**
+  - Enhanced CSV merge logic with filtered existing data to prevent conflicts ✅
+  - Detailed logging of processing statistics (new/updated/skipped positions) ✅
+  - Robust error handling for positions missing critical identifiers ✅
+
+**Technical Implementation:**
+- **models.py**: Added `universal_position_id` property and `is_position_complete()` method
+- **log_extractor.py**: Complete rewrite of deduplication logic in `run_extraction()` function
+- **File processing**: Alphabetical sorting in both main directory and subdirectories
+
+**Business Impact:**
+- **Eliminates duplicate positions** from overlapping log files
+- **Enables cross-file position tracking** for positions spanning multiple logs  
+- **Provides position completion** when close events appear in different files
+- **Maintains data integrity** through intelligent update/skip logic
+
+**Test Results:** Successfully processed overlapping log files with proper deduplication and position completion ✅
+
+**Files Modified:**
+- core/models.py (enhanced Position class with universal identification)
+- extraction/log_extractor.py (complete deduplication logic rewrite)
+
+**System Status:** Enhanced Deduplication v1.0 - Production Ready ✅
