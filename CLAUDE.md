@@ -263,7 +263,7 @@ positions_df['timestamp_column'] = positions_df['timestamp_column'].apply(_parse
 project/
 ├── extraction/             - data extraction and processing
 │   ├── __init__.py
-│   ├── log_extractor.py   - main parser with debug controls and close reason classification (~430 lines)
+│   ├── log_extractor.py   - main parser with debug controls and close reason classification
 │   └── extraction_utils.py - utilities for extraction module
 ├── reporting/              - analytics and portfolio performance analysis
 │   ├── __init__.py
@@ -271,32 +271,32 @@ project/
 │   │   └── portfolio_config.yaml - infrastructure costs, risk-free rates, filters
 │   ├── output/ - generated reports and charts directory
 │   │   ├── charts/ - timestamped PNG visualizations
-│   │   ├── comprehensive_report_YYYYMMDD_HHMM.html - interactive HTML reports 🆕
-│   │   ├── market_correlation_YYYYMMDD_HHMM.json - correlation analysis data 🆕
-│   │   ├── weekend_analysis_YYYYMMDD_HHMM.json - weekend parameter data 🆕
 │   │   └── portfolio_analysis.log
-│   ├── visualizations/ - chart plotting modules
+│   ├── templates/ - **HTML templates for reports** 🆕
+│   │   └── comprehensive_report.html 🆕
+│   ├── visualizations/ - **chart plotting modules**
 │   │   ├── __init__.py
 │   │   ├── cost_impact.py
 │   │   ├── drawdown.py
 │   │   ├── equity_curve.py
+│   │   ├── interactive_charts.py - **Plotly charts for HTML report** 🆕
 │   │   └── strategy_heatmap.py
-│   ├── infrastructure_cost_analyzer.py - daily cost allocation and Moralis API (~300 lines)
-│   ├── portfolio_analytics.py - analysis orchestrator (~170 lines)
-│   ├── chart_generator.py - charting orchestrator (~180 lines)
-│   ├── portfolio_main.py - **CLI orchestrator with market analysis modes (~600 lines)** 🆕
-│   ├── market_correlation_analyzer.py - **SOL correlation and trend analysis (~300 lines)** 🆕
-│   ├── weekend_parameter_analyzer.py - **weekendSizePercentage optimization (~280 lines)** 🆕
-│   ├── html_report_generator.py - **interactive HTML reports (~450 lines)** 🆕
-│   ├── strategy_instance_detector.py - groups positions into strategy instances (~400 lines)
+│   ├── infrastructure_cost_analyzer.py - daily cost allocation and Moralis API
+│   ├── portfolio_analytics.py - analysis engine for portfolio data
+│   ├── chart_generator.py - charting orchestrator for static PNGs
+│   ├── orchestrator.py - **Main workflow orchestrator** 🆕
+│   ├── strategy_instance_detector.py - groups positions into strategy instances
 │   ├── data_loader.py - position data loading and cleaning
 │   ├── metrics_calculator.py - financial metrics calculation
-│   └── text_reporter.py - text report generation
-├── main_analyzer.py        - main orchestrator (extraction → analysis → reporting)
-├── strategy_analyzer.py    - LP strategy simulation engine for Meteora DLMM (~250 lines)
-├── models.py              - Position class and data models (~50 lines)
-├── parsing_utils.py       - universal parsing utilities (~250 lines)
-├── debug_analyzer.py      - context analysis and export system (~200 lines)
+│   ├── text_reporter.py - text report generation
+│   ├── market_correlation_analyzer.py - analysis of portfolio vs market correlation
+│   ├── weekend_parameter_analyzer.py - analysis of weekend parameter impact
+│   └── html_report_generator.py - **HTML report generation orchestrator** (refactored) 🆕
+├── portfolio_main.py       - **Main CLI and interactive menu** 🆕
+├── strategy_analyzer.py    - LP strategy simulation engine for Meteora DLMM
+├── models.py              - Position class and data models
+├── parsing_utils.py       - universal parsing utilities
+└── debug_analyzer.py      - context analysis and export system
 
 File Handling Rules
 
@@ -306,7 +306,7 @@ Reports: individual text reports + collective CSV
 
 🏃‍♂️ Project Status
 Last Update: 2025-07-02
-Current Version: Market Analysis & Reporting Module v3.0 (Complete)
+Current Version: Market Analysis & Reporting Module v3.2 (Complete)
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved 33%)
@@ -643,3 +643,23 @@ Advanced Features:
 - **Weekend Parameter**: Data-driven weekendSizePercentage optimization ✅
 - **Infrastructure Costs**: Significant 20.9% impact identified and quantified ✅
 - **Comprehe
+
+**2025-07-02: Major Refactoring and UI Enhancement**
+
+**Goal:** Refactor oversized modules (`portfolio_main.py`, `html_report_generator.py`) to adhere to project standards and add an interactive user menu for ease of use.
+**Achieved:**
+
+- **Major Refactoring (Code Modularity):**
+  - `html_report_generator.py` was refactored by extracting its large HTML template into `reporting/templates/comprehensive_report.html` and moving all Plotly chart creation logic to a new, dedicated module: `reporting/visualizations/interactive_charts.py`. This significantly improved maintainability.
+  - `portfolio_main.py` was split into two distinct files, separating the user interface from the core logic:
+    - `orchestrator.py`: Now contains the `PortfolioAnalysisOrchestrator` class, serving as the pure logic engine for the analysis workflow.
+    - `portfolio_main.py`: Re-created as the main command-line entry point, featuring an interactive menu and argument parsing. It now imports and uses the `PortfolioAnalysisOrchestrator`.
+
+- **UI Enhancement (Interactive Menu):**
+  - Implemented a user-friendly interactive menu in the new `portfolio_main.py`. This allows users to select analysis modes (comprehensive, quick, period-specific) without needing to memorize command-line arguments, improving accessibility.
+  - Retained the command-line argument functionality for automation and power-user workflows.
+
+- **Improved Project Structure:**
+  - The overall project structure is now cleaner and more aligned with the single-responsibility principle. The new files fit logically within the established directory layout (`templates/`, `visualizations/`).
+
+**System Status:** Portfolio Analytics v3.2 - Refactored and User-Friendly. The codebase is now more maintainable, scalable, and easier to use. ✅

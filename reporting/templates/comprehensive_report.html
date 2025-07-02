@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Analytics Report</title>
+    <script>{{ plotly_js|safe }}</script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; color: #2c3e50; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #3498db; padding-bottom: 20px; }
+        .section { margin: 30px 0; padding: 20px; border-left: 4px solid #3498db; background-color: #f8f9fa; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
+        .metric-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
+        .metric-value { font-size: 2em; font-weight: bold; color: #2c3e50; }
+        .metric-label { color: #7f8c8d; margin-top: 5px; }
+        .chart-container { margin: 20px 0; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .recommendation { background: #e8f5e8; border: 1px solid #4caf50; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .error { background: #f8d7da; border: 1px solid #dc3545; padding: 15px; border-radius: 5px; margin: 15px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Portfolio Analytics Report</h1>
+            <p>Generated on {{ timestamp }}</p>
+        </div>
+
+        <div class="section">
+            <h2>📊 Executive Summary</h2>
+            <div class="metrics-grid">
+                <div class="metric-card"><div class="metric-value">{{ "%.3f"|format(portfolio_analysis.sol_denomination.total_pnl_sol) }}</div><div class="metric-label">Total PnL (SOL)</div></div>
+                <div class="metric-card"><div class="metric-value">{{ "%.2f"|format(portfolio_analysis.usdc_denomination.total_pnl_usdc) }}</div><div class="metric-label">Total PnL (USDC)</div></div>
+                <div class="metric-card"><div class="metric-value">{{ "%.1f"|format(portfolio_analysis.sol_denomination.win_rate * 100) }}%</div><div class="metric-label">Win Rate</div></div>
+                <div class="metric-card"><div class="metric-value">{{ "%.2f"|format(portfolio_analysis.sol_denomination.sharpe_ratio) }}</div><div class="metric-label">Sharpe Ratio</div></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📈 Portfolio Performance</h2>
+            <div class="chart-container">{{ charts.equity_curve|safe }}</div>
+            <div class="chart-container">{{ charts.metrics_summary|safe }}</div>
+        </div>
+
+        {% if correlation_analysis and 'error' not in correlation_analysis %}
+        <div class="section">
+            <h2>🔗 Market Correlation Analysis</h2>
+            <div class="recommendation"><strong>SOL Correlation:</strong> {{ "%.3f"|format(correlation_analysis.correlation_metrics.pearson_correlation) }} (p-value: {{ "%.3f"|format(correlation_analysis.correlation_metrics.pearson_p_value) }}) {% if correlation_analysis.correlation_metrics.is_significant %} - <strong>Statistically Significant</strong> {% else %} - Not statistically significant {% endif %}</div>
+            <div class="chart-container">{{ charts.correlation_analysis|safe }}</div>
+            {% if 'trend_performance' in charts %}<div class="chart-container">{{ charts.trend_performance|safe }}</div>{% endif %}
+            <h3>Trend Analysis Results:</h3>
+            <ul>
+                <li><strong>Uptrend Performance:</strong> {{ "%.4f"|format(correlation_analysis.trend_analysis.uptrend.mean_return) }} SOL/day ({{ correlation_analysis.trend_analysis.uptrend.days }} days, {{ "%.1f"|format(correlation_analysis.trend_analysis.uptrend.win_rate * 100) }}% win rate)</li>
+                <li><strong>Downtrend Performance:</strong> {{ "%.4f"|format(correlation_analysis.trend_analysis.downtrend.mean_return) }} SOL/day ({{ correlation_analysis.trend_analysis.downtrend.days }} days, {{ "%.1f"|format(correlation_analysis.trend_analysis.downtrend.win_rate * 100) }}% win rate)</li>
+            </ul>
+        </div>
+        {% elif correlation_analysis and 'error' in correlation_analysis %}<div class="section"><h2>🔗 Market Correlation Analysis</h2><div class="error"><strong>Error:</strong> {{ correlation_analysis.error }}</div></div>{% endif %}
+
+        {% if weekend_analysis and 'error' not in weekend_analysis %}
+        <div class="section">
+            <h2>📅 Weekend Parameter Analysis</h2>
+            {% set recommendation = weekend_analysis.recommendations.primary_recommendation %}
+            {% if recommendation == 'ENABLE' %}<div class="recommendation"><strong>Recommendation: ENABLE Weekend Parameter</strong><br>Expected Impact: {{ "%.3f"|format(weekend_analysis.performance_comparison.impact_analysis.total_pnl_difference_sol) }} SOL ({{ "%.1f"|format(weekend_analysis.performance_comparison.impact_analysis.pnl_improvement_percent) }}% improvement)</div>
+            {% else %}<div class="warning"><strong>Recommendation: DISABLE Weekend Parameter</strong><br>Current performance would decrease by {{ "%.3f"|format(weekend_analysis.performance_comparison.impact_analysis.total_pnl_difference_sol|abs) }} SOL ({{ "%.1f"|format(weekend_analysis.performance_comparison.impact_analysis.pnl_improvement_percent|abs) }}% reduction)</div>{% endif %}
+            <p><strong>Confidence Level:</strong> {{ weekend_analysis.recommendations.confidence_level }}</p>
+            <p>{{ weekend_analysis.recommendations.explanation }}</p>
+            <div class="chart-container">{{ charts.weekend_comparison|safe }}</div>
+            {% if 'weekend_distribution' in charts %}<div class="chart-container">{{ charts.weekend_distribution|safe }}</div>{% endif %}
+            <h3>Position Classification:</h3>
+            <ul>
+                <li><strong>Weekend Opened:</strong> {{ weekend_analysis.position_classification.weekend_opened.count }} positions ({{ "%.1f"|format(weekend_analysis.position_classification.weekend_opened.percentage) }}%)</li>
+                <li><strong>Weekday Opened:</strong> {{ weekend_analysis.position_classification.weekday_opened.count }} positions ({{ "%.1f"|format(weekend_analysis.position_classification.weekday_opened.percentage) }}%)</li>
+            </ul>
+        </div>
+        {% elif weekend_analysis and 'error' in weekend_analysis %}<div class="section"><h2>📅 Weekend Parameter Analysis</h2><div class="error"><strong>Error:</strong> {{ weekend_analysis.error }}</div></div>{% endif %}
+
+        <div class="section">
+            <h2>💰 Infrastructure Cost Impact</h2>
+            {% set cost_impact = portfolio_analysis.infrastructure_cost_impact %}
+            <div class="metrics-grid">
+                <div class="metric-card"><div class="metric-value">${{ "%.2f"|format(cost_impact.total_cost_usd) }}</div><div class="metric-label">Total Cost (USD)</div></div>
+                <div class="metric-card"><div class="metric-value">{{ "%.3f"|format(cost_impact.total_cost_sol) }}</div><div class="metric-label">Total Cost (SOL)</div></div>
+                <div class="metric-card"><div class="metric-value">{{ "%.1f"|format(cost_impact.cost_impact_percent) }}%</div><div class="metric-label">Cost Impact</div></div>
+                <div class="metric-card"><div class="metric-value">{{ "%.0f"|format(cost_impact.break_even_days) }}</div><div class="metric-label">Break-even Days</div></div>
+            </div>
+            <p><strong>Daily Cost:</strong> ${{ "%.2f"|format(cost_impact.daily_cost_usd) }} ({{ "%.4f"|format(cost_impact.daily_cost_usd / (cost_impact.total_cost_usd / cost_impact.total_cost_sol) if cost_impact.total_cost_usd > 0 else 1) }} SOL)</p>
+        </div>
+
+        <div class="section">
+            <h2>🎯 Key Recommendations</h2>
+            <ul>
+                {% if correlation_analysis and 'error' not in correlation_analysis %}<li><strong>Market Correlation:</strong> {% if correlation_analysis.correlation_metrics.pearson_correlation > 0.3 and correlation_analysis.correlation_metrics.is_significant %}Strong positive correlation with SOL - strategy performs better during SOL uptrends{% elif correlation_analysis.correlation_metrics.pearson_correlation < -0.3 and correlation_analysis.correlation_metrics.is_significant %}Strong negative correlation with SOL - strategy performs better during SOL downtrends{% elif correlation_analysis.correlation_metrics.is_significant %}Weak but significant correlation - monitor SOL market trends{% else %}No significant correlation with SOL market trends detected{% endif %}</li>{% endif %}
+                {% if weekend_analysis and 'error' not in weekend_analysis %}<li><strong>Weekend Parameter:</strong> {{ weekend_analysis.recommendations.primary_recommendation }} the weekendSizePercentage parameter for an expected impact of {{ "%.3f"|format(weekend_analysis.performance_comparison.impact_analysis.total_pnl_difference_sol) }} SOL</li>{% endif %}
+                <li><strong>Infrastructure Costs:</strong> Current costs represent {{ "%.1f"|format(portfolio_analysis.infrastructure_cost_impact.cost_impact_percent) }}% of gross performance - consider optimization if above 15%</li>
+                <li><strong>Risk Management:</strong> Current Sharpe ratio of {{ "%.2f"|format(portfolio_analysis.sol_denomination.sharpe_ratio) }} {% if portfolio_analysis.sol_denomination.sharpe_ratio > 1.0 %}indicates good risk-adjusted returns{% elif portfolio_analysis.sol_denomination.sharpe_ratio > 0.5 %}indicates acceptable risk-adjusted returns{% else %}suggests room for improvement in risk management{% endif %}</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>🔧 Technical Details</h2>
+            <p><strong>Analysis Period:</strong> {{ portfolio_analysis.analysis_metadata.start_date }} to {{ portfolio_analysis.analysis_metadata.end_date }} ({{ portfolio_analysis.analysis_metadata.analysis_period_days }} days)</p>
+            <p><strong>Positions Analyzed:</strong> {{ portfolio_analysis.analysis_metadata.positions_analyzed }}</p>
+            {% if correlation_analysis and 'error' not in correlation_analysis %}<p><strong>Market Data:</strong> {{ correlation_analysis.correlation_metrics.common_days }} days of SOL price data</p><p><strong>EMA Period:</strong> {{ correlation_analysis.analysis_metadata.ema_period }} days</p>{% endif %}
+            {% if weekend_analysis and 'error' not in weekend_analysis %}<p><strong>Weekend Definition:</strong> Saturday-Sunday UTC</p><p><strong>Size Multiplier:</strong> {{ "%.1f"|format(weekend_analysis.analysis_metadata.size_multiplier) }}x simulation</p>{% endif %}
+        </div>
+
+        <div class="section" style="text-align: center; margin-top: 50px; border: none; background: none;">
+            <p style="color: #7f8c8d; font-size: 0.9em;">Report generated by Portfolio Analytics System v1.0<br>Data sources: Position logs, Moralis API (SOL/USDC rates)<br><em>This analysis is for informational purposes only and should not be considered financial advice.</em></p>
+        </div>
+    </div>
+</body>
+</html>
