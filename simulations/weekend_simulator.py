@@ -192,11 +192,24 @@ class WeekendSimulator:
         
     def _calculate_portfolio_metrics(self, pnl_series: pd.Series, investment_series: pd.Series) -> Dict[str, float]:
         """Calculate key portfolio performance metrics."""
-        roi_series = (pnl_series / investment_series).replace([np.inf, -np.inf], 0).fillna(0)
+        # AIDEV-NOTE-CLAUDE: Old ROI calculation was flawed (simple average of individual ROIs).
+        # New calculation uses portfolio-level totals for a correct ROI that will differ between scenarios.
+        total_pnl = pnl_series.sum()
+        total_investment = investment_series.sum()
+        
+        # Correct, portfolio-level ROI
+        portfolio_roi = total_pnl / total_investment if total_investment != 0 else 0
+        
+        # # AIDEV-NOTE-GEMINI: The existing Sharpe ratio is calculated on a non-time-series set of ROIs.
+        # This is a non-standard calculation and will produce identical results for both
+        # scenarios because the distribution of individual ROIs doesn't change. Fixing this
+        # would require a daily PnL simulation, which is beyond this scope. The main bug in ROI is now resolved.
+        roi_per_pos_series = (pnl_series / investment_series).replace([np.inf, -np.inf], 0).fillna(0)
+
         return {
-            'total_pnl': pnl_series.sum(),
-            'average_roi': roi_series.mean(),
-            'sharpe_ratio': roi_series.mean() / roi_series.std() if roi_series.std() > 0 else 0
+            'total_pnl': total_pnl,
+            'average_roi': portfolio_roi,
+            'sharpe_ratio': roi_per_pos_series.mean() / roi_per_pos_series.std() if roi_per_pos_series.std() > 0 else 0
         }
         
     def _get_classification_summary(self, positions_df: pd.DataFrame) -> Dict[str, Any]:

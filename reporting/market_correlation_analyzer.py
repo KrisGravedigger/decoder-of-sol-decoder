@@ -153,27 +153,33 @@ class MarketCorrelationAnalyzer:
         logger.info(f"Calculated daily returns for {len(daily_returns)} days")
         return daily_returns
         
-    def _process_sol_price_data(self, sol_rates: Dict[str, float]) -> pd.DataFrame:
+    def _process_sol_price_data(self, sol_rates: Dict[str, Optional[float]]) -> pd.DataFrame:
         """
         Process SOL price data and calculate technical indicators.
         
         Args:
-            sol_rates (Dict[str, float]): SOL/USDC rates by date
+            sol_rates (Dict[str, Optional[float]]): SOL/USDC rates by date
             
         Returns:
             pd.DataFrame: Processed SOL data with indicators
         """
+        # AIDEV-NOTE-CLAUDE: This logic is now robust against empty or None-filled dictionaries.
         if not sol_rates:
+            logger.warning("SOL price data is empty. Cannot process.")
             return pd.DataFrame()
-        # Convert to DataFrame
-        sol_df = pd.DataFrame([
-            {'date': pd.to_datetime(date), 'close': price}
-            for date, price in sol_rates.items() if price is not None
-        ]).set_index('date').sort_index()
+            
+        # Filter for valid, non-None rates.
+        valid_rates = {k: v for k, v in sol_rates.items() if v is not None}
         
-        if sol_df.empty:
+        if not valid_rates:
+            logger.warning("No valid SOL price data found after filtering. Cannot process.")
             return pd.DataFrame()
 
+        # Convert to DataFrame
+        sol_df = pd.DataFrame(list(valid_rates.items()), columns=['date', 'close'])
+        sol_df['date'] = pd.to_datetime(sol_df['date'])
+        sol_df = sol_df.set_index('date').sort_index()
+        
         # Calculate daily returns
         sol_df['daily_return'] = sol_df['close'].pct_change()
         
@@ -193,7 +199,11 @@ class MarketCorrelationAnalyzer:
         # Clean data (remove NaN values)
         sol_df = sol_df.dropna(subset=['daily_return', 'ema_slope'])
         
-        logger.info(f"Processed SOL price data for {len(sol_df)} days")
+        if not sol_df.empty:
+            logger.info(f"Processed SOL price data for {len(sol_df)} days")
+        else:
+            logger.warning("SOL price data became empty after processing and NaN removal.")
+
         return sol_df
         
     def _calculate_correlations(self, portfolio_daily: pd.Series, sol_daily: pd.DataFrame) -> Dict[str, Any]:

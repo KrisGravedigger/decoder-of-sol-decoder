@@ -8,6 +8,9 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import yaml
 
+# AIDEV-NOTE-CLAUDE: Import PriceCacheManager to replace old cache logic
+from .price_cache_manager import PriceCacheManager
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,8 +22,7 @@ class InfrastructureCostAnalyzer:
         
         self.monthly_costs = self.config.get('infrastructure_costs', {}).get('monthly', {})
         self.daily_cost_usd = sum(self.monthly_costs.values()) / 30
-        self.price_cache_file = "price_cache/sol_usdc_daily.json"
-        self._ensure_cache_directory()
+        
         logger.info(f"Daily infrastructure cost: ${self.daily_cost_usd:.2f} USD")
         if not self.api_key:
             logger.warning("InfrastructureCostAnalyzer initialized without an API key. Will operate in cache-only mode.")
@@ -32,68 +34,59 @@ class InfrastructureCostAnalyzer:
             logger.error(f"Error loading config {config_path}: {e}")
             raise
 
-    def _ensure_cache_directory(self):
-        os.makedirs(os.path.dirname(self.price_cache_file), exist_ok=True)
-
-    def _load_price_cache(self) -> Dict[str, float]:
-        if not os.path.exists(self.price_cache_file): return {}
-        try:
-            with open(self.price_cache_file, 'r') as f: return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError): return {}
-        
-    def _save_price_cache(self, cache: Dict[str, float]):
-        try:
-            with open(self.price_cache_file, 'w') as f: json.dump(cache, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save price cache: {e}")
-
-    def _fetch_sol_usdc_price(self, date: str) -> Optional[float]:
-        # AIDEV-NOTE-CLAUDE: Cache-only mode implementation.
-        # If no API key is provided, do not attempt to fetch.
-        if not self.api_key:
-            logger.warning(f"Cache-only mode: SOL/USDC price for {date} not found in cache. Skipping API call.")
-            return None
-
-        sol_usdc_pool = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
-        date_obj = datetime.strptime(date, "%Y-%m-%d")
-        url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{sol_usdc_pool}/ohlcv"
-        headers = {"accept": "application/json", "X-API-Key": self.api_key}
-        params = {
-            "timeframe": "1h", "fromDate": date,
-            "toDate": (date_obj + timedelta(days=1)).strftime("%Y-%m-%d"), "currency": "usd"
-        }
-        time.sleep(0.6) # Rate limiting
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=20)
-            response.raise_for_status()
-            data = response.json().get('result', [])
-            if data and isinstance(data, list) and data[-1].get('close') is not None:
-                price = float(data[-1]['close'])
-                logger.info(f"Fetched SOL/USDC price for {date}: ${price:.2f}")
-                return price
-            logger.warning(f"No price data available for {date}")
-            return None
-        except requests.RequestException as e:
-            logger.error(f"API request failed for {date}: {e}")
-            return None
+    # AIDEV-NOTE-CLAUDE: Removed old, faulty cache/fetch methods:
+    # _ensure_cache_directory, _load_price_cache, _save_price_cache, _fetch_sol_usdc_price
+    # All price logic is now delegated to PriceCacheManager.
             
     def get_sol_usdc_rates(self, start_date: str, end_date: str) -> Dict[str, Optional[float]]:
-        cache = self._load_price_cache()
+        """
+        Get daily SOL/USDC prices using the centralized PriceCacheManager.
+        """
+        logger.info(f"Fetching SOL/USDC rates from {start_date} to {end_date} via PriceCacheManager.")
+        cache_manager = PriceCacheManager()
+        sol_usdc_pool = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+        
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        # Request one extra day to ensure the end_date is fully covered
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
         
-        all_dates = [d.strftime("%Y-%m-%d") for d in pd.date_range(start_dt, end_dt)]
-        missing_dates = [d for d in all_dates if d not in cache]
+        # Using 1h timeframe is a good balance for getting daily resolution
+        price_data = cache_manager.get_price_data(
+            pool_address=sol_usdc_pool,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            timeframe='1h',
+            api_key=self.api_key
+        )
+        
+        if not price_data:
+            logger.warning("No SOL/USDC price data returned from PriceCacheManager.")
+            return {d.strftime("%Y-%m-%d"): None for d in pd.date_range(start_date, end_date)}
+            
+        # Process raw candle data into a clean daily price series
+        df = pd.DataFrame(price_data)
+        df['date'] = pd.to_datetime(df['timestamp'], unit='s').dt.date
+        
+        # Get the last available 'close' price for each day
+        daily_prices_df = df.sort_values('timestamp').groupby('date')['close'].last()
+        
+        # Create a complete date range and map prices
+        all_dates = pd.date_range(start=start_date, end=end_date)
+        rates_series = daily_prices_df.reindex(all_dates.date, method=None)
+        
+        # Forward-fill any gaps (e.g., weekends with no new data)
+        rates_series_filled = rates_series.ffill()
+        
+        # Back-fill any initial NaNs
+        rates_series_filled = rates_series_filled.bfill()
 
-        if missing_dates:
-            logger.info(f"Fetching {len(missing_dates)} missing SOL/USDC prices")
-            for date in missing_dates:
-                price = self._fetch_sol_usdc_price(date)
-                cache[date] = price # Can be None if fetch fails
-                if price is None: logger.warning(f"Failed to fetch price for {date}, will be recorded as null.")
-            self._save_price_cache(cache)
-        
-        return {d: cache.get(d) for d in all_dates}
+        final_rates = {date.strftime('%Y-%m-%d'): price for date, price in rates_series_filled.items()}
+
+        missing_before_fill = rates_series.isnull().sum()
+        if missing_before_fill > 0:
+            logger.info(f"Found {missing_before_fill} days with no price data; used forward/backward fill to ensure complete series.")
+            
+        return final_rates
 
     def calculate_daily_costs(self, analysis_start: str, analysis_end: str) -> Dict[str, Dict[str, float]]:
         sol_rates = self.get_sol_usdc_rates(analysis_start, analysis_end)

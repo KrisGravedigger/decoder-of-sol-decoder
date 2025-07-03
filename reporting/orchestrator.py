@@ -26,6 +26,7 @@ from reporting.data_loader import load_and_prepare_positions
 from reporting.text_reporter import generate_portfolio_and_cost_reports, generate_weekend_simulation_report
 from simulations.weekend_simulator import WeekendSimulator
 from reporting.strategy_instance_detector import run_instance_detection
+from reporting.analysis_runner import AnalysisRunner
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,11 @@ class PortfolioAnalysisOrchestrator:
             report_files, timestamp = self._generate_portfolio_reports(portfolio_result)
             chart_files = self.chart_generator.generate_all_charts(portfolio_result)
 
+            # AIDEV-CLAUDE-ADDITION: New step for Spot vs. Bid-Ask analysis
+            logger.info("Step 1b: Running Spot vs. Bid-Ask strategy simulations...")
+            strategy_simulator = AnalysisRunner(api_key=self.api_key)
+            strategy_simulation_results = strategy_simulator.analyze_all_positions(positions_df)
+
             logger.info("Step 2: Running market correlation analysis...")
             correlation_analyzer = MarketCorrelationAnalyzer(self.config_path, api_key=self.api_key)
             correlation_result = correlation_analyzer.analyze_market_correlation(positions_df)
@@ -115,6 +121,8 @@ class PortfolioAnalysisOrchestrator:
             html_generator = HTMLReportGenerator()
             html_file = html_generator.generate_comprehensive_report(
                 portfolio_analysis=portfolio_result,
+                # AIDEV-CLAUDE-ADDITION: Pass new results to HTML generator
+                strategy_simulations=strategy_simulation_results,
                 correlation_analysis=correlation_result,
                 weekend_analysis=weekend_result
             )
@@ -122,7 +130,9 @@ class PortfolioAnalysisOrchestrator:
             execution_time = (datetime.now() - start_time).total_seconds()
             comprehensive_result = {
                 'status': 'SUCCESS', 'execution_time_seconds': execution_time,
-                'portfolio_analysis': portfolio_result, 'correlation_analysis': correlation_result,
+                'portfolio_analysis': portfolio_result,
+                'strategy_simulations': strategy_simulation_results, # Add this
+                'correlation_analysis': correlation_result,
                 'weekend_analysis': weekend_result,
                 'files_generated': {'html_report': html_file, 'text_reports': report_files, 'charts': chart_files}
             }
