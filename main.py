@@ -73,9 +73,14 @@ def run_full_pipeline(api_key: Optional[str]):
         print(f"Error during instance detection: {e}. Aborting pipeline.")
         return
 
-    # Step 3: Spot vs. Bid-Ask Simulation
-    logger.info("Pipeline Step 3: Running Spot vs. Bid-Ask simulation...")
-    print("\n[3/4] Running Spot vs. Bid-Ask simulation...")
+    # Step 3: SOL/USDC Rates (optional - skip if cache exists)
+    logger.info("Pipeline Step 3: Checking SOL/USDC rates...")
+    print("\n[3/5] Checking SOL/USDC historical rates...")
+    # Note: This step is optional and will be skipped if sufficient cache exists
+    
+    # Step 4: Spot vs. Bid-Ask Simulation  
+    logger.info("Pipeline Step 4: Running Spot vs. Bid-Ask simulation...")
+    print("\n[4/5] Running Spot vs. Bid-Ask simulation...")
     try:
         run_spot_vs_bidask_analysis(api_key)
         print("Spot vs. Bid-Ask simulation completed successfully.")
@@ -84,9 +89,9 @@ def run_full_pipeline(api_key: Optional[str]):
         print(f"Error during simulation: {e}. Aborting pipeline.")
         return
 
-    # Step 4: Comprehensive Reporting
-    logger.info("Pipeline Step 4: Generating comprehensive portfolio report...")
-    print("\n[4/4] Generating comprehensive portfolio report...")
+    # Step 5: Comprehensive Reporting
+    logger.info("Pipeline Step 5: Generating comprehensive portfolio report...")
+    print("\n[5/5] Generating comprehensive portfolio report...")
     try:
         orchestrator = PortfolioAnalysisOrchestrator(api_key=api_key)
         result = orchestrator.run_comprehensive_analysis('positions_to_analyze.csv')
@@ -124,15 +129,15 @@ def main_menu():
     orchestrator = PortfolioAnalysisOrchestrator(api_key=api_key)
 
     while True:
-        print_header("Main Menu - LP Strategy Analyzer")
         print("1. Step 1: Process Logs and Extract Positions")
         print("2. Step 2: Detect Strategy Instances (generates strategy_instances.csv)")
-        print("3. Step 3: Run Base Simulations (Spot vs. Bid-Ask)")
-        print("4. Step 4: Generate Portfolio Reports & Analysis (Menu)")
-        print("5. Run Full Pipeline (Step 1 -> 2 -> 3 -> 4)")
-        print("6. Exit")
+        print("3. Step 3: Fetch SOL/USDC Historical Rates (for portfolio analysis)")
+        print("4. Step 4: Run Base Simulations (Spot vs. Bid-Ask)")
+        print("5. Step 5: Generate Portfolio Reports & Analysis (Menu)")
+        print("6. Run Full Pipeline (Step 1 -> 2 -> 3 -> 4 -> 5)")
+        print("7. Exit")
         
-        choice = input("Select an option (1-6): ")
+        choice = input("Select an option (1-7): ")
 
         if choice == '1':
             print_header("Step 1: Log Processing")
@@ -141,13 +146,16 @@ def main_menu():
             print_header("Step 2: Strategy Instance Detection")
             run_instance_detection()
         elif choice == '3':
-            print_header("Step 3: Spot vs. Bid-Ask Simulation")
-            run_spot_vs_bidask_analysis(api_key)
+            print_header("Step 3: Fetch SOL/USDC Historical Rates")
+            fetch_sol_usdc_rates_menu(api_key)
         elif choice == '4':
-            reporting_menu(orchestrator)
+            print_header("Step 4: Spot vs. Bid-Ask Simulation")
+            run_spot_vs_bidask_analysis(api_key)
         elif choice == '5':
-            run_full_pipeline(api_key)
+            reporting_menu(orchestrator)
         elif choice == '6':
+            run_full_pipeline(api_key)
+        elif choice == '7':
             print("Exiting application...")
             break
         else:
@@ -187,6 +195,67 @@ def reporting_menu(orchestrator: PortfolioAnalysisOrchestrator):
             break
         else:
             print("Invalid choice, please try again.")
+
+def fetch_sol_usdc_rates_menu(api_key: Optional[str]):
+    """Menu for fetching SOL/USDC historical rates."""
+    if not api_key:
+        print("Error: No API key available. Cannot fetch SOL/USDC rates in cache-only mode.")
+        print("Historical rates are needed for portfolio analysis.")
+        return
+    
+    try:
+        from reporting.infrastructure_cost_analyzer import InfrastructureCostAnalyzer
+        
+        # Get date range from positions file
+        try:
+            import pandas as pd
+            positions_df = pd.read_csv("positions_to_analyze.csv")
+            
+            if positions_df.empty:
+                print("No positions found in positions_to_analyze.csv")
+                return
+            
+            # Parse dates and find range
+            from reporting.data_loader import _parse_custom_timestamp
+            positions_df['open_dt'] = positions_df['open_timestamp'].apply(_parse_custom_timestamp)
+            positions_df['close_dt'] = positions_df['close_timestamp'].apply(_parse_custom_timestamp)
+            
+            min_date = positions_df['open_dt'].min().strftime('%Y-%m-%d')
+            max_date = positions_df['close_dt'].max().strftime('%Y-%m-%d')
+            
+            print(f"Detected date range from positions: {min_date} to {max_date}")
+            
+        except Exception as e:
+            logger.warning(f"Could not detect date range from positions: {e}")
+            min_date = "2025-05-01"
+            max_date = "2025-07-31"
+            print(f"Using default date range: {min_date} to {max_date}")
+        
+        # Initialize cost analyzer and fetch rates
+        print("Fetching SOL/USDC historical rates...")
+        cost_analyzer = InfrastructureCostAnalyzer(api_key=api_key)
+        
+        sol_rates = cost_analyzer.get_sol_usdc_rates(min_date, max_date)
+        
+        # Count successful vs failed fetches
+        successful = sum(1 for rate in sol_rates.values() if rate is not None)
+        total = len(sol_rates)
+        failed = total - successful
+        
+        print(f"\nSOL/USDC Rate Fetching Results:")
+        print(f"  Total days: {total}")
+        print(f"  Successfully fetched: {successful}")
+        print(f"  Failed/cached: {failed}")
+        
+        if failed > 0:
+            print(f"  Note: {failed} days may use cached or fallback values")
+        
+        print(f"\nRates saved to: price_cache/sol_usdc_daily.json")
+        print("These rates will be used for portfolio analysis and cost calculations.")
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch SOL/USDC rates: {e}")
+        print(f"Error fetching SOL/USDC rates: {e}")
 
 if __name__ == "__main__":
     try:

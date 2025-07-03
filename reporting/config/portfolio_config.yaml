@@ -46,4 +46,4 @@ weekend_analysis:
 api_settings:
   # set 'true' to turn off all the API queries and use only /price_cache/ files.
   # set 'false'to turn on API queries.
-  cache_only: true
+  cache_only: false
