@@ -70,7 +70,7 @@ class Position:
         if not self.pool_address: 
             errors.append("Missing pool_address")
         if not self.initial_investment: 
-            errors.append("Missing initial_investment_sol")
+            errors.append("Missing investment_sol")
         if self.close_reason != "active_at_log_end" and not self.close_timestamp: 
             errors.append("Missing close_timestamp")
         return errors
@@ -83,9 +83,9 @@ class Position:
             "pool_address": self.pool_address, 
             "open_timestamp": self.open_timestamp,
             "close_timestamp": self.close_timestamp, 
-            "initial_investment_sol": self.initial_investment,
-            "final_pnl_sol_from_log": self.final_pnl, 
-            "actual_strategy_from_log": self.actual_strategy,
+            "investment_sol": self.initial_investment,
+            "pnl_sol": self.final_pnl, 
+            "strategy_raw": self.actual_strategy,
             "close_reason": self.close_reason, 
             "bot_version": self.bot_version,
             "wallet_id": self.wallet_id,

@@ -77,18 +77,11 @@ def load_and_prepare_positions(file_path: str, min_threshold: float) -> pd.DataF
         logger.error(f"Positions file not found: {file_path}")
         raise
 
-    # Validate required columns and map from actual CSV structure
-    csv_to_expected_mapping = {
-        'final_pnl_sol_from_log': 'pnl_sol',
-        'actual_strategy_from_log': 'strategy_raw',
-        'initial_investment_sol': 'investment_sol'
-    }
-
-    missing_csv_columns = [col for col in csv_to_expected_mapping.keys() if col not in positions_df.columns]
+    # Validate required columns (no mapping needed)
+    required_csv_columns = ['pnl_sol', 'strategy_raw', 'investment_sol']
+    missing_csv_columns = [col for col in required_csv_columns if col not in positions_df.columns]
     if missing_csv_columns:
-        raise ValueError(f"Missing required raw CSV columns: {missing_csv_columns}")
-
-    positions_df = positions_df.rename(columns=csv_to_expected_mapping)
+        raise ValueError(f"Missing required CSV columns: {missing_csv_columns}")
 
     # Extract strategy and step_size from strategy_raw
     positions_df['strategy'] = positions_df['strategy_raw'].str.extract(r'(Bid-Ask|Spot)', expand=False)
