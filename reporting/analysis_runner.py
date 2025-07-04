@@ -62,7 +62,7 @@ def generate_text_report(position_data: Dict, simulation_results: Dict) -> str:
     report.append("="*60)
     report.append(f"\n--- INPUT DATA ---")
     report.append(f"Investment: {position_data.get('investment_sol', 0):.4f} SOL")
-    report.append(f"Actual strategy: {position_data.get('actual_strategy_from_log', 'N/A')}")
+    report.append(f"Actual strategy: {position_data.get('strategy_raw', 'N/A')}")
     report.append(f"Actual PnL (from log): {position_data.get('pnl_sol', 'N/A')}")
     report.append(f"\n--- SIMULATION RESULTS (PnL in SOL) ---")
     
@@ -192,7 +192,7 @@ class AnalysisRunner:
                 }
             
             import re
-            strategy_str = position_dict.get('actual_strategy_from_log', '')
+            strategy_str = position_dict.get('strategy_raw', '')
             step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', str(strategy_str), re.IGNORECASE)
             step_size = step_match.group(1).upper() if step_match else "UNKNOWN"
             

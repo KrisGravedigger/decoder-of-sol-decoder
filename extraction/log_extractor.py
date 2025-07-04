@@ -325,7 +325,7 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
                 # Check if we should update: existing is incomplete and new is complete
                 if (existing_pos['close_reason'] == 'active_at_log_end' and 
                     pos['close_reason'] != 'active_at_log_end' and 
-                    pos['final_pnl_sol_from_log'] is not None):
+                    pos['pnl_sol'] is not None):
                     # Update existing position with complete data
                     processed_data.append(pos)
                     updated_count += 1

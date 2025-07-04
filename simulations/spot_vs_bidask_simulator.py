@@ -119,7 +119,7 @@ class SpotVsBidAskSimulator: # AIDEV-NOTE-CLAUDE: Renamed class from StrategyAna
             return {'error': f'Invalid investment amount: {initial_sol}'}
         
         if pd.isna(initial_sol) or initial_sol <= 0:
-            logger.warning(f"Invalid initial_investment_sol value: {initial_sol}")
+            logger.warning(f"Invalid investment_sol value: {initial_sol}")
             return {'error': f'Invalid investment amount: {initial_sol}'}
         initial_price = price_history[0]['close']
         final_price = price_history[-1]['close']
@@ -130,7 +130,7 @@ class SpotVsBidAskSimulator: # AIDEV-NOTE-CLAUDE: Renamed class from StrategyAna
         
         price_ratio = final_price / initial_price
 
-        actual_pnl_from_log = position_data.get('final_pnl_sol_from_log')
+        actual_pnl_from_log = position_data.get('pnl_sol')
         estimated_total_fees = actual_pnl_from_log if actual_pnl_from_log is not None else initial_sol * 0.005
 
         results = {}
