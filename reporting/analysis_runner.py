@@ -1,8 +1,6 @@
 import os
 import csv
-import json
 import time
-import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
@@ -16,88 +14,43 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from simulations.spot_vs_bidask_simulator import SpotVsBidAskSimulator
+# AIDEV-NOTE-CLAUDE: Import the custom timestamp parser as per CLAUDE.md
 from .data_loader import _parse_custom_timestamp
+from .price_cache_manager import PriceCacheManager
 
 # --- Configuration ---
 POSITIONS_CSV = "positions_to_analyze.csv"
 FINAL_REPORT_CSV = "final_analysis_report.csv"
 DETAILED_REPORTS_DIR = "detailed_reports"
-PRICE_CACHE_DIR = "price_cache"
 
 logger = logging.getLogger('AnalysisRunner')
 
-# AIDEV-NOTE-CLAUDE: API key is now passed as an argument for reliability.
 def fetch_price_history(pool_address: str, start_dt: datetime, end_dt: datetime, api_key: Optional[str]) -> List[Dict]:
-    """Fetch price history for a pool from Moralis API."""
-    os.makedirs(PRICE_CACHE_DIR, exist_ok=True)
+    """
+    Fetch price history with smart caching via PriceCacheManager.
     
-    start_unix = int(start_dt.timestamp())
-    end_unix = int(end_dt.timestamp())
-    cache_file = os.path.join(PRICE_CACHE_DIR, f"{pool_address}_{start_unix}_{end_unix}.json")
-
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r') as f:
-                logger.info(f"Loading prices from cache for {pool_address}")
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            logger.warning("Cache file error, attempting to fetch from API.")
-
-    if not api_key:
-        logger.warning(f"Cache-only mode: Price data for {pool_address} not found in cache. Skipping API call.")
-        return []
-
+    Args:
+        pool_address (str): Pool address
+        start_dt (datetime): Start datetime
+        end_dt (datetime): End datetime
+        api_key (Optional[str]): API key for fetching missing data
+        
+    Returns:
+        List[Dict]: Price data with timestamp and close keys
+    """
     duration_hours = (end_dt - start_dt).total_seconds() / 3600
     
-    if duration_hours <= 4: timeframe = "10min"
-    elif duration_hours <= 12: timeframe = "30min"
-    elif duration_hours <= 72: timeframe = "1h"
-    else: timeframe = "4h"
-
-    url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{pool_address}/ohlcv"
-    headers = {"accept": "application/json", "X-API-Key": api_key}
+    if duration_hours <= 4: 
+        timeframe = "10min"
+    elif duration_hours <= 12: 
+        timeframe = "30min"
+    elif duration_hours <= 72: 
+        timeframe = "1h"
+    else: 
+        timeframe = "4h"
     
-    start_date_str = start_dt.strftime('%Y-%m-%d')
-    end_date_str = (end_dt + timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    params = {"timeframe": timeframe, "fromDate": start_date_str, "toDate": end_date_str, "currency": "usd"}
-    
-    try:
-        logger.info(f"Fetching prices for {pool_address} (API params: {params})...")
-        response = requests.get(url, headers=headers, params=params, timeout=20)
-        response.raise_for_status()
-        data = response.json()
-        
-        processed_data = []
-        api_result = data.get('result', []) if isinstance(data, dict) else data
-        
-        if isinstance(api_result, list):
-            for d in api_result:
-                if isinstance(d, dict) and 'close' in d:
-                    ts_val = d.get('time') or d.get('timestamp')
-                    if ts_val:
-                        ts = 0
-                        if isinstance(ts_val, (int, float, str)) and str(ts_val).isdigit():
-                            ts = int(ts_val) // 1000
-                        elif isinstance(ts_val, str):
-                            try:
-                                ts_dt = datetime.fromisoformat(ts_val.replace('Z', '+00:00'))
-                                ts = int(ts_dt.timestamp())
-                            except ValueError: continue
-                        else: continue
-
-                        if start_unix <= ts <= end_unix:
-                            processed_data.append({'timestamp': ts, 'close': float(d['close'])})
-            processed_data.sort(key=lambda x: x['timestamp'])
-
-        with open(cache_file, 'w') as f: 
-            json.dump(processed_data, f)
-            
-        return processed_data
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching prices for {pool_address}: {e}")
-        return []
+    cache_manager = PriceCacheManager()
+    return cache_manager.get_price_data(pool_address, start_dt, end_dt, timeframe, api_key)
 
 def generate_text_report(position_data: Dict, simulation_results: Dict) -> str:
     """Generate a detailed text report for a position analysis."""
@@ -108,33 +61,165 @@ def generate_text_report(position_data: Dict, simulation_results: Dict) -> str:
     report.append(f"Period: {position_data['open_timestamp']} -> {position_data['close_timestamp']}")
     report.append("="*60)
     report.append(f"\n--- INPUT DATA ---")
-    report.append(f"Investment: {position_data.get('initial_investment_sol', 0):.4f} SOL")
+    report.append(f"Investment: {position_data.get('investment_sol', 0):.4f} SOL")
     report.append(f"Actual strategy: {position_data.get('actual_strategy_from_log', 'N/A')}")
-    report.append(f"Actual PnL (from log): {position_data.get('final_pnl_sol_from_log', 'N/A')}")
+    report.append(f"Actual PnL (from log): {position_data.get('pnl_sol', 'N/A')}")
     report.append(f"\n--- SIMULATION RESULTS (PnL in SOL) ---")
     
     if not simulation_results or 'error' in simulation_results:
         report.append("Error during simulation or no results available.")
     else:
+        # Use .get('pnl_sol', -9e9) for safe sorting even if a strategy fails
         sorted_results = sorted(simulation_results.items(), key=lambda item: item[1].get('pnl_sol', -9e9), reverse=True)
         for name, res in sorted_results:
             report.append(f"\n- Strategy: {name}")
             report.append(f"  > Total PnL: {res.get('pnl_sol', 0):+.5f} SOL ({res.get('return_pct', 0):.2f}%)")
             report.append(f"    (Est. fees: {res.get('pnl_from_fees', 0):+.5f} | Est. value change/IL: {res.get('pnl_from_il', 0):+.5f})")
-        report.append("\n" + "="*60)
-        report.append(f"BEST STRATEGY: {sorted_results[0][0]}")
-        report.append("="*60)
+        
+        if sorted_results:
+            report.append("\n" + "="*60)
+            report.append(f"BEST STRATEGY: {sorted_results[0][0]}")
+            report.append("="*60)
     return "\n".join(report)
+
+class AnalysisRunner:
+    """
+    Main analysis runner for Spot vs Bid-Ask strategy comparisons.
+    """
+    
+    def __init__(self, api_key: Optional[str] = None):
+        """
+        Initialize analysis runner.
+        
+        Args:
+            api_key (Optional[str]): Moralis API key
+        """
+        self.api_key = api_key
+        if not api_key:
+            logger.warning("AnalysisRunner initialized without API key - cache-only mode")
+    
+    def _smart_timestamp_parser(self, timestamp_str: str) -> Optional[datetime]:
+        """
+        Smart timestamp parser that handles both custom SOL Decoder format and standard format.
+        
+        Args:
+            timestamp_str (str): Timestamp string to parse
+            
+        Returns:
+            Optional[datetime]: Parsed datetime or None if parsing fails
+        """
+        if pd.isna(timestamp_str) or timestamp_str == '' or str(timestamp_str).lower() == 'nan':
+            return None
+            
+        # Check if it's SOL Decoder format (MM/DD-HH:MM:SS)
+        # Format has slash, dash, and when split by dash should give exactly 2 parts
+        if '/' in timestamp_str and '-' in timestamp_str and len(timestamp_str.split('-')) == 2:
+            return _parse_custom_timestamp(timestamp_str)
+        else:
+            # Standard format - use pandas directly
+            try:
+                return pd.to_datetime(timestamp_str)
+            except Exception as e:
+                logger.warning(f"Failed to parse standard timestamp '{timestamp_str}': {e}")
+                return None
+
+    def analyze_all_positions(self, positions_df: pd.DataFrame) -> List[Dict]:
+        """
+        Analyze all positions with strategy comparisons.
+        
+        Args:
+            positions_df (pd.DataFrame): Positions to analyze
+            
+        Returns:
+            List[Dict]: Analysis results for each position
+        """
+        results = []
+        # AIDEV-NOTE-CLAUDE: Use enumerate to get a correct loop counter (idx).
+        # The row index from iterrows() can be non-sequential after filtering.
+        total_positions = len(positions_df)
+        for idx, (original_index, position) in enumerate(positions_df.iterrows()):
+            logger.info(f"Analyzing position {idx + 1}/{total_positions}: {position['token_pair']} (pos_id: {position.get('position_id', 'N/A')})")
+            
+            result = self.analyze_single_position(position.to_dict())
+            if result:
+                results.append(result)
+        
+        return results
+    
+    def analyze_single_position(self, position_dict: Dict) -> Optional[Dict]:
+        """
+        Analyze single position with strategy comparison.
+        
+        Args:
+            position_dict (Dict): Position data
+            
+        Returns:
+            Optional[Dict]: Analysis result or None if failed
+        """
+        try:
+            # AIDEV-NOTE-CLAUDE: Debug logging for missing column investigation
+            logger.debug(f"Position {position_dict.get('position_id', 'UNKNOWN')} keys: {sorted(position_dict.keys())}")
+            
+            # Check for required columns before proceeding
+            # AIDEV-NOTE-CLAUDE: Use actual runtime column names, not CSV header names
+            required_columns = ['investment_sol', 'open_timestamp', 'close_timestamp', 'pool_address', 'token_pair']
+            missing_columns = [col for col in required_columns if col not in position_dict]
+            
+            if missing_columns:
+                logger.error(f"Missing required columns for position {position_dict.get('position_id', 'UNKNOWN')}: {missing_columns}")
+                logger.error(f"Available keys: {list(position_dict.keys())}")
+                return None
+            
+            # AIDEV-NOTE-CLAUDE: Smart timestamp parsing - handle both SOL Decoder and standard formats
+            start_dt = self._smart_timestamp_parser(str(position_dict['open_timestamp']))
+            end_dt = self._smart_timestamp_parser(str(position_dict['close_timestamp']))
+
+            if pd.isna(start_dt) or pd.isna(end_dt) or start_dt >= end_dt:
+                logger.warning(f"Invalid or unparseable timestamps for position {position_dict.get('position_id', 'N/A')}. open='{position_dict['open_timestamp']}', close='{position_dict['close_timestamp']}'")
+                return None
+                
+            price_history = fetch_price_history(
+                position_dict['pool_address'], start_dt, end_dt, self.api_key
+            )
+            
+            if not price_history:
+                logger.warning(f"No price history for {position_dict['token_pair']}. Skipping simulation for this position.")
+                return {
+                    'position_id': position_dict.get('position_id'),
+                    'token_pair': position_dict.get('token_pair'),
+                    'best_strategy': 'ERROR - No Price History',
+                    'simulation_results': {'error': 'No price history available'}
+                }
+            
+            import re
+            strategy_str = position_dict.get('actual_strategy_from_log', '')
+            step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', str(strategy_str), re.IGNORECASE)
+            step_size = step_match.group(1).upper() if step_match else "UNKNOWN"
+            
+            analyzer = SpotVsBidAskSimulator(bin_step=100, step_size=step_size)
+            simulation_results = analyzer.run_all_simulations(position_dict, price_history)
+            
+            if not simulation_results or 'error' in simulation_results:
+                best_strategy_name = 'ERROR - Simulation Failed'
+            else:
+                best_strategy_name = max(simulation_results, key=lambda k: simulation_results[k].get('pnl_sol', -9e9))
+            
+            return {
+                'position_id': position_dict.get('position_id'),
+                'token_pair': position_dict.get('token_pair'),
+                'best_strategy': best_strategy_name,
+                'simulation_results': simulation_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Analysis failed for position {position_dict.get('position_id')}: {e}", exc_info=True)
+            return None
 
 def run_spot_vs_bidask_analysis(api_key: Optional[str]):
     """Main analysis function that coordinates the Spot vs. Bid-Ask simulation."""
     if not api_key:
         logger.warning("No API key provided. Running in cache-only mode for Spot vs Bid-Ask analysis.")
 
-    if os.path.exists(PRICE_CACHE_DIR) and not os.listdir(PRICE_CACHE_DIR):
-        logger.info(f"Cleaning empty price cache folder: {PRICE_CACHE_DIR}")
-        shutil.rmtree(PRICE_CACHE_DIR)
-    
     logger.info(f"Loading positions from file {POSITIONS_CSV}")
     try:
         positions_df = pd.read_csv(POSITIONS_CSV)
@@ -144,64 +229,67 @@ def run_spot_vs_bidask_analysis(api_key: Optional[str]):
         print(f"Error: File {POSITIONS_CSV} not found. Please run step 1 first.")
         return
 
+    # AIDEV-NOTE-CLAUDE: API rate limiting - test mode with x positions max
+    """
+    test_limit = 5
+    if len(positions_df) > test_limit:
+        positions_to_run = positions_df.head(test_limit)
+        logger.info(f"Test mode: analyzing first {test_limit} positions (out of {len(positions_df)} total).")
+    else:
+        positions_to_run = positions_df
+        logger.info(f"Analyzing all {len(positions_to_run)} positions.")
+    """
+
+    positions_to_run = positions_df
+
     os.makedirs(DETAILED_REPORTS_DIR, exist_ok=True)
-    all_final_results = []
+    
+    runner = AnalysisRunner(api_key=api_key)
+    all_simulation_results = runner.analyze_all_positions(positions_to_run)
 
-    for index, position in positions_df.iterrows():
-        logger.info(f"\n--- Analyzing position {index+1}/{len(positions_df)}: {position['token_pair']} ---")
-        position_dict = position.to_dict()
-
-        start_dt = _parse_custom_timestamp(position['open_timestamp'])
-        end_dt = _parse_custom_timestamp(position['close_timestamp'])
-
-        if pd.isna(start_dt) or pd.isna(end_dt) or start_dt >= end_dt:
-            logger.warning(f"Skipped position {position.get('position_id', 'N/A')} due to invalid dates.")
+    # Process results for final CSV report
+    processed_results_for_df = []
+    for result in all_simulation_results:
+        if not result or 'position_id' not in result:
             continue
             
-        price_history = fetch_price_history(position['pool_address'], start_dt, end_dt, api_key)
-        time.sleep(0.6) # Rate limiting
-        
-        if not price_history:
-            logger.warning(f"No price history for {position['token_pair']}. Skipping simulation.")
+        # Find original position data to merge with results
+        original_position_series = positions_df[positions_df['position_id'] == result['position_id']]
+        if original_position_series.empty:
+            logger.warning(f"Could not find original data for position_id: {result['position_id']}")
             continue
+        original_position = original_position_series.iloc[0].to_dict()
         
-        import re
-        strategy_str = position.get('actual_strategy_from_log', '')
-        step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', strategy_str)
-        step_size = step_match.group(1) if step_match else "UNKNOWN"
-        bin_step = 100
-        
-        analyzer = SpotVsBidAskSimulator(bin_step=bin_step, step_size=step_size)
-        simulation_results = analyzer.run_all_simulations(position_dict, price_history)
-        
-        report_filename_safe = f"{position['token_pair'].replace('/', '_')}_{str(position['open_timestamp']).replace('/','-').replace(':','-')}.txt"
-        report_filename = os.path.join(DETAILED_REPORTS_DIR, report_filename_safe)
-        
-        text_report = generate_text_report(position_dict, simulation_results)
-        with open(report_filename, 'w', encoding='utf-8') as f: f.write(text_report)
-        logger.info(f"Saved detailed report: {report_filename}")
-        
-        best_strategy_name = "error"
-        best_pnl = None
-        if simulation_results and 'error' not in simulation_results:
-            best_strategy_name = max(simulation_results, key=lambda k: simulation_results[k].get('pnl_sol', -9e9))
-            best_pnl = simulation_results[best_strategy_name].get('pnl_sol')
+        final_row = {
+            **original_position, 
+            "best_sim_strategy": result.get('best_strategy'),
+        }
 
-        final_row = {**position_dict, "best_sim_strategy": best_strategy_name, "best_sim_pnl": best_pnl}
-        
-        if simulation_results and 'error' not in simulation_results:
-            for name, res in simulation_results.items():
+        sim_results = result.get('simulation_results', {})
+        if sim_results and 'error' not in sim_results:
+            best_strategy_pnl = sim_results.get(result.get('best_strategy'), {}).get('pnl_sol')
+            final_row["best_sim_pnl"] = best_strategy_pnl
+            for name, res in sim_results.items():
                 column_name = f"pnl_{name.replace(' ','_').lower()}"
                 final_row[column_name] = res.get('pnl_sol')
         
-        all_final_results.append(final_row)
+        processed_results_for_df.append(final_row)
+        
+        # Generate text report for each position
+        report_filename_safe = f"{result['token_pair'].replace('/', '_')}_{str(original_position['open_timestamp']).replace('/','-').replace(':','-')}.txt"
+        report_filename = os.path.join(DETAILED_REPORTS_DIR, report_filename_safe)
+        
+        text_report = generate_text_report(original_position, sim_results)
+        with open(report_filename, 'w', encoding='utf-8') as f: 
+            f.write(text_report)
+        logger.info(f"Saved detailed report: {report_filename}")
 
     logger.info(f"\nSaving final Spot vs. Bid-Ask comprehensive report...")
-    if all_final_results:
-        final_df = pd.DataFrame(all_final_results)
+    if processed_results_for_df:
+        final_df = pd.DataFrame(processed_results_for_df)
         final_df.to_csv(FINAL_REPORT_CSV, index=False, encoding='utf-8')
         logger.info(f"Saved final report to: {FINAL_REPORT_CSV}")
     else:
-        logger.warning("No final results were generated.")
+        logger.warning("No final results were generated for the comprehensive report.")
         
     logger.info("\nSpot vs. Bid-Ask analysis completed!")

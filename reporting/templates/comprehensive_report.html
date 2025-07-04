@@ -14,7 +14,7 @@
         h2 { font-size: 1.8em; }
         h3 { font-size: 1.4em; }
         .report-meta { text-align: center; color: #7f8c8d; margin-bottom: 40px; }
-        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
         .metric-card { background: #ecf0f1; padding: 20px; border-radius: 5px; }
         .metric-card h3 { margin-top: 0; }
         .metric-card .value { font-size: 2em; font-weight: bold; color: #34495e; }
@@ -51,13 +51,17 @@
                     <p class="label">After infrastructure costs</p>
                 </div>
                 <div class="metric-card">
-                    <h3>Sharpe Ratio (SOL)</h3>
-                    <p class="value">{{ "%.2f"|format(portfolio_analysis.sol_denomination.sharpe_ratio) }}</p>
-                    <p class="label">Risk-adjusted return</p>
+                    <h3>Best Sim Strategy</h3>
+                    {% if best_sim_strategy and best_sim_strategy.name %}
+                        <p class="value">{{ best_sim_strategy.name }}</p>
+                        <p class="label">PnL: {{ "%.3f"|format(best_sim_strategy.pnl) }} SOL</p>
+                    {% else %}
+                        <p class="value">N/A</p>
+                        <p class="label">Data unavailable</p>
+                    {% endif %}
                 </div>
                 <div class="metric-card">
                     <h3>SOL Correlation</h3>
-                    {# AIDEV-NOTE-CLAUDE: Robust check for nested data before rendering #}
                     {% if correlation_analysis and not correlation_analysis.get('error') and correlation_analysis.get('correlation_metrics') and not correlation_analysis.get('correlation_metrics').get('error') %}
                         <p class="value">{{ "%.3f"|format(correlation_analysis.correlation_metrics.pearson_correlation) }}</p>
                         <p class="label">Pearson correlation with SOL market</p>
@@ -83,13 +87,23 @@
         <div class="section">
             <h2>Portfolio Performance</h2>
             <div id="equity_curve" class="plotly-chart">{{ charts.equity_curve | safe }}</div>
-            <div id="metrics_summary" class="plotly-chart">{{ charts.metrics_summary | safe }}</div>
+            <div id="metrics_summary">{{ charts.metrics_summary | safe }}</div>
+        </div>
+        
+        <!-- Strategy Simulation -->
+        <div class="section">
+            <h2>Spot vs. Bid-Ask Simulation</h2>
+            <p>This section compares the aggregated performance of two fundamental liquidity provision strategies (Spot and Bid-Ask) against the actual recorded PnL for the entire portfolio. This helps determine if a different base strategy could have been more profitable overall.</p>
+            {% if strategy_simulations and charts.get('strategy_simulation_comparison') %}
+                <div id="strategy_simulation_comparison" class="plotly-chart">{{ charts.strategy_simulation_comparison | safe }}</div>
+            {% else %}
+                <div class="skipped">Strategy simulation analysis was not performed or failed.</div>
+            {% endif %}
         </div>
 
         <!-- Market Correlation Analysis -->
         <div class="section">
             <h2>Market Correlation Analysis</h2>
-            {# AIDEV-NOTE-CLAUDE: Robust check for nested data before rendering the entire section #}
             {% if correlation_analysis and not correlation_analysis.get('error') and charts.get('correlation_analysis') %}
                 <div id="correlation_analysis" class="plotly-chart">{{ charts.correlation_analysis | safe }}</div>
                 <div id="trend_performance" class="plotly-chart">{{ charts.trend_performance | safe }}</div>
@@ -110,54 +124,26 @@
                     <h3>Recommendation: {{ weekend_analysis.recommendations.primary_recommendation | replace('_', ' ') }}</h3>
                     <p>{{ weekend_analysis.recommendations.explanation }}</p>
                 </div>
-
-                <h3>Scenario Comparison</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th>{{ weekend_analysis.current_scenario.name }} (Current)</th>
-                            <th>{{ weekend_analysis.alternative_scenario.name }} (Simulated)</th>
-                            <th>Impact</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Total PnL (SOL)</td>
-                            <td>{{ "%.3f"|format(weekend_analysis.current_scenario.metrics.total_pnl) }}</td>
-                            <td>{{ "%.3f"|format(weekend_analysis.alternative_scenario.metrics.total_pnl) }}</td>
-                            <td class="{% if weekend_analysis.impact_analysis.total_pnl_difference_sol > 0 %}positive{% else %}negative{% endif %}">
-                                {{ "%+.3f"|format(weekend_analysis.impact_analysis.total_pnl_difference_sol) }}
-                                ({{ "%+.1f"|format(weekend_analysis.impact_analysis.pnl_improvement_percent) }}%)
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>Average ROI</td>
-                            <td>{{ "%.2f"|format(weekend_analysis.current_scenario.metrics.average_roi * 100) }}%</td>
-                            <td>{{ "%.2f"|format(weekend_analysis.alternative_scenario.metrics.average_roi * 100) }}%</td>
-                            <td class="{% if weekend_analysis.impact_analysis.roi_difference > 0 %}positive{% else %}negative{% endif %}">
-                                {{ "%+.2f"|format(weekend_analysis.impact_analysis.roi_difference * 100) }}%
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>Sharpe Ratio</td>
-                            <td>{{ "%.3f"|format(weekend_analysis.current_scenario.metrics.sharpe_ratio) }}</td>
-                            <td>{{ "%.3f"|format(weekend_analysis.alternative_scenario.metrics.sharpe_ratio) }}</td>
-                            <td class="{% if weekend_analysis.impact_analysis.sharpe_difference > 0 %}positive{% else %}negative{% endif %}">
-                                {{ "%+.3f"|format(weekend_analysis.impact_analysis.sharpe_difference) }}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
                 <div id="weekend_comparison" class="plotly-chart">{{ charts.weekend_comparison | safe }}</div>
-                <div id="weekend_distribution" class="plotly-chart">{{ charts.weekend_distribution | safe }}</div>
             {% else %}
                 <div class="skipped">
                     Weekend Parameter analysis was skipped.
-                    Reason: {{ weekend_analysis.raw.reason | default('Unknown') }}
+                    Reason: {{ weekend_analysis.raw.reason | default(weekend_analysis.reason, 'Unknown') }}
                 </div>
             {% endif %}
         </div>
+        
+        <!-- Strategy Heatmap -->
+        <div class="section">
+            <h2>Strategy Performance Heatmap</h2>
+            <p>This heatmap visualizes the average PnL for the top-performing strategy instances, broken down by step size. It helps identify which strategy configurations are most profitable.</p>
+            {% if charts.get('strategy_heatmap') %}
+                <div id="strategy_heatmap" class="plotly-chart" style="min-height: 600px;">{{ charts.strategy_heatmap | safe }}</div>
+            {% else %}
+                <div class="skipped">Strategy heatmap could not be generated. Check if 'strategy_instances.csv' exists and has sufficient data.</div>
+            {% endif %}
+        </div>
+        
     </div>
 </body>
 </html>

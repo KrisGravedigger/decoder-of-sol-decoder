@@ -6,7 +6,9 @@ comprehensive HTML report.
 """
 import logging
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -22,6 +24,7 @@ def create_equity_curve_chart(portfolio_analysis: Dict[str, Any]) -> str:
     try:
         daily_df = portfolio_analysis['raw_data']['daily_returns_df']
         sol_rates = portfolio_analysis['raw_data']['sol_rates']
+        fallback_price = 150.0
         
         if daily_df.empty:
             return "<p>No daily data available for equity curve</p>"
@@ -30,8 +33,10 @@ def create_equity_curve_chart(portfolio_analysis: Dict[str, Any]) -> str:
         daily_df['cumulative_pnl_usdc'] = 0.0
         for idx, row in daily_df.iterrows():
             date_str = row['date'].strftime("%Y-%m-%d")
-            if date_str in sol_rates:
-                daily_df.at[idx, 'cumulative_pnl_usdc'] = row['cumulative_pnl_sol'] * sol_rates[date_str]
+            # AIDEV-NOTE-CLAUDE: Fix for TypeError. Handle None values from sol_rates.
+            rate = sol_rates.get(date_str)
+            price_to_use = rate if rate is not None else fallback_price
+            daily_df.at[idx, 'cumulative_pnl_usdc'] = row['cumulative_pnl_sol'] * price_to_use
                 
         fig = make_subplots(
             rows=2, cols=1,
@@ -43,9 +48,10 @@ def create_equity_curve_chart(portfolio_analysis: Dict[str, Any]) -> str:
         fig.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['cumulative_pnl_sol'], name='SOL PnL', line=dict(color='#FF6B35', width=3), hovertemplate='Date: %{x}<br>SOL PnL: %{y:.3f}<extra></extra>'), row=1, col=1)
         fig.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['cumulative_pnl_usdc'], name='USDC PnL', line=dict(color='#004E89', width=2, dash='dash'), yaxis='y2', hovertemplate='Date: %{x}<br>USDC PnL: $%{y:.2f}<extra></extra>'), row=1, col=1)
         
-        if sol_rates:
-            sol_dates = [datetime.strptime(date, "%Y-%m-%d") for date in sol_rates.keys()]
-            sol_prices = list(sol_rates.values())
+        valid_sol_rates = {k: v for k, v in sol_rates.items() if v is not None}
+        if valid_sol_rates:
+            sol_dates = [datetime.strptime(date, "%Y-%m-%d") for date in valid_sol_rates.keys()]
+            sol_prices = list(valid_sol_rates.values())
             fig.add_trace(go.Scatter(x=sol_dates, y=sol_prices, name='SOL/USDC Price', line=dict(color='#7209B7', width=2), hovertemplate='Date: %{x}<br>SOL Price: $%{y:.2f}<extra></extra>'), row=2, col=1)
             
         fig.update_layout(title=dict(text="Portfolio Performance - Dual Currency Analysis", font=dict(size=20, color='#2E3440')), height=700, showlegend=True, template='plotly_white', hovermode='x unified')
@@ -61,25 +67,37 @@ def create_equity_curve_chart(portfolio_analysis: Dict[str, Any]) -> str:
         return f"<p>Error creating equity curve chart: {str(e)}</p>"
 
 def create_metrics_summary_chart(portfolio_analysis: Dict[str, Any]) -> str:
-    """Create metrics summary visualization."""
+    """Create metrics summary visualization as a table for clarity."""
     try:
         sol_metrics = portfolio_analysis['sol_denomination']
         usdc_metrics = portfolio_analysis['usdc_denomination']
         
-        metrics = ['Total PnL', 'Win Rate (%)', 'Sharpe Ratio', 'Max Drawdown (%)']
-        sol_values = [sol_metrics['total_pnl_sol'], sol_metrics['win_rate'] * 100, sol_metrics['sharpe_ratio'], abs(sol_metrics['max_drawdown_percent'])]
-        usdc_values = [usdc_metrics['total_pnl_usdc'], usdc_metrics['win_rate'] * 100, usdc_metrics['sharpe_ratio'], abs(usdc_metrics['max_drawdown_percent'])]
+        # AIDEV-NOTE-CLAUDE: Fix for KeyError by accessing keys that are guaranteed to exist.
+        header = ['Metric', 'SOL Denomination', 'USDC Denomination']
+        cells = [
+            ['Total PnL', f"{sol_metrics.get('total_pnl_sol', 0):.3f} SOL", f"${usdc_metrics.get('total_pnl_usdc', 0):.2f}"],
+            ['Net PnL (after costs)', f"{sol_metrics.get('net_pnl_after_costs', 0):.3f} SOL", f"${usdc_metrics.get('net_pnl_after_costs', 0):.2f}"],
+            ['Win Rate', f"{sol_metrics.get('win_rate', 0):.1%}", f"{usdc_metrics.get('win_rate', 0):.1%}"],
+            ['Sharpe Ratio', f"{sol_metrics.get('sharpe_ratio', 0):.2f}", f"{usdc_metrics.get('sharpe_ratio', 0):.2f}"],
+            ['Max Drawdown', f"{sol_metrics.get('max_drawdown_percent', 0):.2%}", f"{usdc_metrics.get('max_drawdown_percent', 0):.2%}"],
+            ['Cost Impact', f"{sol_metrics.get('cost_impact_percent', 0):.1f}%", f"{usdc_metrics.get('cost_impact_percent', 0):.1f}%"],
+        ]
+
+        cells_transposed = list(map(list, zip(*cells)))
         
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='SOL Denomination', x=metrics, y=sol_values, marker_color='#FF6B35', hovertemplate='%{x}<br>SOL: %{y:.3f}<extra></extra>'))
+        fig = go.Figure(data=[go.Table(
+            header=dict(values=header,
+                        fill_color='#2c3e50',
+                        align='left',
+                        font=dict(color='white', size=14)),
+            cells=dict(values=cells_transposed,
+                       fill_color='#ecf0f1',
+                       align='left',
+                       font=dict(size=12, color='#2c3e50'),
+                       height=30)
+        )])
         
-        usdc_values_normalized = usdc_values.copy()
-        if len(portfolio_analysis['raw_data']['sol_rates']) > 0:
-            avg_sol_price = np.mean(list(portfolio_analysis['raw_data']['sol_rates'].values()))
-            usdc_values_normalized[0] /= avg_sol_price
-            
-        fig.add_trace(go.Bar(name='USDC Denomination', x=metrics, y=usdc_values_normalized, marker_color='#004E89', hovertemplate='%{x}<br>USDC: %{y:.3f}<extra></extra>'))
-        fig.update_layout(title="Portfolio Metrics Comparison", xaxis_title="Metrics", yaxis_title="Value", barmode='group', template='plotly_white', height=400)
+        fig.update_layout(title="Key Performance Indicators", height=300, margin=dict(l=10, r=10, t=50, b=10))
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         
@@ -87,13 +105,13 @@ def create_metrics_summary_chart(portfolio_analysis: Dict[str, Any]) -> str:
         logger.error(f"Failed to create metrics summary chart: {e}", exc_info=True)
         return f"<p>Error creating metrics chart: {str(e)}</p>"
 
+
 def create_correlation_chart(correlation_analysis: Dict[str, Any]) -> str:
     """Create market correlation visualization."""
     try:
-        # AIDEV-NOTE-CLAUDE: Deeper check for nested errors or missing data.
         corr_metrics = correlation_analysis.get('correlation_metrics', {})
         if not correlation_analysis or correlation_analysis.get('error') or corr_metrics.get('error'):
-            return "" # Return empty string, template handles the message.
+            return "" 
 
         raw_data = correlation_analysis.get('raw_data', {})
         portfolio_daily = raw_data.get('portfolio_daily_returns')
@@ -112,13 +130,12 @@ def create_correlation_chart(correlation_analysis: Dict[str, Any]) -> str:
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=sol_aligned, y=portfolio_aligned, mode='markers', name='Daily Returns', marker=dict(size=8, color=portfolio_aligned, colorscale='RdYlGn', showscale=True, colorbar=dict(title="Portfolio Return")), hovertemplate='SOL Return: %{x:.2%}<br>Portfolio Return: %{y:.3f} SOL<extra></extra>'))
         
-        # Check for sufficient points for trend line
         if len(sol_aligned.dropna()) > 1:
             z = np.polyfit(sol_aligned, portfolio_aligned, 1)
             p = np.poly1d(z)
             fig.add_trace(go.Scatter(x=sol_aligned, y=p(sol_aligned), mode='lines', name='Trend Line', line=dict(color='red', width=2, dash='dash')))
         
-        fig.update_layout(title=f"Portfolio vs SOL Correlation (r={corr_metrics['pearson_correlation']:.3f}, p={corr_metrics['pearson_p_value']:.3f})", xaxis_title="SOL Daily Return", yaxis_title="Portfolio Daily Return (SOL)", template='plotly_white', height=500)
+        fig.update_layout(title=f"Portfolio vs SOL Correlation (r={corr_metrics.get('pearson_correlation', 0):.3f}, p={corr_metrics.get('pearson_p_value', 1):.3f})", xaxis_title="SOL Daily Return", yaxis_title="Portfolio Daily Return (SOL)", template='plotly_white', height=500)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         
@@ -129,16 +146,15 @@ def create_correlation_chart(correlation_analysis: Dict[str, Any]) -> str:
 def create_trend_performance_chart(correlation_analysis: Dict[str, Any]) -> str:
     """Create trend-based performance chart."""
     try:
-        # AIDEV-NOTE-CLAUDE: Deeper check for nested errors and required keys like 'uptrend'.
         trend_analysis = correlation_analysis.get('trend_analysis', {})
         if (not correlation_analysis or correlation_analysis.get('error') or 
             trend_analysis.get('error') or 'uptrend' not in trend_analysis):
-            return "" # Return empty string, template handles the message.
+            return ""
 
         trends = ['Uptrend', 'Downtrend']
-        returns = [trend_analysis['uptrend']['mean_return'], trend_analysis['downtrend']['mean_return']]
-        win_rates = [trend_analysis['uptrend']['win_rate'] * 100, trend_analysis['downtrend']['win_rate'] * 100]
-        days = [trend_analysis['uptrend']['days'], trend_analysis['downtrend']['days']]
+        returns = [trend_analysis.get('uptrend', {}).get('mean_return', 0), trend_analysis.get('downtrend', {}).get('mean_return', 0)]
+        win_rates = [trend_analysis.get('uptrend', {}).get('win_rate', 0) * 100, trend_analysis.get('downtrend', {}).get('win_rate', 0) * 100]
+        days = [trend_analysis.get('uptrend', {}).get('days', 0), trend_analysis.get('downtrend', {}).get('days', 0)]
         
         fig = make_subplots(rows=1, cols=3, subplot_titles=('Average Daily Return', 'Win Rate (%)', 'Days Count'), specs=[[{"type": "bar"}, {"type": "bar"}, {"type": "bar"}]])
         fig.add_trace(go.Bar(x=trends, y=returns, name='Avg Return', marker_color=['#4CAF50', '#F44336']), row=1, col=1)
@@ -155,60 +171,36 @@ def create_trend_performance_chart(correlation_analysis: Dict[str, Any]) -> str:
 def create_weekend_comparison_chart(weekend_analysis: Dict[str, Any]) -> str:
     """Create weekend parameter comparison chart."""
     try:
-        # AIDEV-NOTE-CLAUDE: Handle both analysis skipped and error cases
-        if 'analysis_skipped' in weekend_analysis:
+        if weekend_analysis.get('analysis_skipped'):
             return f"<p>Weekend analysis was skipped: {weekend_analysis.get('reason', 'unknown reason')}</p>"
+        if 'error' in weekend_analysis or not weekend_analysis.get('is_valid'):
+            return f"<p>Weekend analysis error: {weekend_analysis.get('error', 'invalid data')}</p>"
             
-        if 'error' in weekend_analysis:
-            return f"<p>Weekend analysis error: {weekend_analysis['error']}</p>"
-            
-        comparison = weekend_analysis['performance_comparison']
+        comparison = weekend_analysis.get('performance_comparison', {})
         
-        # AIDEV-NOTE-CLAUDE: Updated to use new structure (current_scenario/alternative_scenario)
-        current = comparison['current_scenario']['metrics']
-        alternative = comparison['alternative_scenario']['metrics']
+        current = comparison.get('current_scenario', {}).get('metrics', {})
+        alternative = comparison.get('alternative_scenario', {}).get('metrics', {})
         
-        # AIDEV-NOTE-CLAUDE: Removed win_rate as it's not included in weekend analysis metrics
         metrics = ['Total PnL', 'Average ROI (%)', 'Sharpe Ratio']
         current_values = [
-            current['total_pnl'], 
-            current['average_roi'] * 100, 
-            current['sharpe_ratio']
+            current.get('total_pnl', 0), 
+            current.get('average_roi', 0) * 100, 
+            current.get('sharpe_ratio', 0)
         ]
         alternative_values = [
-            alternative['total_pnl'], 
-            alternative['average_roi'] * 100, 
-            alternative['sharpe_ratio']
+            alternative.get('total_pnl', 0), 
+            alternative.get('average_roi', 0) * 100, 
+            alternative.get('sharpe_ratio', 0)
         ]
         
-        # Get scenario names from the analysis
-        current_name = comparison['current_scenario']['name']
-        alternative_name = comparison['alternative_scenario']['name']
+        current_name = comparison.get('current_scenario', {}).get('name', 'Current')
+        alternative_name = comparison.get('alternative_scenario', {}).get('name', 'Alternative')
         
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            name=current_name, 
-            x=metrics, 
-            y=current_values, 
-            marker_color='#FF6B35',
-            hovertemplate='%{x}<br>' + current_name + ': %{y:.3f}<extra></extra>'
-        ))
-        fig.add_trace(go.Bar(
-            name=alternative_name, 
-            x=metrics, 
-            y=alternative_values, 
-            marker_color='#004E89',
-            hovertemplate='%{x}<br>' + alternative_name + ': %{y:.3f}<extra></extra>'
-        ))
+        fig.add_trace(go.Bar(name=current_name, x=metrics, y=current_values, marker_color='#FF6B35', hovertemplate='%{x}<br>' + current_name + ': %{y:.3f}<extra></extra>'))
+        fig.add_trace(go.Bar(name=alternative_name, x=metrics, y=alternative_values, marker_color='#004E89', hovertemplate='%{x}<br>' + alternative_name + ': %{y:.3f}<extra></extra>'))
         
-        fig.update_layout(
-            title="Weekend Parameter Impact Comparison", 
-            xaxis_title="Metrics", 
-            yaxis_title="Value", 
-            barmode='group', 
-            template='plotly_white', 
-            height=500
-        )
+        fig.update_layout(title="Weekend Parameter Impact Comparison", xaxis_title="Metrics", yaxis_title="Value", barmode='group', template='plotly_white', height=500)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         
@@ -219,34 +211,142 @@ def create_weekend_comparison_chart(weekend_analysis: Dict[str, Any]) -> str:
 def create_weekend_distribution_chart(weekend_analysis: Dict[str, Any]) -> str:
     """Create weekend position distribution chart."""
     try:
-        # AIDEV-NOTE-CLAUDE: Handle analysis skipped case
-        if 'analysis_skipped' in weekend_analysis:
+        if weekend_analysis.get('analysis_skipped'):
             return f"<p>Weekend analysis was skipped: {weekend_analysis.get('reason', 'unknown reason')}</p>"
+        if 'error' in weekend_analysis or not weekend_analysis.get('is_valid'):
+            return f"<p>Weekend analysis error: {weekend_analysis.get('error', 'invalid data')}</p>"
             
-        if 'error' in weekend_analysis:
-            return f"<p>Weekend analysis error: {weekend_analysis['error']}</p>"
-            
-        classification = weekend_analysis['position_classification']
+        classification = weekend_analysis.get('position_classification', {})
         
         fig = go.Figure()
         fig.add_trace(go.Pie(
             labels=['Weekend Opened', 'Weekday Opened'], 
             values=[
-                classification['weekend_opened']['count'], 
-                classification['weekday_opened']['count']
+                classification.get('weekend_opened', {}).get('count', 0), 
+                classification.get('weekday_opened', {}).get('count', 0)
             ], 
             hole=0.3, 
             marker_colors=['#FF6B35', '#004E89'], 
             hovertemplate='%{label}<br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
         ))
-        fig.update_layout(
-            title="Position Opening Distribution", 
-            template='plotly_white', 
-            height=400
-        )
+        fig.update_layout(title="Position Opening Distribution", template='plotly_white', height=400)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         
     except Exception as e:
         logger.error(f"Failed to create weekend distribution chart: {e}", exc_info=True)
         return f"<p>Error creating weekend distribution chart: {str(e)}</p>"
+
+def create_strategy_simulation_chart(simulation_results: Optional[List[Dict]], portfolio_analysis: Dict[str, Any]) -> str:
+    """Create a bar chart comparing total PnL from different strategies."""
+    try:
+        # AIDEV-NOTE-CLAUDE: Enhanced debug logging for portfolio structure
+        # Debug complete - portfolio structure identified
+        
+        if not simulation_results:
+            return "<div class='skipped'>No simulation results available.</div>"
+
+        sim_pnl = {}
+        for res in simulation_results:
+            if not res or 'simulation_results' not in res: continue
+            for name, data in res['simulation_results'].items():
+                if 'pnl_sol' in data:
+                    sim_pnl[name] = sim_pnl.get(name, 0) + data['pnl_sol']
+
+        # AIDEV-NOTE-CLAUDE: gross_pnl_sol is in infrastructure_cost_impact, not sol_denomination
+        cost_impact_data = portfolio_analysis.get('infrastructure_cost_impact', {})
+        sol_data = portfolio_analysis.get('sol_denomination', {})
+        
+        if 'gross_pnl_sol' in cost_impact_data:
+            actual_pnl = cost_impact_data['gross_pnl_sol']
+        elif 'total_pnl_sol' in sol_data:
+            actual_pnl = sol_data['total_pnl_sol']
+            logger.info("Using total_pnl_sol as fallback for gross_pnl_sol")
+        else:
+            logger.warning("No suitable PnL metric found in portfolio analysis")
+            return "<div class='skipped'>Portfolio analysis data incomplete - cannot create strategy comparison chart.</div>"
+
+        strategy_names = list(sim_pnl.keys()) + ['Actual (from Log)']
+        pnl_values = list(sim_pnl.values()) + [actual_pnl]
+        
+        df = pd.DataFrame({'Strategy': strategy_names, 'Total PnL (SOL)': pnl_values})
+        df = df.sort_values('Total PnL (SOL)', ascending=False)
+        
+        fig = px.bar(df, x='Strategy', y='Total PnL (SOL)', color='Strategy',
+                     color_discrete_map={'Actual (from Log)': '#7f8c8d'},
+                     title='Aggregated PnL: Actual vs. Simulated Strategies',
+                     labels={'Total PnL (SOL)': 'Total PnL (SOL)'})
+        
+        fig.update_layout(template='plotly_white', height=500, showlegend=False)
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+
+    except Exception as e:
+        logger.error(f"Failed to create strategy simulation chart: {e}", exc_info=True)
+        return f"<p>Error creating strategy simulation chart: {str(e)}</p>"
+
+    except Exception as e:
+        logger.error(f"Failed to create strategy simulation chart: {e}", exc_info=True)
+        return f"<p>Error creating strategy simulation chart: {str(e)}</p>"
+
+def create_strategy_heatmap_chart(strategy_instances_path: str = "strategy_instances.csv") -> str:
+    """Create an interactive strategy performance heatmap from strategy_instances.csv."""
+    try:
+        if not os.path.exists(strategy_instances_path):
+            return "<div class='skipped'>strategy_instances.csv not found. Run log extraction and instance detection.</div>"
+            
+        df = pd.read_csv(strategy_instances_path)
+        min_occurrences = 3
+        top_strategies = 15
+        
+        df = df[df['position_count'] >= min_occurrences]
+        if df.empty:
+            return f"<div class='skipped'>No strategies with at least {min_occurrences} positions found.</div>"
+
+        def _extract_step_size(s):
+            m = re.search(r'\b(MEDIUM|WIDE|NARROW|SIXTYNINE)\b', str(s), re.IGNORECASE)
+            return m.group(1).upper() if m else 'MEDIUM'
+        
+        def _extract_strategy_name(s):
+            s_clean = str(s)
+            # AIDEV-NOTE-CLAUDE: Fix for TypeError. Using re.sub for case-insensitive replace.
+            for step in ['MEDIUM', 'WIDE', 'NARROW', 'SIXTYNINE']:
+                s_clean = re.sub(step, '', s_clean, flags=re.IGNORECASE).strip()
+            return ' '.join(s_clean.split()).rstrip('() -') or 'Unknown'
+
+        df['step_size'] = df['strategy'].apply(_extract_step_size)
+        df['strategy_clean'] = df['strategy'].apply(_extract_strategy_name)
+        
+        sort_metric = 'performance_score' if 'performance_score' in df.columns else 'avg_pnl_percent'
+        df = df.sort_values(sort_metric, ascending=False).head(top_strategies)
+        
+        df['strategy_label'] = df['strategy_clean'] + ' ' + df['initial_investment'].round(3).astype(str) + ' SOL'
+        
+        pivot_df = df.pivot(index='strategy_label', columns='step_size', values='avg_pnl_percent')
+        
+        if pivot_df.empty:
+            return "<div class='skipped'>Could not create pivot table for heatmap. Check data.</div>"
+
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot_df.values,
+            x=pivot_df.columns,
+            y=pivot_df.index,
+            colorscale='RdYlGn',
+            zmid=0,
+            hovertemplate='Strategy: %{y}<br>Step Size: %{x}<br>Avg PnL: %{z:.2f}%<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=f'Strategy Performance Heatmap (Avg PnL %)',
+            xaxis_title='Step Size',
+            yaxis_title='Strategy Instance',
+            template='plotly_white',
+            height=max(400, len(pivot_df.index) * 30 + 150),
+            yaxis=dict(autorange="reversed")
+        )
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+
+    except Exception as e:
+        logger.error(f"Failed to create strategy heatmap chart: {e}", exc_info=True)
+        return f"<p>Error creating strategy heatmap chart: {str(e)}</p>"
