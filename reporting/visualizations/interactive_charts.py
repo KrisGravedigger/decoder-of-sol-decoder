@@ -240,6 +240,9 @@ def create_weekend_distribution_chart(weekend_analysis: Dict[str, Any]) -> str:
 def create_strategy_simulation_chart(simulation_results: Optional[List[Dict]], portfolio_analysis: Dict[str, Any]) -> str:
     """Create a bar chart comparing total PnL from different strategies."""
     try:
+        # AIDEV-NOTE-CLAUDE: Enhanced debug logging for portfolio structure
+        # Debug complete - portfolio structure identified
+        
         if not simulation_results:
             return "<div class='skipped'>No simulation results available.</div>"
 
@@ -250,7 +253,18 @@ def create_strategy_simulation_chart(simulation_results: Optional[List[Dict]], p
                 if 'pnl_sol' in data:
                     sim_pnl[name] = sim_pnl.get(name, 0) + data['pnl_sol']
 
-        actual_pnl = portfolio_analysis['sol_denomination']['gross_pnl_sol']
+        # AIDEV-NOTE-CLAUDE: gross_pnl_sol is in infrastructure_cost_impact, not sol_denomination
+        cost_impact_data = portfolio_analysis.get('infrastructure_cost_impact', {})
+        sol_data = portfolio_analysis.get('sol_denomination', {})
+        
+        if 'gross_pnl_sol' in cost_impact_data:
+            actual_pnl = cost_impact_data['gross_pnl_sol']
+        elif 'total_pnl_sol' in sol_data:
+            actual_pnl = sol_data['total_pnl_sol']
+            logger.info("Using total_pnl_sol as fallback for gross_pnl_sol")
+        else:
+            logger.warning("No suitable PnL metric found in portfolio analysis")
+            return "<div class='skipped'>Portfolio analysis data incomplete - cannot create strategy comparison chart.</div>"
 
         strategy_names = list(sim_pnl.keys()) + ['Actual (from Log)']
         pnl_values = list(sim_pnl.values()) + [actual_pnl]
@@ -266,6 +280,10 @@ def create_strategy_simulation_chart(simulation_results: Optional[List[Dict]], p
         fig.update_layout(template='plotly_white', height=500, showlegend=False)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+
+    except Exception as e:
+        logger.error(f"Failed to create strategy simulation chart: {e}", exc_info=True)
+        return f"<p>Error creating strategy simulation chart: {str(e)}</p>"
 
     except Exception as e:
         logger.error(f"Failed to create strategy simulation chart: {e}", exc_info=True)

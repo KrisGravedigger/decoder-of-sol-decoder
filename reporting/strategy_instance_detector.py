@@ -104,9 +104,9 @@ class StrategyInstanceDetector:
         if not positions:
             return {}
         
-        # AIDEV-NOTE-CLAUDE: Use correct column names from CSV
-        pnl_column = 'final_pnl_sol_from_log'
-        investment_column = 'initial_investment_sol'
+        # AIDEV-NOTE-CLAUDE: Use runtime column names (mapped from CSV)
+        pnl_column = 'pnl_sol'
+        investment_column = 'investment_sol'
         
         pnl_values = [pos[pnl_column] for pos in positions if pos.get(pnl_column) is not None]
         investment_values = [pos[investment_column] for pos in positions if pos.get(investment_column) is not None]
@@ -214,9 +214,9 @@ class StrategyInstanceDetector:
         for idx, row in df.iterrows():
             # AIDEV-NOTE-CLAUDE: Column name mapping for compatibility with CSV from log_extractor
             column_mapping = {
-                'strategy': 'actual_strategy_from_log',  # CSV uses '_from_log' suffix
-                'investment': 'initial_investment_sol',   # CSV uses '_sol' suffix  
-                'final_pnl': 'final_pnl_sol_from_log'    # CSV uses full descriptive name
+                'strategy': 'strategy_raw',  # Runtime column name
+                'investment': 'investment_sol',   # Runtime column name  
+                'final_pnl': 'pnl_sol'    # Runtime column name
             }
 
             # Extract required parameters with proper column names

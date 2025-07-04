@@ -152,7 +152,17 @@ class PriceCacheManager:
         for gap_start, gap_end in gaps:
             logger.info(f"Fetching gap: {gap_start} to {gap_end}")
             gap_data = self._fetch_from_api(pool_address, gap_start, gap_end, timeframe, api_key)
-            new_data.extend(gap_data)
+            
+            # AIDEV-NOTE-CLAUDE: Only process data if API request was successful
+            if gap_data and isinstance(gap_data, list) and len(gap_data) > 0:
+                # Check if it's an API failure marker
+                if gap_data[0].get('api_request_failed'):
+                    logger.warning(f"Skipping gap {gap_start} to {gap_end} due to API failure - will retry tomorrow")
+                    continue  # Skip this gap, don't create placeholders
+                
+                # Success case - process data (even if empty array)
+                filled_data = self._fill_gaps_with_placeholders(gap_data, gap_start, gap_end, timeframe)
+                new_data.extend(filled_data)
             
             # Rate limiting
             time.sleep(0.6)
@@ -327,13 +337,125 @@ class PriceCacheManager:
                 
                 processed_data.sort(key=lambda x: x['timestamp'])
             
-            logger.info(f"Fetched {len(processed_data)} points from API for gap")
-            return processed_data
+            # AIDEV-NOTE-CLAUDE: Fill gaps with placeholders to prevent re-fetching
+            processed_data_with_placeholders = self._fill_gaps_with_placeholders(
+                processed_data, start_dt, end_dt, timeframe
+            )
+            
+            logger.info(f"Fetched {len(processed_data)} points from API for gap, filled to {len(processed_data_with_placeholders)} with placeholders")
+            return processed_data_with_placeholders
             
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed for gap {start_dt} to {end_dt}: {e}")
-            return []
+            # AIDEV-NOTE-CLAUDE: Return special marker for API failures vs empty data
+            return [{'api_request_failed': True, 'error': str(e)}]
     
+    def _fill_gaps_with_placeholders(self, api_data: List[Dict], start_dt: datetime, 
+                                   end_dt: datetime, timeframe: str) -> List[Dict]:
+        """
+        Fill missing timestamps with forward-filled placeholders.
+        
+        Args:
+            api_data (List[Dict]): Data returned from API
+            start_dt (datetime): Expected start of range
+            end_dt (datetime): Expected end of range  
+            timeframe (str): Timeframe for interval calculation
+            
+        Returns:
+            List[Dict]: Complete data with placeholders for missing timestamps
+        """
+        if not api_data:
+            # No real data - create placeholder for entire range using a default price
+            interval_seconds = self._get_interval_seconds(timeframe)
+            placeholders = []
+            current_ts = int(start_dt.timestamp())
+            end_ts = int(end_dt.timestamp())
+            
+            while current_ts <= end_ts:
+                # AIDEV-NOTE-CLAUDE: Use forward fill from next available data if any exists
+                fallback_price = self._get_fallback_price(api_data) if api_data else 100.0  # Default SOL price
+                placeholders.append({
+                    'timestamp': current_ts,
+                    'close': fallback_price,
+                    'is_placeholder': True
+                })
+                current_ts += interval_seconds
+            
+            return placeholders
+        
+        # Create complete series with forward fill
+        interval_seconds = self._get_interval_seconds(timeframe)
+        api_data.sort(key=lambda x: x['timestamp'])
+        
+        complete_data = []
+        current_ts = int(start_dt.timestamp())
+        end_ts = int(end_dt.timestamp())
+        api_index = 0
+        last_real_price = None
+        
+        while current_ts <= end_ts:
+            # Check if we have real data for this timestamp
+            real_data_found = False
+            while api_index < len(api_data) and api_data[api_index]['timestamp'] <= current_ts:
+                if api_data[api_index]['timestamp'] == current_ts:
+                    complete_data.append(api_data[api_index])
+                    last_real_price = api_data[api_index]['close']
+                    real_data_found = True
+                api_index += 1
+            
+            # If no real data, create placeholder with intelligent price fill
+            if not real_data_found:
+                # Forward fill from last known price, or backward fill from future data
+                if last_real_price and last_real_price > 0:
+                    placeholder_price = last_real_price
+                else:
+                    # Look ahead for next available price (backward fill)
+                    future_price = self._find_next_real_price(api_data, current_ts)
+                    placeholder_price = future_price if future_price > 0 else 100.0
+                
+                complete_data.append({
+                    'timestamp': current_ts,
+                    'close': placeholder_price,
+                    'is_placeholder': True
+                })
+            
+            current_ts += interval_seconds
+        
+        return complete_data
+
+    def _find_next_real_price(self, api_data: List[Dict], current_ts: int) -> float:
+        """
+        Find next available real price after current timestamp (backward fill).
+        
+        Args:
+            api_data (List[Dict]): Available real data from API
+            current_ts (int): Current timestamp to look after
+            
+        Returns:
+            float: Next available price or 0.0 if none found
+        """
+        future_data = [d for d in api_data if d['timestamp'] > current_ts and d['close'] > 0]
+        if future_data:
+            return min(future_data, key=lambda x: x['timestamp'])['close']
+        return 0.0
+
+    def _get_fallback_price(self, api_data: List[Dict]) -> float:
+        """
+        Get fallback price for placeholders using forward/backward fill logic.
+        
+        Args:
+            api_data (List[Dict]): Available real data from API
+            
+        Returns:
+            float: Price to use for placeholders
+        """
+        if not api_data:
+            return 100.0  # Reasonable SOL fallback price
+        
+        # Use first available real price (backward fill) or last (forward fill)
+        sorted_data = sorted(api_data, key=lambda x: x['timestamp'])
+        return sorted_data[0]['close'] if sorted_data[0]['close'] > 0 else 100.0
+
     def _merge_and_save(self, existing_data: List[Dict], new_data: List[Dict], 
                        cache_path: str) -> List[Dict]:
         """

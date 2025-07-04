@@ -99,7 +99,7 @@ class InfrastructureCostAnalyzer:
                 logger.warning(f"Using fallback SOL price for {date_str} for cost calculation.")
 
             daily_costs[date_str] = {
-                "cost_usd": self.daily_cost_usd, "cost_sol": self.daily_cost_usd / price_to_use, "sol_price": price_to_use
+                "cost_usd": self.daily_cost_usd, "cost_sol": self.daily_cost_usd / price_to_use if price_to_use > 0 else 0.0, "sol_price": price_to_use
             }
         return daily_costs
         
