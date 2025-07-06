@@ -121,12 +121,21 @@ class SpotVsBidAskSimulator: # AIDEV-NOTE-CLAUDE: Renamed class from StrategyAna
         if pd.isna(initial_sol) or initial_sol <= 0:
             logger.warning(f"Invalid investment_sol value: {initial_sol}")
             return {'error': f'Invalid investment amount: {initial_sol}'}
+        # AIDEV-DEBUG-CLAUDE: Enhanced logging to trace zero price source
         initial_price = price_history[0]['close']
         final_price = price_history[-1]['close']
+        
+        logger.debug(f"Simulator received {len(price_history)} price points")
+        logger.debug(f"First point: {price_history[0]}")
+        logger.debug(f"Last point: {price_history[-1]}")
+        
         # AIDEV-NOTE-CLAUDE: Prevent division by zero from placeholder/invalid price data
         if initial_price == 0 or final_price == 0:
-            logger.warning(f"Zero price detected in simulation: initial={initial_price}, final={final_price}")
-            return {'error': 'Invalid price data - contains zero values'}
+            logger.warning(f"⚠️  SIMULATION ERROR: Zero price detected after forward-fill: initial={initial_price}, final={final_price}")
+            logger.warning(f"   Pool: {position_data.get('pool_address', 'UNKNOWN')}")
+            logger.warning(f"   Token: {position_data.get('token_pair', 'UNKNOWN')}")
+            logger.warning(f"   Price history length: {len(price_history)}")
+            return {'error': f'Invalid price data - contains zero values after cleaning: initial={initial_price}, final={final_price}'}
         
         price_ratio = final_price / initial_price
 

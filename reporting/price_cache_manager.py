@@ -399,25 +399,44 @@ class PriceCacheManager:
             while api_index < len(api_data) and api_data[api_index]['timestamp'] <= current_ts:
                 if api_data[api_index]['timestamp'] == current_ts:
                     complete_data.append(api_data[api_index])
-                    last_real_price = api_data[api_index]['close']
+                    # AIDEV-NOTE-CLAUDE: Only update last_real_price if it's valid (> 0)
+                    if api_data[api_index]['close'] > 0:
+                        last_real_price = api_data[api_index]['close']
                     real_data_found = True
                 api_index += 1
             
             # If no real data, create placeholder with intelligent price fill
             if not real_data_found:
-                # Forward fill from last known price, or backward fill from future data
+                # AIDEV-NOTE-CLAUDE: Enhanced forward-fill logic - always try to use valid price
+                placeholder_price = None
+                
+                # 1. Forward fill from last valid price
                 if last_real_price and last_real_price > 0:
                     placeholder_price = last_real_price
                 else:
-                    # Look ahead for next available price (backward fill)
+                    # 2. Backward fill from future data  
                     future_price = self._find_next_real_price(api_data, current_ts)
-                    placeholder_price = future_price if future_price > 0 else 100.0
+                    if future_price > 0:
+                        placeholder_price = future_price
+                    else:
+                        # 3. Look for ANY valid price in the entire dataset
+                        valid_prices = [d['close'] for d in api_data if d.get('close', 0) > 0]
+                        if valid_prices:
+                            placeholder_price = valid_prices[0]  # Use first valid price found
+                        else:
+                            # 4. Final fallback for completely empty datasets
+                            placeholder_price = 0.000001
+                            logger.warning(f"No valid prices found in dataset, using minimal fallback: {placeholder_price}")
                 
                 complete_data.append({
                     'timestamp': current_ts,
                     'close': placeholder_price,
                     'is_placeholder': True
                 })
+                
+                # Debug logging for zero placeholders
+                if placeholder_price <= 0:
+                    logger.warning(f"Created zero placeholder at timestamp {current_ts} - this should not happen!")
             
             current_ts += interval_seconds
         

@@ -182,6 +182,18 @@ class AnalysisRunner:
                 position_dict['pool_address'], start_dt, end_dt, self.api_key
             )
             
+            # AIDEV-DEBUG-CLAUDE: Check price data structure and content
+            if price_history:
+                logger.info(f"Got {len(price_history)} price points. First: {price_history[0] if price_history else 'NONE'}, Last: {price_history[-1] if price_history else 'NONE'}")
+                
+                # Check for zero prices and warn
+                zero_count = sum(1 for p in price_history if p.get('close', 0) <= 0)
+                if zero_count > 0:
+                    logger.warning(f"⚠️  DATA QUALITY WARNING: {zero_count}/{len(price_history)} price points have zero/negative values for {position_dict['token_pair']}")
+                
+                # Apply forward fill to clean zero prices
+                price_history = self._forward_fill_price_history(price_history, position_dict['token_pair'])
+            
             if not price_history:
                 logger.warning(f"No price history for {position_dict['token_pair']}. Skipping simulation for this position.")
                 return {
@@ -214,6 +226,78 @@ class AnalysisRunner:
         except Exception as e:
             logger.error(f"Analysis failed for position {position_dict.get('position_id')}: {e}", exc_info=True)
             return None
+        
+    def _forward_fill_price_history(self, price_history: List[Dict], token_pair: str) -> List[Dict]:
+        """
+        Forward-fill zero/negative prices in price history with warnings.
+        
+        Args:
+            price_history (List[Dict]): Raw price data from cache
+            token_pair (str): Token pair name for logging
+            
+        Returns:
+            List[Dict]: Cleaned price data with forward-filled prices
+        """
+        if not price_history:
+            return price_history
+            
+        cleaned_history = []
+        last_valid_price = None
+        missing_periods = []
+        
+        for i, item in enumerate(price_history):
+            price = item.get('close', 0)
+            timestamp = item.get('timestamp', 0)
+            
+            if price <= 0:
+                if last_valid_price is not None:
+                    # Forward-fill with last valid price
+                    new_item = item.copy()
+                    new_item['close'] = last_valid_price
+                    new_item['forward_filled'] = True
+                    cleaned_history.append(new_item)
+                    
+                    # Track missing period for warning
+                    if not missing_periods or missing_periods[-1]['end_idx'] != i - 1:
+                        missing_periods.append({'start_idx': i, 'end_idx': i, 'timestamp': timestamp})
+                    else:
+                        missing_periods[-1]['end_idx'] = i
+                        
+                    logger.debug(f"Forward-filled zero price at index {i} with {last_valid_price} for {token_pair}")
+                else:
+                    # Skip until we find first valid price
+                    logger.debug(f"Skipping zero price at start: index {i} for {token_pair}")
+                    continue
+            else:
+                # Valid price found
+                last_valid_price = price
+                new_item = item.copy()
+                new_item['forward_filled'] = False
+                cleaned_history.append(new_item)
+        
+        # Generate comprehensive warnings for missing data periods
+        if missing_periods:
+            logger.warning(f"📊 MISSING DATA WARNING for {token_pair}:")
+            for period in missing_periods:
+                start_time = datetime.fromtimestamp(period['timestamp']).strftime('%Y-%m-%d %H:%M')
+                if period['start_idx'] == period['end_idx']:
+                    logger.warning(f"   • Missing price data at {start_time} (forward-filled)")
+                else:
+                    count = period['end_idx'] - period['start_idx'] + 1
+                    logger.warning(f"   • Missing price data for {count} consecutive periods starting {start_time} (forward-filled)")
+        
+        # If all prices were zero, create minimal fallback
+        if not cleaned_history and price_history:
+            logger.warning(f"⚠️  CRITICAL: All prices were zero for {token_pair}, creating fallback data")
+            fallback_price = 0.000001  # Minimal non-zero price to prevent division by zero
+            for item in price_history:
+                new_item = item.copy()
+                new_item['close'] = fallback_price
+                new_item['forward_filled'] = True
+                new_item['fallback_data'] = True
+                cleaned_history.append(new_item)
+        
+        return cleaned_history
 
 def run_spot_vs_bidask_analysis(api_key: Optional[str]):
     """Main analysis function that coordinates the Spot vs. Bid-Ask simulation."""
