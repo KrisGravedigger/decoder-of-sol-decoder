@@ -34,23 +34,26 @@ class PriceCacheManager:
         os.makedirs(cache_dir, exist_ok=True)
         
     def get_price_data(self, pool_address: str, start_dt: datetime, end_dt: datetime, 
-                      timeframe: str, api_key: Optional[str] = None) -> List[Dict]:
+                    timeframe: str, api_key: Optional[str] = None) -> List[Dict]:
         """
-        Get price data with smart caching - only fetch missing gaps.
+        Get price data with smart caching and timestamp alignment.
         
         Args:
             pool_address (str): Pool address
-            start_dt (datetime): Start datetime
-            end_dt (datetime): End datetime  
+            start_dt (datetime): Start datetime (will be aligned to candle boundary)
+            end_dt (datetime): End datetime (will be aligned to candle boundary)
             timeframe (str): Timeframe (10min, 30min, 1h, 4h)
             api_key (Optional[str]): API key for fetching missing data
             
         Returns:
-            List[Dict]: Price data with timestamp and close keys
+            List[Dict]: Price data with timestamp and close keys, aligned to candle boundaries
         """
         logger.info(f"Getting price data for {pool_address} ({timeframe}): {start_dt} to {end_dt}")
         
-        # Step 1: Split request into monthly periods
+        # AIDEV-NOTE-CLAUDE: Conservative approach - use original timestamps for cache keys, alignment post-processing only
+        logger.info(f"Getting price data for {pool_address} ({timeframe}): {start_dt} to {end_dt}")
+        
+        # Step 1: Split request into monthly periods using ORIGINAL timestamps (no cache invalidation)
         monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
         
         all_data = []
@@ -73,8 +76,12 @@ class PriceCacheManager:
         
         filtered_data.sort(key=lambda x: x['timestamp'])
         
-        logger.info(f"Returning {len(filtered_data)} price points for {pool_address}")
-        return filtered_data
+        # Step 4: Post-processing alignment (conservative approach - no cache impact)
+        aligned_data = self._align_to_candle_boundaries(filtered_data, timeframe)
+        
+        logger.info(f"Returning {len(aligned_data)} price points for {pool_address} (post-processing aligned)")
+        
+        return aligned_data
     
     def _split_into_monthly_periods(self, start_dt: datetime, end_dt: datetime) -> List[Tuple[datetime, datetime]]:
         """
@@ -191,6 +198,7 @@ class PriceCacheManager:
                        timeframe: str) -> List[Tuple[datetime, datetime]]:
         """
         Find gaps in existing data for the required period.
+        ENHANCED: Treats zero prices and invalid placeholders as missing data.
         
         Args:
             existing_data (List[Dict]): Existing cached data
@@ -207,15 +215,26 @@ class PriceCacheManager:
         # Calculate expected interval in seconds
         interval_seconds = self._get_interval_seconds(timeframe)
         
-        # Get existing timestamps in required range
+        # Get existing timestamps in required range - ONLY VALID PRICES
         start_unix = int(start_dt.timestamp())
         end_unix = int(end_dt.timestamp())
         
-        existing_timestamps = set()
+        valid_timestamps = set()
         for point in existing_data:
             ts = point['timestamp']
             if start_unix <= ts <= end_unix:
-                existing_timestamps.add(ts)
+                # ENHANCED: Only count valid prices as "existing data"
+                price = point.get('close', 0.0)
+                is_placeholder = point.get('is_placeholder', False)
+                is_repaired = point.get('repaired_from_zero', False)
+                
+                # Criteria for "valid data": price > 0 and (not placeholder OR successfully repaired)
+                if price > 0 and (not is_placeholder or is_repaired):
+                    valid_timestamps.add(ts)
+                # Zero prices and invalid placeholders are treated as gaps
+        
+        # Replace the existing_timestamps variable name
+        existing_timestamps = valid_timestamps
         
         # Generate expected timestamps
         expected_timestamps = []
@@ -474,6 +493,113 @@ class PriceCacheManager:
         # Use first available real price (backward fill) or last (forward fill)
         sorted_data = sorted(api_data, key=lambda x: x['timestamp'])
         return sorted_data[0]['close'] if sorted_data[0]['close'] > 0 else 100.0
+
+    def _align_to_candle_boundaries(self, data: List[Dict], timeframe: str) -> List[Dict]:
+        """
+        Conservative post-processing alignment - maps existing data to candle boundaries.
+        Does not create new API requests or invalidate cache.
+        
+        Args:
+            data (List[Dict]): Existing price data from cache
+            timeframe (str): Timeframe for boundary calculation
+            
+        Returns:
+            List[Dict]: Data aligned to candle boundaries with zero prices eliminated
+        """
+        if not data:
+            return data
+            
+        interval_seconds = self._get_interval_seconds(timeframe)
+        
+        # Create map: aligned_timestamp -> best_available_price
+        timestamp_map = {}
+        
+        for point in data:
+            # Find nearest candle boundary for this point
+            aligned_ts = self._align_timestamp_to_boundary(point['timestamp'], interval_seconds)
+            current_price = point.get('close', 0.0)
+            
+            # Only use valid prices
+            if current_price > 0:
+                if aligned_ts not in timestamp_map:
+                    timestamp_map[aligned_ts] = current_price
+                else:
+                    # If multiple points map to same boundary, prefer non-placeholder data
+                    if not point.get('is_placeholder', False):
+                        timestamp_map[aligned_ts] = current_price
+        
+        # Convert map back to list format
+        aligned_data = []
+        for aligned_ts in sorted(timestamp_map.keys()):
+            aligned_data.append({
+                'timestamp': aligned_ts,
+                'close': timestamp_map[aligned_ts]
+            })
+        
+        # Apply forward fill for any remaining gaps
+        return self._conservative_forward_fill(aligned_data, interval_seconds)
+    
+    def _align_timestamp_to_boundary(self, timestamp: int, interval_seconds: int) -> int:
+        """Align single timestamp to nearest candle boundary (floor)."""
+        return (timestamp // interval_seconds) * interval_seconds
+    
+    def _conservative_forward_fill(self, data: List[Dict], interval_seconds: int) -> List[Dict]:
+        """
+        Conservative forward fill for aligned data.
+        
+        Args:
+            data (List[Dict]): Aligned data with potential gaps
+            interval_seconds (int): Interval between candles
+            
+        Returns:
+            List[Dict]: Data with gaps forward-filled
+        """
+        if not data:
+            return data
+        
+        # Sort chronologically
+        sorted_data = sorted(data, key=lambda x: x['timestamp'])
+        filled_data = []
+        last_valid_price = None
+        
+        # Generate expected timestamps
+        if len(sorted_data) >= 2:
+            start_ts = sorted_data[0]['timestamp']
+            end_ts = sorted_data[-1]['timestamp']
+            
+            current_ts = start_ts
+            data_index = 0
+            
+            while current_ts <= end_ts:
+                # Check if we have real data for this timestamp
+                real_price = None
+                while data_index < len(sorted_data) and sorted_data[data_index]['timestamp'] <= current_ts:
+                    if sorted_data[data_index]['timestamp'] == current_ts:
+                        real_price = sorted_data[data_index]['close']
+                        if real_price > 0:
+                            last_valid_price = real_price
+                    data_index += 1
+                
+                # Use real price or forward fill
+                if real_price and real_price > 0:
+                    filled_data.append({
+                        'timestamp': current_ts,
+                        'close': real_price
+                    })
+                elif last_valid_price and last_valid_price > 0:
+                    filled_data.append({
+                        'timestamp': current_ts,
+                        'close': last_valid_price,
+                        'is_forward_filled': True
+                    })
+                
+                current_ts += interval_seconds
+                data_index = max(0, data_index - 1)  # Reset for next iteration
+        else:
+            # Fallback for single data point
+            filled_data = sorted_data
+        
+        return filled_data
 
     def _merge_and_save(self, existing_data: List[Dict], new_data: List[Dict], 
                        cache_path: str) -> List[Dict]:
