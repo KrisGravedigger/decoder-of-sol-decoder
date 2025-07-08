@@ -229,7 +229,7 @@ class AnalysisRunner:
         
     def _forward_fill_price_history(self, price_history: List[Dict], token_pair: str) -> List[Dict]:
         """
-        Forward-fill zero/negative prices in price history with warnings.
+        Apply forward fill to handle missing price data.
         
         Args:
             price_history (List[Dict]): Raw price data from cache
@@ -263,10 +263,10 @@ class AnalysisRunner:
                     else:
                         missing_periods[-1]['end_idx'] = i
                         
-                    logger.debug(f"Forward-filled zero price at index {i} with {last_valid_price} for {token_pair}")
+                    logger.debug(f"Forward-filled price gap for {token_pair}")
                 else:
                     # Skip until we find first valid price
-                    logger.debug(f"Skipping zero price at start: index {i} for {token_pair}")
+                    logger.debug(f"Skipping invalid price at start for {token_pair}")
                     continue
             else:
                 # Valid price found
@@ -281,10 +281,10 @@ class AnalysisRunner:
             for period in missing_periods:
                 start_time = datetime.fromtimestamp(period['timestamp']).strftime('%Y-%m-%d %H:%M')
                 if period['start_idx'] == period['end_idx']:
-                    logger.warning(f"   • Missing price data at {start_time} (forward-filled)")
+                    logger.warning(f"   • Missing price data at {start_time}")
                 else:
                     count = period['end_idx'] - period['start_idx'] + 1
-                    logger.warning(f"   • Missing price data for {count} consecutive periods starting {start_time} (forward-filled)")
+                    logger.warning(f"   • Missing price data for {count} consecutive periods starting {start_time}")
         
         # If all prices were zero, create minimal fallback
         if not cleaned_history and price_history:

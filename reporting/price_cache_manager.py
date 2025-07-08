@@ -198,7 +198,7 @@ class PriceCacheManager:
                        timeframe: str) -> List[Tuple[datetime, datetime]]:
         """
         Find gaps in existing data for the required period.
-        ENHANCED: Treats zero prices and invalid placeholders as missing data.
+        Treats zero prices as missing data requiring API fetch.
         
         Args:
             existing_data (List[Dict]): Existing cached data
@@ -215,26 +215,15 @@ class PriceCacheManager:
         # Calculate expected interval in seconds
         interval_seconds = self._get_interval_seconds(timeframe)
         
-        # Get existing timestamps in required range - ONLY VALID PRICES
+        # Get existing timestamps in required range with valid prices
         start_unix = int(start_dt.timestamp())
         end_unix = int(end_dt.timestamp())
         
-        valid_timestamps = set()
+        existing_timestamps = set()
         for point in existing_data:
             ts = point['timestamp']
-            if start_unix <= ts <= end_unix:
-                # ENHANCED: Only count valid prices as "existing data"
-                price = point.get('close', 0.0)
-                is_placeholder = point.get('is_placeholder', False)
-                is_repaired = point.get('repaired_from_zero', False)
-                
-                # Criteria for "valid data": price > 0 and (not placeholder OR successfully repaired)
-                if price > 0 and (not is_placeholder or is_repaired):
-                    valid_timestamps.add(ts)
-                # Zero prices and invalid placeholders are treated as gaps
-        
-        # Replace the existing_timestamps variable name
-        existing_timestamps = valid_timestamps
+            if start_unix <= ts <= end_unix and point.get('close', 0.0) > 0:
+                existing_timestamps.add(ts)
         
         # Generate expected timestamps
         expected_timestamps = []
