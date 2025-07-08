@@ -72,12 +72,14 @@ def create_metrics_summary_chart(portfolio_analysis: Dict[str, Any]) -> str:
         sol_metrics = portfolio_analysis['sol_denomination']
         usdc_metrics = portfolio_analysis['usdc_denomination']
         
-        # AIDEV-NOTE-CLAUDE: Fix for KeyError by accessing keys that are guaranteed to exist.
+        # AIDEV-NOTE-CLAUDE: Merged Win Rate cells - single value for both currencies
+        win_rate_value = f"{sol_metrics.get('win_rate', 0):.1%}"
+        
         header = ['Metric', 'SOL Denomination', 'USDC Denomination']
         cells = [
             ['Total PnL', f"{sol_metrics.get('total_pnl_sol', 0):.3f} SOL", f"${usdc_metrics.get('total_pnl_usdc', 0):.2f}"],
             ['Net PnL (after costs)', f"{sol_metrics.get('net_pnl_after_costs', 0):.3f} SOL", f"${usdc_metrics.get('net_pnl_after_costs', 0):.2f}"],
-            ['Win Rate', f"{sol_metrics.get('win_rate', 0):.1%}", f"{usdc_metrics.get('win_rate', 0):.1%}"],
+            ['Win Rate', win_rate_value, f"({win_rate_value})"],  # Unified value, parentheses for visual unity
             ['Sharpe Ratio', f"{sol_metrics.get('sharpe_ratio', 0):.2f}", f"{usdc_metrics.get('sharpe_ratio', 0):.2f}"],
             ['Max Drawdown', f"{sol_metrics.get('max_drawdown_percent', 0):.2%}", f"{usdc_metrics.get('max_drawdown_percent', 0):.2%}"],
             ['Cost Impact', f"{sol_metrics.get('cost_impact_percent', 0):.1f}%", f"{usdc_metrics.get('cost_impact_percent', 0):.1f}%"],

@@ -159,10 +159,13 @@ def calculate_usdc_metrics(positions_df: pd.DataFrame, sol_rates: Dict[str, Any]
     total_cost_usdc = positions_usdc['infrastructure_cost_usdc'].sum()
     net_pnl_usdc = total_pnl_usdc - total_cost_usdc
 
+    cost_impact_percent = (total_cost_usdc / abs(total_pnl_usdc) * 100) if total_pnl_usdc != 0 else 0
+
     return {
         'total_pnl_usdc': total_pnl_usdc, 'sharpe_ratio': sharpe_ratio,
         'max_drawdown_percent': max_drawdown, 'win_rate': win_rate,
         'profit_factor': profit_factor, 'net_pnl_after_costs': net_pnl_usdc,
+        'cost_impact_percent': cost_impact_percent,
         'total_positions': len(positions_usdc)
     }
 
