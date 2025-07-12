@@ -90,6 +90,22 @@
             <div id="metrics_summary">{{ charts.metrics_summary | safe }}</div>
         </div>
         
+        <!-- Professional Portfolio Analytics -->
+        <div class="section">
+            <h2>Professional Portfolio Analytics</h2>
+            <h3>Enhanced Equity Curve</h3>
+            <div id="professional_equity_curve" class="plotly-chart">{{ charts.professional_equity_curve | safe }}</div>
+            
+            <h3>Drawdown Analysis</h3>
+            <div id="professional_drawdown" class="plotly-chart">{{ charts.professional_drawdown | safe }}</div>
+            
+            <h3>Strategy Performance Heatmap</h3>
+            <div id="professional_strategy_heatmap" class="plotly-chart">{{ charts.professional_strategy_heatmap | safe }}</div>
+            
+            <h3>Infrastructure Cost Impact</h3>
+            <div id="professional_cost_impact" class="plotly-chart">{{ charts.professional_cost_impact | safe }}</div>
+        </div>
+        
         <!-- Strategy Simulation -->
         <div class="section">
             <h2>Spot vs. Bid-Ask Simulation</h2>
@@ -133,14 +149,22 @@
             {% endif %}
         </div>
         
-        <!-- Strategy Heatmap -->
+        <!-- Strategy Performance Summary -->
         <div class="section">
-            <h2>Strategy Performance Heatmap</h2>
-            <p>This heatmap visualizes the average PnL for the top-performing strategy instances, broken down by step size. It helps identify which strategy configurations are most profitable.</p>
-            {% if charts.get('strategy_heatmap') %}
-                <div id="strategy_heatmap" class="plotly-chart" style="min-height: 600px;">{{ charts.strategy_heatmap | safe }}</div>
+            <h2>Strategy Performance Summary</h2>
+            <p>This chart shows the average PnL performance for the top-performing strategy instances, respecting YAML configuration filters (min_strategy_occurrences: {{ config.get('visualization', {}).get('filters', {}).get('min_strategy_occurrences', 2) }}, top_strategies_only: {{ config.get('visualization', {}).get('filters', {}).get('top_strategies_only', 10) }}). Position counts are displayed in parentheses for each strategy.</p>
+            {% if charts.get('strategy_avg_pnl_summary') %}
+                <div id="strategy_avg_pnl_summary" class="plotly-chart" style="min-height: 600px;">{{ charts.strategy_avg_pnl_summary | safe }}</div>
             {% else %}
-                <div class="skipped">Strategy heatmap could not be generated. Check if 'strategy_instances.csv' exists and has sufficient data.</div>
+                <div class="skipped">Strategy performance summary could not be generated. Check if 'strategy_instances.csv' exists and has sufficient data.</div>
+            {% endif %}
+            
+            <!-- Legacy Heatmap as Fallback -->
+            <h3>Legacy Strategy Heatmap (Fallback)</h3>
+            {% if charts.get('strategy_heatmap') %}
+                <div id="strategy_heatmap_legacy" class="plotly-chart" style="min-height: 400px;">{{ charts.strategy_heatmap | safe }}</div>
+            {% else %}
+                <div class="skipped">Legacy strategy heatmap could not be generated.</div>
             {% endif %}
         </div>
         

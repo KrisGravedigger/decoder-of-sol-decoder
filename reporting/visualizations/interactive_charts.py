@@ -352,3 +352,681 @@ def create_strategy_heatmap_chart(strategy_instances_path: str = "strategy_insta
     except Exception as e:
         logger.error(f"Failed to create strategy heatmap chart: {e}", exc_info=True)
         return f"<p>Error creating strategy heatmap chart: {str(e)}</p>"
+
+def create_professional_equity_curve(portfolio_analysis: Dict[str, Any]) -> str:
+    """Create professional interactive equity curve with dual currency and cost impact."""
+    try:
+        daily_df = portfolio_analysis['raw_data']['daily_returns_df']
+        sol_rates = portfolio_analysis['raw_data']['sol_rates']
+        cost_summary = portfolio_analysis['infrastructure_cost_impact']
+        
+        if daily_df.empty:
+            return "<p>No daily data available for professional equity curve</p>"
+            
+        # Prepare data similar to chart_generator.py
+        daily_df = daily_df.copy()
+        daily_df['cumulative_pnl_usdc'] = 0.0
+        daily_df['cumulative_cost_sol'] = 0.0
+        daily_df['net_pnl_sol'] = 0.0
+        
+        cumulative_cost = 0.0
+        daily_cost_usd = cost_summary.get('daily_cost_usd', 11.67)
+        
+        for idx, row in daily_df.iterrows():
+            date_str = row['date'].strftime("%Y-%m-%d")
+            
+            if date_str in sol_rates:
+                sol_price = sol_rates[date_str]
+                if sol_price is not None:
+                    daily_df.at[idx, 'cumulative_pnl_usdc'] = row['cumulative_pnl_sol'] * sol_price
+                    
+                    daily_cost_sol = daily_cost_usd / sol_price
+                    cumulative_cost += daily_cost_sol
+                    
+                    daily_df.at[idx, 'cumulative_cost_sol'] = cumulative_cost
+                    daily_df.at[idx, 'net_pnl_sol'] = row['cumulative_pnl_sol'] - cumulative_cost
+        
+        # Create subplot figure
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Portfolio Equity Curve - Dual Currency Analysis', 'SOL/USDC Price'),
+            vertical_spacing=0.1,
+            specs=[[{"secondary_y": True}], [{}]]
+        )
+        
+        # Main equity curves
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=daily_df['cumulative_pnl_sol'],
+                mode='lines',
+                name='Gross SOL PnL',
+                line=dict(color='#FF6B35', width=2),
+                hovertemplate='<b>Gross SOL PnL</b><br>Date: %{x}<br>PnL: %{y:.3f} SOL<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=daily_df['net_pnl_sol'],
+                mode='lines',
+                name='Net SOL PnL (after costs)',
+                line=dict(color='#D2001C', width=2, dash='dash'),
+                hovertemplate='<b>Net SOL PnL</b><br>Date: %{x}<br>PnL: %{y:.3f} SOL<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=daily_df['cumulative_pnl_usdc'],
+                mode='lines',
+                name='USDC PnL',
+                line=dict(color='#004E89', width=2, dash='dot'),
+                yaxis='y2',
+                hovertemplate='<b>USDC PnL</b><br>Date: %{x}<br>PnL: %{y:.2f} USDC<extra></extra>'
+            ),
+            row=1, col=1, secondary_y=True
+        )
+        
+        # Cost impact fill area
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=daily_df['cumulative_pnl_sol'],
+                fill='tonexty',
+                fillcolor='rgba(255, 0, 0, 0.2)',
+                line=dict(width=0),
+                name='Infrastructure Cost Impact',
+                showlegend=True,
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=daily_df['net_pnl_sol'],
+                mode='lines',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+        
+        # SOL price chart
+        valid_sol_rates = {k: v for k, v in sol_rates.items() if v is not None}
+        if valid_sol_rates:
+            sol_dates = [datetime.strptime(date, "%Y-%m-%d") for date in valid_sol_rates.keys()]
+            sol_prices = list(valid_sol_rates.values())
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=sol_dates,
+                    y=sol_prices,
+                    mode='lines',
+                    name='SOL/USDC Price',
+                    line=dict(color='#7209B7', width=2),
+                    hovertemplate='<b>SOL Price</b><br>Date: %{x}<br>Price: $%{y:.2f}<extra></extra>'
+                ),
+                row=2, col=1
+            )
+        
+        # Add zero line
+        fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.3, row=1, col=1)
+        
+        # Update layout
+        fig.update_layout(
+            height=700,
+            title=dict(
+                text="Professional Portfolio Equity Curve - Dual Currency with Cost Impact",
+                font=dict(size=20, color='#2E3440'),
+                x=0.5
+            ),
+            template='plotly_white',
+            hovermode='x unified'
+        )
+        
+        # Update axes
+        fig.update_xaxes(title_text="Date", row=2, col=1)
+        fig.update_yaxes(title_text="Cumulative PnL (SOL)", row=1, col=1)
+        fig.update_yaxes(title_text="SOL/USDC Price", row=2, col=1)
+        
+        # Update secondary y-axis for USDC
+        fig.update_yaxes(title_text="Cumulative PnL (USDC)", secondary_y=True, row=1, col=1)
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+        
+    except Exception as e:
+        logger.error(f"Failed to create professional equity curve: {e}", exc_info=True)
+        return f"<p>Error creating professional equity curve: {str(e)}</p>"
+
+def create_professional_drawdown_analysis(portfolio_analysis: Dict[str, Any]) -> str:
+    """Create professional interactive drawdown analysis chart."""
+    try:
+        daily_df = portfolio_analysis['raw_data']['daily_returns_df']
+        
+        if daily_df.empty:
+            return "<p>No daily data available for professional drawdown analysis</p>"
+            
+        # Calculate drawdown
+        daily_df = daily_df.copy()
+        cumulative = daily_df['cumulative_pnl_sol']
+        running_max = cumulative.expanding().max()
+        drawdown = (cumulative - running_max) / running_max.abs() * 100
+        
+        # Create subplot
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Equity Curve with Running Maximum', 'Drawdown Percentage'),
+            vertical_spacing=0.12,
+            row_heights=[0.6, 0.4]
+        )
+        
+        # Equity curve with running max
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=cumulative,
+                mode='lines',
+                name='Cumulative PnL',
+                line=dict(color='#004E89', width=2),
+                hovertemplate='<b>Cumulative PnL</b><br>Date: %{x}<br>PnL: %{y:.3f} SOL<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=running_max,
+                mode='lines',
+                name='Running Maximum',
+                line=dict(color='#FF6B35', width=1, dash='dash'),
+                opacity=0.7,
+                hovertemplate='<b>Running Maximum</b><br>Date: %{x}<br>Max: %{y:.3f} SOL<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        # Drawdown fill
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=cumulative,
+                fill='tonexty',
+                fillcolor='rgba(255, 0, 0, 0.2)',
+                line=dict(width=0),
+                name='Drawdown Periods',
+                showlegend=True,
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=running_max,
+                mode='lines',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+        
+        # Drawdown percentage
+        fig.add_trace(
+            go.Scatter(
+                x=daily_df['date'],
+                y=drawdown,
+                mode='lines',
+                name='Drawdown %',
+                line=dict(color='darkred', width=1),
+                fill='tozeroy',
+                fillcolor='rgba(139, 0, 0, 0.6)',
+                hovertemplate='<b>Drawdown</b><br>Date: %{x}<br>Drawdown: %{y:.1f}%<extra></extra>'
+            ),
+            row=2, col=1
+        )
+        
+        # Highlight maximum drawdown
+        max_dd_idx = drawdown.idxmin()
+        max_dd_value = drawdown.min()
+        max_dd_date = daily_df.iloc[max_dd_idx]['date']
+        
+        fig.add_trace(
+            go.Scatter(
+                x=[max_dd_date],
+                y=[max_dd_value],
+                mode='markers',
+                name=f'Max DD: {max_dd_value:.1f}%',
+                marker=dict(color='red', size=12, symbol='circle'),
+                hovertemplate=f'<b>Maximum Drawdown</b><br>Date: {max_dd_date.strftime("%Y-%m-%d")}<br>Drawdown: {max_dd_value:.1f}%<extra></extra>'
+            ),
+            row=2, col=1
+        )
+        
+        # Add zero lines
+        fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.3, row=1, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.3, row=2, col=1)
+        
+        # Update layout
+        fig.update_layout(
+            height=700,
+            title=dict(
+                text="Professional Portfolio Drawdown Analysis",
+                font=dict(size=20, color='#2E3440'),
+                x=0.5
+            ),
+            template='plotly_white',
+            hovermode='x unified'
+        )
+        
+        # Update axes
+        fig.update_xaxes(title_text="Date", row=2, col=1)
+        fig.update_yaxes(title_text="Cumulative PnL (SOL)", row=1, col=1)
+        fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+        
+    except Exception as e:
+        logger.error(f"Failed to create professional drawdown analysis: {e}", exc_info=True)
+        return f"<p>Error creating professional drawdown analysis: {str(e)}</p>"
+
+def create_professional_strategy_heatmap(portfolio_analysis: Dict[str, Any], config: Dict[str, Any]) -> str:
+    """Create professional interactive strategy performance heatmap with YAML filters."""
+    try:
+        positions_df = portfolio_analysis['raw_data']['positions_df']
+        
+        if positions_df.empty:
+            return "<p>No positions data available for professional strategy heatmap</p>"
+            
+        # Try to load strategy instances data first
+        if os.path.exists("strategy_instances.csv"):
+            try:
+                strategy_instances_df = pd.read_csv("strategy_instances.csv")
+                return _create_strategy_instances_professional_heatmap(strategy_instances_df, config)
+            except Exception as e:
+                logger.warning(f"Failed to use strategy_instances.csv: {e}, using positions fallback")
+                return _create_positions_professional_heatmap(positions_df, config)
+        else:
+            return _create_positions_professional_heatmap(positions_df, config)
+            
+    except Exception as e:
+        logger.error(f"Failed to create professional strategy heatmap: {e}", exc_info=True)
+        return f"<p>Error creating professional strategy heatmap: {str(e)}</p>"
+
+def _create_strategy_instances_professional_heatmap(strategy_instances_df: pd.DataFrame, config: Dict[str, Any]) -> str:
+    """Create professional heatmap from strategy_instances.csv with YAML filters."""
+    filters = config.get('visualization', {}).get('filters', {})
+    min_occurrences = filters.get('min_strategy_occurrences', 2)
+    top_strategies = filters.get('top_strategies_only', 10)
+    
+    # Apply filters
+    strategy_instances_df = strategy_instances_df[
+        strategy_instances_df['position_count'] >= min_occurrences
+    ]
+    
+    if strategy_instances_df.empty:
+        return f"<p>No strategies with ≥{min_occurrences} positions found</p>"
+        
+    # Sort and limit strategies
+    if 'avg_pnl_percent' in strategy_instances_df.columns:
+        strategy_instances_df = strategy_instances_df.sort_values(
+            'avg_pnl_percent', ascending=False
+        ).head(top_strategies)
+    else:
+        strategy_instances_df = strategy_instances_df.head(top_strategies)
+        
+    # Create strategy name with position count
+    strategy_instances_df['strategy_display_name'] = (
+        strategy_instances_df['strategy'] + ' ' + 
+        strategy_instances_df['step_size'] + ' ' +
+        strategy_instances_df['investment_sol'].astype(str) + 'SOL' +
+        ' (' + strategy_instances_df['position_count'].astype(str) + ')'
+    )
+    
+    # Create interactive heatmap with 3 metrics
+    metrics = ['avg_pnl_percent', 'win_rate']
+    if 'sharpe_ratio' in strategy_instances_df.columns:
+        metrics.append('sharpe_ratio')
+    
+    metric_labels = ['Avg PnL %', 'Win Rate', 'Sharpe Ratio'][:len(metrics)]
+    
+    fig = make_subplots(
+        rows=1, cols=len(metrics),
+        subplot_titles=metric_labels,
+        horizontal_spacing=0.15
+    )
+    
+    for i, (metric, label) in enumerate(zip(metrics, metric_labels)):
+        if metric not in strategy_instances_df.columns:
+            continue
+            
+        values = strategy_instances_df[metric].values
+        strategy_names = strategy_instances_df['strategy_display_name'].values
+        
+        # Adjust values for win_rate display
+        display_values = values * 100 if metric == 'win_rate' else values
+        
+        # Create heatmap
+        heatmap = go.Heatmap(
+            z=display_values.reshape(-1, 1),
+            y=strategy_names,
+            x=[label],
+            colorscale='RdYlGn',
+            zmid=0 if metric == 'avg_pnl_percent' else display_values.mean(),
+            text=[[f'{val:.1f}%' if metric == 'win_rate' else f'{val:.2f}'] for val in display_values],
+            texttemplate='%{text}',
+            textfont=dict(size=10),
+            hovertemplate=f'<b>{label}</b><br>Strategy: %{{y}}<br>Value: %{{z:.2f}}<extra></extra>',
+            showscale=(i == len(metrics)-1)  # Show colorbar only for last subplot
+        )
+        
+        fig.add_trace(heatmap, row=1, col=i+1)
+    
+    fig.update_layout(
+        height=max(600, len(strategy_names) * 35),
+        title=dict(
+            text=f'Professional Strategy Performance Heatmap (Top {len(strategy_instances_df)} Strategies)',
+            font=dict(size=20, color='#2E3440'),
+            x=0.5
+        ),
+        template='plotly_white'
+    )
+    
+    # Update y-axes to prevent label overlap
+    fig.update_yaxes(tickfont=dict(size=9))
+    
+    return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+
+def _create_positions_professional_heatmap(positions_df: pd.DataFrame, config: Dict[str, Any]) -> str:
+    """Professional fallback heatmap based on positions data."""
+    try:
+        # Group by strategy and step_size
+        strategy_groups = positions_df.groupby(['strategy', 'step_size']).agg({
+            'pnl_sol': ['sum', 'mean', 'count'],
+            'investment_sol': 'sum'
+        }).round(3)
+        
+        strategy_groups.columns = ['total_pnl', 'avg_pnl', 'position_count', 'total_investment']
+        strategy_groups['win_rate'] = positions_df.groupby(['strategy', 'step_size']).apply(
+            lambda x: (x['pnl_sol'] > 0).mean()
+        )
+        
+        # Apply filters
+        filters = config.get('visualization', {}).get('filters', {})
+        min_occurrences = filters.get('min_strategy_occurrences', 2)
+        
+        strategy_groups = strategy_groups[strategy_groups['position_count'] >= min_occurrences]
+        
+        if strategy_groups.empty:
+            return f"<p>No strategies with ≥{min_occurrences} positions found</p>"
+            
+        # Create pivot table for heatmap
+        pivot_data = strategy_groups.reset_index().pivot(
+            index='strategy', columns='step_size', values='avg_pnl'
+        ).fillna(0)
+        
+        # Create interactive heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot_data.values,
+            x=pivot_data.columns,
+            y=pivot_data.index,
+            colorscale='RdYlGn',
+            zmid=0,
+            text=pivot_data.values,
+            texttemplate='%{text:.3f}',
+            textfont=dict(size=10),
+            hovertemplate='<b>Strategy Performance</b><br>Strategy: %{y}<br>Step Size: %{x}<br>Avg PnL: %{z:.3f} SOL<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            height=500,
+            title=dict(
+                text='Professional Strategy Performance Heatmap (Positions-Based)',
+                font=dict(size=20, color='#2E3440'),
+                x=0.5
+            ),
+            xaxis_title='Step Size',
+            yaxis_title='Strategy',
+            template='plotly_white'
+        )
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+        
+    except Exception as e:
+        logger.error(f"Failed to create positions-based professional heatmap: {e}")
+        return f"<p>Error creating fallback professional heatmap: {str(e)}</p>"
+
+def create_professional_cost_impact(portfolio_analysis: Dict[str, Any]) -> str:
+    """Create professional interactive infrastructure cost impact chart."""
+    try:
+        sol_metrics = portfolio_analysis['sol_denomination']
+        usdc_metrics = portfolio_analysis['usdc_denomination']
+        cost_summary = portfolio_analysis['infrastructure_cost_impact']
+        
+        # Prepare data
+        categories = ['SOL Denomination', 'USDC Denomination']
+        gross_pnl = [
+            sol_metrics['total_pnl_sol'] + cost_summary.get('total_cost_sol', 0),
+            usdc_metrics['total_pnl_usdc'] + cost_summary.get('total_cost_usd', 0)
+        ]
+        net_pnl = [
+            sol_metrics['net_pnl_after_costs'],
+            usdc_metrics['net_pnl_after_costs']
+        ]
+        costs = [
+            cost_summary.get('total_cost_sol', 0),
+            cost_summary.get('total_cost_usd', 0)
+        ]
+        
+        # Create subplot
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                'Gross vs Net PnL Comparison',
+                'Infrastructure Cost Impact (%)',
+                'Daily Infrastructure Cost',
+                'Break-even Analysis'
+            ),
+            specs=[[{"type": "bar"}, {"type": "bar"}],
+                   [{"type": "bar"}, {"type": "pie"}]]
+        )
+        
+        # 1. Gross vs Net PnL
+        fig.add_trace(
+            go.Bar(
+                x=categories,
+                y=gross_pnl,
+                name='Gross PnL',
+                marker_color='#004E89',
+                opacity=0.8,
+                hovertemplate='<b>Gross PnL</b><br>Currency: %{x}<br>Amount: %{y:.2f}<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Bar(
+                x=categories,
+                y=net_pnl,
+                name='Net PnL',
+                marker_color='#FF6B35',
+                opacity=0.8,
+                hovertemplate='<b>Net PnL</b><br>Currency: %{x}<br>Amount: %{y:.2f}<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        # 2. Cost Impact Percentage
+        cost_impact_sol = (costs[0] / gross_pnl[0] * 100) if gross_pnl[0] > 0 else 0
+        cost_impact_usdc = (costs[1] / gross_pnl[1] * 100) if gross_pnl[1] > 0 else 0
+        impact_percentages = [cost_impact_sol, cost_impact_usdc]
+        
+        fig.add_trace(
+            go.Bar(
+                x=categories,
+                y=impact_percentages,
+                name='Cost Impact %',
+                marker_color=['#7209B7', '#A663CC'],
+                opacity=0.8,
+                hovertemplate='<b>Cost Impact</b><br>Currency: %{x}<br>Impact: %{y:.1f}%<extra></extra>',
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+        
+        # 3. Daily Cost Allocation
+        period_days = cost_summary.get('period_days', 30)
+        daily_costs = [
+            cost_summary.get('total_cost_sol', 0) / period_days,
+            cost_summary.get('total_cost_usd', 0) / period_days
+        ]
+        
+        fig.add_trace(
+            go.Bar(
+                x=categories,
+                y=daily_costs,
+                name='Daily Cost',
+                marker_color=['#FF6B35', '#004E89'],
+                opacity=0.6,
+                hovertemplate='<b>Daily Cost</b><br>Currency: %{x}<br>Cost: %{y:.3f}<extra></extra>',
+                showlegend=False
+            ),
+            row=2, col=1
+        )
+        
+        # 4. Break-even Analysis (Pie Chart)
+        break_even_days = cost_summary.get('break_even_days', 0)
+        analysis_days = cost_summary.get('period_days', 30)
+        
+        if break_even_days > 0 and break_even_days < analysis_days:
+            sizes = [break_even_days, analysis_days - break_even_days]
+            labels = [f'Break-even<br>({break_even_days:.0f} days)', 
+                     f'Profitable<br>({analysis_days - break_even_days:.0f} days)']
+            colors = ['#FF6B35', '#004E89']
+            
+            fig.add_trace(
+                go.Pie(
+                    labels=labels,
+                    values=sizes,
+                    marker_colors=colors,
+                    hovertemplate='<b>%{label}</b><br>Days: %{value}<br>Percentage: %{percent}<extra></extra>',
+                    showlegend=False
+                ),
+                row=2, col=2
+            )
+        
+        # Update layout
+        fig.update_layout(
+            height=700,
+            title=dict(
+                text="Professional Infrastructure Cost Impact Analysis",
+                font=dict(size=20, color='#2E3440'),
+                x=0.5
+            ),
+            template='plotly_white',
+            showlegend=True
+        )
+        
+        # Update axes
+        fig.update_yaxes(title_text="PnL Amount", row=1, col=1)
+        fig.update_yaxes(title_text="Cost Impact (%)", row=1, col=2)
+        fig.update_yaxes(title_text="Daily Cost", row=2, col=1)
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+        
+    except Exception as e:
+        logger.error(f"Failed to create professional cost impact chart: {e}", exc_info=True)
+        return f"<p>Error creating professional cost impact chart: {str(e)}</p>"
+
+def create_strategy_avg_pnl_summary(config: Dict[str, Any], strategy_instances_path: str = "strategy_instances.csv") -> str:
+    """Create AVG PnL summary chart replacing the current heatmap."""
+    try:
+        if not os.path.exists(strategy_instances_path):
+            return "<div class='skipped'>strategy_instances.csv not found. Run log extraction and instance detection.</div>"
+            
+        strategy_instances_df = pd.read_csv(strategy_instances_path)
+        
+        # Apply YAML filters
+        filters = config.get('visualization', {}).get('filters', {})
+        min_occurrences = filters.get('min_strategy_occurrences', 2)
+        top_strategies = filters.get('top_strategies_only', 10)
+        
+        # Filter by minimum occurrences
+        strategy_instances_df = strategy_instances_df[
+            strategy_instances_df['position_count'] >= min_occurrences
+        ]
+        
+        if strategy_instances_df.empty:
+            return f"<div class='skipped'>No strategies with ≥{min_occurrences} positions found.</div>"
+        
+        # Sort by avg_pnl_percent and take top N
+        if 'avg_pnl_percent' in strategy_instances_df.columns:
+            strategy_instances_df = strategy_instances_df.sort_values(
+                'avg_pnl_percent', ascending=True  # Ascending for horizontal bar chart
+            ).tail(top_strategies)  # Take top performers
+        else:
+            strategy_instances_df = strategy_instances_df.head(top_strategies)
+        
+        # Create strategy display name with position count
+        strategy_instances_df['strategy_display_name'] = (
+            strategy_instances_df['strategy'] + ' ' + 
+            strategy_instances_df['step_size'] + ' ' +
+            strategy_instances_df['investment_sol'].astype(str) + 'SOL' +
+            ' (' + strategy_instances_df['position_count'].astype(str) + ')'
+        )
+        
+        # Create horizontal bar chart
+        colors = ['#27ae60' if x >= 0 else '#c0392b' for x in strategy_instances_df['avg_pnl_percent']]
+        
+        fig = go.Figure()
+        
+        fig.add_trace(
+            go.Bar(
+                y=strategy_instances_df['strategy_display_name'],
+                x=strategy_instances_df['avg_pnl_percent'],
+                orientation='h',
+                marker_color=colors,
+                hovertemplate=(
+                    '<b>%{y}</b><br>'
+                    'Avg PnL: %{x:.2f}%<br>'
+                    '<extra></extra>'
+                )
+            )
+        )
+        
+        # Add zero line
+        fig.add_vline(x=0, line_dash="dash", line_color="black", opacity=0.5)
+        
+        # Update layout
+        fig.update_layout(
+            height=max(500, len(strategy_instances_df) * 40),
+            title=dict(
+                text=f'Strategy Performance Summary - AVG PnL (Top {len(strategy_instances_df)} Strategies)',
+                font=dict(size=20, color='#2E3440'),
+                x=0.5
+            ),
+            xaxis_title='Average PnL (%)',
+            yaxis_title='Strategy (Position Count)',
+            template='plotly_white',
+            showlegend=False,
+            margin=dict(l=250)  # Left margin for strategy names
+        )
+        
+        # Update y-axis to prevent label overlap
+        fig.update_yaxes(tickfont=dict(size=10))
+        
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+        
+    except Exception as e:
+        logger.error(f"Failed to create strategy AVG PnL summary: {e}", exc_info=True)
+        return f"<p>Error creating strategy AVG PnL summary: {str(e)}</p>"

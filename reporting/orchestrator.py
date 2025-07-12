@@ -118,7 +118,7 @@ class PortfolioAnalysisOrchestrator:
                     report_files['weekend_simulation'] = weekend_report_path
 
             logger.info("Step 4: Generating comprehensive HTML report...")
-            html_generator = HTMLReportGenerator()
+            html_generator = HTMLReportGenerator(config=self.config)
             html_file = html_generator.generate_comprehensive_report(
                 portfolio_analysis=portfolio_result,
                 # AIDEV-CLAUDE-ADDITION: Pass new results to HTML generator

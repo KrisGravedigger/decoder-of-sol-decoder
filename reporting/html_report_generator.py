@@ -28,11 +28,12 @@ class HTMLReportGenerator:
     Generates comprehensive HTML reports with interactive charts.
     """
     
-    def __init__(self, output_dir: str = "reporting/output"):
+    def __init__(self, output_dir: str = "reporting/output", config: Dict[str, Any] = None):
         """
         Initialize HTML report generator.
         """
         self.output_dir = output_dir
+        self.config = config or {}
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.templates_dir = os.path.join(base_dir, "templates")
         self.timestamp_format = "%Y%m%d_%H%M"
@@ -89,8 +90,18 @@ class HTMLReportGenerator:
         """
         charts = {}
         
+        # Original charts
         charts['equity_curve'] = interactive_charts.create_equity_curve_chart(portfolio_analysis)
         charts['metrics_summary'] = interactive_charts.create_metrics_summary_chart(portfolio_analysis)
+        
+        # Professional charts from chart_generator.py
+        charts['professional_equity_curve'] = interactive_charts.create_professional_equity_curve(portfolio_analysis)
+        charts['professional_drawdown'] = interactive_charts.create_professional_drawdown_analysis(portfolio_analysis)
+        charts['professional_strategy_heatmap'] = interactive_charts.create_professional_strategy_heatmap(portfolio_analysis, self.config if hasattr(self, 'config') else {})
+        charts['professional_cost_impact'] = interactive_charts.create_professional_cost_impact(portfolio_analysis)
+        
+        # Strategy AVG PnL summary (replaces old heatmap)
+        charts['strategy_avg_pnl_summary'] = interactive_charts.create_strategy_avg_pnl_summary(self.config if hasattr(self, 'config') else {})
         
         if correlation_analysis and 'error' not in correlation_analysis:
             charts['correlation_analysis'] = interactive_charts.create_correlation_chart(correlation_analysis)
@@ -104,6 +115,8 @@ class HTMLReportGenerator:
         # AIDEV-NOTE-CLAUDE: Generate the new charts for strategy simulations.
         if strategy_simulations:
             charts['strategy_simulation_comparison'] = interactive_charts.create_strategy_simulation_chart(strategy_simulations, portfolio_analysis)
+        
+        # Keep old heatmap as fallback
         charts['strategy_heatmap'] = interactive_charts.create_strategy_heatmap_chart()
 
         return charts
@@ -127,6 +140,7 @@ class HTMLReportGenerator:
             'strategy_simulations': strategy_simulations,
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
+            'config': self.config,  # Add config for template
             'plotly_js': pyo.get_plotlyjs()
         }
         
