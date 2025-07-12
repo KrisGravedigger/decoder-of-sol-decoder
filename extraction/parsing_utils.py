@@ -94,106 +94,99 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
     return "UNKNOWN"
 
 
-def parse_strategy_from_context(lines: List[str], start_index: int, lookback: int, debug_enabled: bool = False) -> str:
+def parse_open_details_from_context(lines: List[str], start_index: int, lookback: int, lookahead: int = 50, debug_enabled: bool = False) -> Dict[str, Any]:
     """
-    Parse strategy from log context with step size detection.
+    Parse position opening details (strategy, TP, SL) from log context.
+    Finds the most complete log line within the search window.
     
     Args:
         lines: All log lines
         start_index: Starting line index
         lookback: Number of lines to look back
+        lookahead: Number of lines to look ahead
         debug_enabled: Whether debug logging is enabled
         
     Returns:
-        Strategy string with step size: "Spot (1-Sided) WIDE", "Bid-Ask (1-Sided) SIXTYNINE", etc. or "UNKNOWN"
+        A dictionary with 'strategy', 'tp', and 'sl' keys.
     """
-    lookahead = 30  # Fixed lookahead value
-    
-    if debug_enabled:
-        logger.debug(f"Parsing strategy from line {start_index + 1}, looking back {lookback} lines and ahead {lookahead} lines")
-    
-    # Search both backward and forward
+    force_debug = True # Keep this for now
+
     search_start = max(0, start_index - lookback)
     search_end = min(len(lines), start_index + lookahead)
-    
-    # FIRST PASS: Look for bracket format with step size (highest priority)
-    for i in range(search_start, search_end):
+
+    best_fallback_strategy = "UNKNOWN"
+    # AIDEV-NOTE-GEMINI: Default result dictionary.
+    final_details = {
+        'strategy': "UNKNOWN",
+        'tp': None,
+        'sl': None
+    }
+
+    # Search backwards to find the most recent, definitive log line first.
+    for i in range(search_end - 1, search_start - 1, -1):
         line = clean_ansi(lines[i])
         
-        # Pattern 1: [Spot (1-Sided)/... or [Bid-Ask (1-Sided)/... with step size detection
-        strategy_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
-        if strategy_match:
-            strategy_type = strategy_match.group(1)  # "Spot" or "Bid-Ask"
-            base_strategy = f"{strategy_type} (1-Sided)"
-            
-            if debug_enabled:
-                logger.debug(f"Found base strategy '{base_strategy}' at line {i + 1}")
-                logger.debug(f"Full line content: {line}")
-            
-            # Extract step size - try multiple patterns
-            step_size_patterns = [
-                r'Step Size:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)',  # with optional whitespace
-                r'/Step Size:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)/',  # with slashes
-                r'Step Size:\s*([A-Z]+)',  # any uppercase word after Step Size
-            ]
-            
-            step_size = None
-            for pattern in step_size_patterns:
-                step_size_match = re.search(pattern, line, re.IGNORECASE)
-                if step_size_match:
-                    step_size = step_size_match.group(1).upper()
-                    if debug_enabled:
-                        logger.debug(f"Found step size '{step_size}' using pattern: {pattern}")
-                    break
-            
-            if step_size and step_size in ['WIDE', 'SIXTYNINE', 'MEDIUM', 'NARROW']:
-                result = f"{base_strategy} {step_size}"
-                if debug_enabled:
-                    logger.debug(f"Returning strategy with step size: '{result}'")
-                return result
-            else:
-                # Found bracket format but no valid step size - still return it
-                if debug_enabled:
-                    logger.debug(f"Found bracket format but no valid step size, returning: '{base_strategy}'")
-                return base_strategy
-    
-    # SECOND PASS: Look for text format (fallback)
-    for i in range(search_start, search_end):
-        line = clean_ansi(lines[i])
+        # --- Attempt to parse all details from the current line ---
+        base_strategy = None
+        step_size = None
+        tp = None
+        sl = None
+
+        # Check for a line that could contain strategy info
+        is_strategy_line = re.search(r'(bidask|spot-onesided|spot|\[(Spot|Bid-Ask) \(1-Sided\))', line, re.IGNORECASE)
         
-        # Pattern 2: "using the spot-onesided strategy" or "using the bidask strategy"
-        text_strategy_match = re.search(r'using the (spot-onesided|bidask|spot|bid-ask) strategy', line)
-        if text_strategy_match:
-            strategy_text = text_strategy_match.group(1)
-            if strategy_text == "spot-onesided" or strategy_text == "spot":
-                result = "Spot (1-Sided)"
-            elif strategy_text == "bidask" or strategy_text == "bid-ask":
-                result = "Bid-Ask (1-Sided)"
-            else:
-                result = "UNKNOWN"
-            
-            if debug_enabled:
-                logger.debug(f"Found strategy '{result}' at line {i + 1} (text format: '{strategy_text}') - fallback")
-            return result
-        
-        # Pattern 3: "spot-onesided:" or "bidask:" at start of summary line
-        summary_match = re.search(r'^.*?(spot-onesided|bidask|spot|bid-ask):', line)
-        if summary_match:
-            strategy_text = summary_match.group(1)
-            if strategy_text == "spot-onesided" or strategy_text == "spot":
-                result = "Spot (1-Sided)"
-            elif strategy_text == "bidask" or strategy_text == "bid-ask":
-                result = "Bid-Ask (1-Sided)"
-            else:
-                result = "UNKNOWN"
-            
-            if debug_enabled:
-                logger.debug(f"Found strategy '{result}' at line {i + 1} (summary format: '{strategy_text}') - fallback")
-            return result
+        if is_strategy_line:
+            # 1. Parse Strategy Type
+            log_summary_match = re.search(r'(bidask|spot-onesided|spot):\s*\d+', line, re.IGNORECASE)
+            if log_summary_match:
+                strategy_text = log_summary_match.group(1).lower()
+                if "spot" in strategy_text: base_strategy = "Spot (1-Sided)"
+                elif "bidask" in strategy_text: base_strategy = "Bid-Ask (1-Sided)"
+            else: # Fallback to bracket format
+                bracket_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
+                if bracket_match:
+                    base_strategy = f"{bracket_match.group(1)} (1-Sided)"
+
+            # 2. Parse Step Size
+            step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', line, re.IGNORECASE)
+            if step_size_match:
+                step_size = step_size_match.group(1).upper()
+
+            # 3. Parse Take Profit & Stop Loss
+            tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', line)
+            if tp_match:
+                tp = float(tp_match.group(1))
+
+            sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', line)
+            if sl_match:
+                sl = float(sl_match.group(1))
+
+            # --- Decision Logic ---
+            if base_strategy:
+                # Perfect Match: We have strategy and step size. This is the definitive line.
+                if step_size:
+                    final_details['strategy'] = f"{base_strategy} {step_size}"
+                    final_details['tp'] = tp
+                    final_details['sl'] = sl
+                    if debug_enabled or force_debug:
+                        logger.debug(f"Found COMPLETE match on line {i + 1}: {final_details}. Returning.")
+                    return final_details
+                
+                # Partial Match: Store as fallback if we don't have one yet, and KEEP SEARCHING.
+                if best_fallback_strategy == "UNKNOWN":
+                    best_fallback_strategy = base_strategy
+                    # Also store TP/SL if found on this partial line
+                    final_details['tp'] = tp if final_details['tp'] is None else final_details['tp']
+                    final_details['sl'] = sl if final_details['sl'] is None else final_details['sl']
+                    if debug_enabled or force_debug:
+                        logger.debug(f"Found PARTIAL match on line {i + 1}: '{base_strategy}'. Storing as fallback and continuing.")
+
+    # If loop finishes, return the best we could find.
+    final_details['strategy'] = best_fallback_strategy
+    if debug_enabled or force_debug:
+        logger.debug(f"Search complete. Returning best found details: {final_details}")
     
-    if debug_enabled:
-        logger.debug(f"No strategy pattern found in {lookback} lines lookback + {lookahead} lines lookahead from line {start_index + 1}")
-    return "UNKNOWN"
+    return final_details
 
 
 def parse_initial_investment(lines: List[str], start_index: int, lookahead: int, debug_enabled: bool = False) -> Optional[float]:

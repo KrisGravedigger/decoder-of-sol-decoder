@@ -138,7 +138,7 @@ class AnalysisRunner:
         # The row index from iterrows() can be non-sequential after filtering.
         total_positions = len(positions_df)
         for idx, (original_index, position) in enumerate(positions_df.iterrows()):
-            logger.info(f"Analyzing position {idx + 1}/{total_positions}: {position['token_pair']} (pos_id: {position.get('position_id', 'N/A')})")
+            logger.debug(f"Analyzing position {idx + 1}/{total_positions}: {position['token_pair']} (pos_id: {position.get('position_id', 'N/A')})")
             
             result = self.analyze_single_position(position.to_dict())
             if result:
@@ -184,7 +184,7 @@ class AnalysisRunner:
             
             # AIDEV-DEBUG-CLAUDE: Check price data structure and content
             if price_history:
-                logger.info(f"Got {len(price_history)} price points. First: {price_history[0] if price_history else 'NONE'}, Last: {price_history[-1] if price_history else 'NONE'}")
+                logger.debug(f"Got {len(price_history)} price points. First: {price_history[0] if price_history else 'NONE'}, Last: {price_history[-1] if price_history else 'NONE'}")
                 
                 # Check for zero prices and warn
                 zero_count = sum(1 for p in price_history if p.get('close', 0) <= 0)

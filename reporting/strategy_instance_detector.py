@@ -50,9 +50,19 @@ class StrategyInstanceDetector:
             Unique strategy instance ID
         """
         # AIDEV-NOTE-CLAUDE: Consistent formatting to avoid float precision issues
+        # AIDEV-NOTE-GEMINI: Added NaN check to prevent crashes.
         investment_rounded = round(investment, 3)
-        tp_formatted = int(tp) if tp == int(tp) else round(tp, 1)  # 6.0 -> 6, 6.5 -> 6.5
-        sl_formatted = int(sl) if sl == int(sl) else round(sl, 1)  # 18.0 -> 18, 12.5 -> 12.5
+        
+        # Handle potential NaN values for tp and sl
+        if pd.isna(tp):
+            tp_formatted = 'NaN'
+        else:
+            tp_formatted = int(tp) if tp == int(tp) else round(tp, 1)
+
+        if pd.isna(sl):
+            sl_formatted = 'NaN'
+        else:
+            sl_formatted = int(sl) if sl == int(sl) else round(sl, 1)
         
         # Create readable ID: strategy_investment_tp_sl
         strategy_id = f"{strategy}_{investment_rounded}_{tp_formatted}_{sl_formatted}"
@@ -221,8 +231,8 @@ class StrategyInstanceDetector:
 
             # Extract required parameters with proper column names
             strategy = row.get(column_mapping['strategy'], 'unknown')
-            tp = row.get('takeProfit', 0)  # This should match CSV exactly
-            sl = row.get('stopLoss', 0)    # This should match CSV exactly  
+            tp = row.get('takeProfit', float('nan'))  # This should match CSV exactly
+            sl = row.get('stopLoss', float('nan'))    # This should match CSV exactly  
             investment = row.get(column_mapping['investment'], 0)
             
             # Skip rows with missing critical data

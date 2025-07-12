@@ -6,6 +6,29 @@ from typing import Dict, List, Optional, Any
 import sys
 from pathlib import Path
 
+
+
+# Failed position detection patterns
+FAILED_POSITION_PATTERNS = [
+    r'Transactions failed to confirm after \d+ attempts',
+    r'Error creating a position:.*failed',
+    r'Error creating a position:.*Transactions failed',
+    r'Failed to create position',
+    r'Position creation failed', 
+    r'Transaction failed after multiple attempts',
+    r'Could not confirm transaction after \d+ attempts',
+    r'Error.*creating.*position',
+]
+
+# AIDEV-NOTE-GEMINI: Added success patterns to prevent "silent failures" from being treated as successful.
+SUCCESS_CONFIRMATION_PATTERNS = [
+    # Pattern 1: Catches summary lines like "bidask: 12345 | OPENED..." or "spot: 12345 | OPENED..."
+    r'(bidask|spot|spot-onesided):\s*\d+',
+    # Pattern 2: Catches explicit pool creation logs like "Opened a new pool for..."
+    r'Opened a new pool for',
+    # Pattern 3: A generic fallback for future formats
+    r'Position successfully created',
+]
 # AIDEV-NOTE-CLAUDE: This ensures project root is on the path for module resolution
 # This is a robust way to handle imports in a nested structure.
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -21,7 +44,7 @@ DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event 
 from core.models import Position
 from extraction.parsing_utils import (
     clean_ansi, find_context_value, normalize_token_pair,
-    extract_close_timestamp, parse_strategy_from_context,
+    extract_close_timestamp, parse_open_details_from_context,
     parse_initial_investment, parse_final_pnl_with_line_info
 )
 from tools.debug_analyzer import DebugAnalyzer
@@ -31,6 +54,8 @@ LOG_DIR = "input"
 OUTPUT_CSV = "positions_to_analyze.csv"
 CONTEXT_EXPORT_FILE = "close_contexts_analysis.txt"
 MIN_PNL_THRESHOLD = 0.01  # Skip positions with PnL between -0.01 and +0.01 SOL
+STRATEGY_DIAGNOSTIC_ENABLED = True  # Enable strategy parsing diagnostics
+STRATEGY_DIAGNOSTIC_FILE = "strategy_parsing_diagnostic.txt"
 
 # Logging configuration
 log_level = logging.DEBUG if (DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG") else logging.INFO
@@ -41,6 +66,168 @@ logging.basicConfig(
 )
 logger = logging.getLogger('LogExtractor')
 
+
+# === STRATEGY PARSING DIAGNOSTIC ===
+STRATEGY_DIAGNOSTIC_ENABLED = True  # Enable strategy parsing diagnostics
+STRATEGY_DIAGNOSTIC_FILE = "strategy_parsing_diagnostic.txt"
+
+class StrategyParsingDiagnostic:
+    """Diagnostic tool for strategy parsing issues - missing step_size detection."""
+    
+    def __init__(self, enabled: bool = True):
+        """Initialize strategy parsing diagnostic."""
+        self.enabled = enabled
+        self.diagnostic_cases: List[Dict[str, Any]] = []
+        self.all_lines: List[str] = []
+        self.file_line_mapping: List[Dict[str, Any]] = []
+        
+    def set_log_data(self, lines: List[str], file_mapping: List[Dict[str, Any]]):
+        """Set log lines and file mapping for diagnostic."""
+        self.all_lines = lines
+        self.file_line_mapping = file_mapping
+        
+    def _get_file_info_for_line(self, line_index: int) -> tuple[str, str]:
+        """Get wallet_id and source_file for a given line index."""
+        for file_info in self.file_line_mapping:
+            if file_info['start'] <= line_index < file_info['end']:
+                return file_info['wallet_id'], file_info['source_file']
+        return "unknown_wallet", "unknown_file"
+        
+    def detect_missing_step_size(self, strategy_raw: str, line_index: int, investment_amount: float = None):
+        """
+        Detect cases where step_size might be missing from strategy name.
+        
+        Args:
+            strategy_raw: Extracted strategy string
+            line_index: Line index where strategy was parsed
+            investment_amount: Investment amount if available
+        """
+        if not self.enabled:
+            return
+            
+        # Check if strategy is missing step_size
+        strategy_lower = strategy_raw.lower()
+        has_step_size = any(step in strategy_lower for step in ['wide', 'medium', 'sixtynine', 'narrow'])
+        
+        # Criteria for suspicion:
+        # 1. No step_size in strategy name
+        # 2. Investment amount suggests it might be Wide (>7 SOL)
+        is_suspicious = (
+            not has_step_size and 
+            investment_amount is not None and 
+            investment_amount > 7.0  # Wide-range investment threshold
+        )
+        
+        if is_suspicious or not has_step_size:
+            wallet_id, source_file = self._get_file_info_for_line(line_index)
+            
+            # Extract context around the line
+            context_lines_before = 30
+            context_lines_after = 30
+            start_idx = max(0, line_index - context_lines_before)
+            end_idx = min(len(self.all_lines), line_index + context_lines_after + 1)
+            
+            context_lines = self.all_lines[start_idx:end_idx]
+            
+            diagnostic_case = {
+                'strategy_raw': strategy_raw,
+                'investment_amount': investment_amount,
+                'line_index': line_index,
+                'wallet_id': wallet_id,
+                'source_file': source_file,
+                'context_lines': context_lines,
+                'context_start_line': start_idx,
+                'is_suspicious': is_suspicious,
+                'reason': 'Missing step_size + high investment' if is_suspicious else 'Missing step_size'
+            }
+            
+            self.diagnostic_cases.append(diagnostic_case)
+            
+            if DETAILED_POSITION_LOGGING:
+                logger.warning(f"Strategy parsing diagnostic: {diagnostic_case['reason']} | "
+                              f"Strategy: '{strategy_raw}' | Investment: {investment_amount} SOL | "
+                              f"File: {source_file} | Line: {line_index + 1}")
+    
+    def export_diagnostic(self, output_file: str) -> Dict[str, int]:
+        """
+        Export strategy parsing diagnostic to file.
+        
+        Args:
+            output_file: Path to output file
+            
+        Returns:
+            Dictionary with export statistics
+        """
+        if not self.enabled or not self.diagnostic_cases:
+            logger.info("No strategy parsing diagnostic cases to export.")
+            return {}
+            
+        try:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write("STRATEGY PARSING DIAGNOSTIC REPORT\n")
+                f.write(f"Generated from {len(self.diagnostic_cases)} suspicious cases\n")
+                f.write("=" * 80 + "\n\n")
+                
+                f.write("SUMMARY:\n")
+                f.write("This report shows cases where strategy parsing might be incomplete.\n")
+                f.write("Look for patterns in log format that cause step_size detection failure.\n\n")
+                
+                suspicious_count = sum(1 for case in self.diagnostic_cases if case['is_suspicious'])
+                missing_count = len(self.diagnostic_cases) - suspicious_count
+                
+                f.write(f"Cases found:\n")
+                f.write(f"  - {suspicious_count} suspicious (missing step_size + high investment)\n")
+                f.write(f"  - {missing_count} missing step_size (normal investment)\n\n")
+                
+                # Group by file for easier analysis
+                cases_by_file = {}
+                for case in self.diagnostic_cases:
+                    file_key = case['source_file']
+                    if file_key not in cases_by_file:
+                        cases_by_file[file_key] = []
+                    cases_by_file[file_key].append(case)
+                
+                for file_name, file_cases in cases_by_file.items():
+                    f.write(f"\n{'=' * 20} FILE: {file_name} {'=' * 20}\n")
+                    f.write(f"Cases in this file: {len(file_cases)}\n\n")
+                    
+                    for i, case in enumerate(file_cases, 1):
+                        f.write(f"--- CASE #{i} ---\n")
+                        f.write(f"Strategy: '{case['strategy_raw']}'\n")
+                        f.write(f"Investment: {case['investment_amount']} SOL\n")
+                        f.write(f"Line: {case['line_index'] + 1} (context starts at line {case['context_start_line'] + 1})\n")
+                        f.write(f"Reason: {case['reason']}\n")
+                        f.write(f"File: {case['wallet_id']}/{case['source_file']}\n")
+                        f.write("\n" + "=" * 60 + " CONTEXT START " + "=" * 60 + "\n")
+                        
+                        for line_idx, line in enumerate(case['context_lines']):
+                            actual_line_num = case['context_start_line'] + line_idx + 1
+                            marker = ">>> " if line_idx == 30 else "    "  # Mark the target line
+                            f.write(f"{marker}Line {actual_line_num:6}: {line}")
+                            if not line.endswith('\n'):
+                                f.write('\n')
+                        
+                        f.write("=" * 60 + " CONTEXT END " + "=" * 62 + "\n\n")
+                
+                f.write(f"\n{'=' * 20} ANALYSIS RECOMMENDATIONS {'=' * 20}\n")
+                f.write("1. Look for log format patterns that differ between working and failing cases\n")
+                f.write("2. Check if bot version changes correlate with parsing failures\n")
+                f.write("3. Examine context around target lines (marked with >>>) for strategy mentions\n")
+                f.write("4. Update parsing_utils.py regex patterns if format changes detected\n")
+            
+            logger.info(f"Strategy parsing diagnostic exported to {output_file}")
+            logger.info(f"Total cases: {len(self.diagnostic_cases)}, Suspicious: {suspicious_count}")
+            
+            return {
+                'total_cases': len(self.diagnostic_cases),
+                'suspicious_cases': suspicious_count,
+                'missing_step_size': missing_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error exporting strategy diagnostic: {e}")
+            return {}
 
 # === Main Parser Class ===
 
@@ -56,6 +243,7 @@ class LogParser:
             debug_enabled=DEBUG_ENABLED,
             context_export_enabled=CONTEXT_EXPORT_ENABLED
         )
+        self.strategy_diagnostic = StrategyParsingDiagnostic(enabled=STRATEGY_DIAGNOSTIC_ENABLED)
         self.file_line_mapping: List[Dict[str, Any]] = []
 
     def _process_open_event(self, timestamp: str, version: str, index: int):
@@ -75,6 +263,11 @@ class LogParser:
                 logger.debug(f"Skipped opening at line {index + 1}, missing token pair.")
             return
         
+        # AIDEV-NOTE-GEMINI: Check if position creation will fail BEFORE creating the object.
+        if self._check_for_failed_position(index, token_pair):
+            # Detailed logging for failure is now inside _check_for_failed_position
+            return
+        
         existing_position = next((pos for pos in self.active_positions.values() if pos.token_pair == token_pair), None)
 
         if existing_position:
@@ -86,11 +279,24 @@ class LogParser:
                 r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', 
                 r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
             ], self.all_lines, index, 50)
-            existing_position.actual_strategy = parse_strategy_from_context(
-                self.all_lines, index, 50, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
+            
+            # AIDEV-NOTE-GEMINI: Call the new function and unpack the details dictionary.
+            open_details = parse_open_details_from_context(
+                self.all_lines, index, lookback=50, lookahead=150, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
             )
+            existing_position.actual_strategy = open_details['strategy']
+            existing_position.take_profit = open_details['tp']
+            existing_position.stop_loss = open_details['sl']
+
             existing_position.initial_investment = parse_initial_investment(
                 self.all_lines, index, 100, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
+            )
+            
+            # ADD DIAGNOSTIC CHECK:
+            self.strategy_diagnostic.detect_missing_step_size(
+                existing_position.actual_strategy, 
+                index, 
+                existing_position.initial_investment
             )
             return
             
@@ -102,17 +308,42 @@ class LogParser:
             r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', 
             r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
         ], self.all_lines, index, 50)
-        pos.actual_strategy = parse_strategy_from_context(
-            self.all_lines, index, 50, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
+
+        # AIDEV-NOTE-GEMINI: Call the new function and unpack the details dictionary.
+        open_details = parse_open_details_from_context(
+            self.all_lines, index, lookback=50, lookahead=150, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
         )
+        pos.actual_strategy = open_details['strategy']
+        pos.take_profit = open_details['tp']
+        pos.stop_loss = open_details['sl']
+
         pos.initial_investment = parse_initial_investment(
             self.all_lines, index, 100, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
         )
         
+        # ADD DIAGNOSTIC CHECK:
+        self.strategy_diagnostic.detect_missing_step_size(
+            pos.actual_strategy, 
+            index, 
+            pos.initial_investment
+        )
+        
         self.active_positions[pos.position_id] = pos
         
+        # AIDEV-NOTE-GEMINI: Moved the enhanced logging block here to fix the UnboundLocalError.
+        # This code now only runs after a new `pos` object has been successfully created.
         if DETAILED_POSITION_LOGGING:
-            logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Open detected at line {index + 1}")
+            file_info = next((f for f in self.file_line_mapping if f['start'] <= index < f['end']), None)
+            if file_info:
+                local_line_num = index - file_info['start'] + 1
+                source_file_name = file_info['source_file'].replace("\\", "/") # Ensure consistent path separators
+                logger.info(
+                    f"Opened position: {pos.position_id} ({pos.token_pair}) | "
+                    f"Detected at Global Line: {index + 1} (File: {source_file_name}, Line: {local_line_num})"
+                )
+            else:
+                # Fallback to the old logging style if file info isn't found for some reason
+                logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Open detected at line {index + 1}")
 
     def _process_close_event_without_timestamp(self, index: int):
         """
@@ -226,6 +457,7 @@ class LogParser:
         
         logger.info(f"Processing {len(self.all_lines)} lines from {len(log_files_info)} log files.")
         self.debug_analyzer.set_log_lines(self.all_lines)
+        self.strategy_diagnostic.set_log_data(self.all_lines, self.file_line_mapping)
 
         for i, line_content in enumerate(self.all_lines):
             if "position and withdrew liquidity" in line_content:
@@ -259,6 +491,46 @@ class LogParser:
         
         logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data. {skipped_low_pnl} skipped due to low PnL.")
         return validated_positions
+    
+    def _check_for_failed_position(self, start_index: int, token_pair: str) -> bool:
+        """
+        Check if position creation failed within the lookahead window.
+        A position is considered FAILED if:
+        1. An explicit failure message is found.
+        2. NO explicit success confirmation is found within the window.
+        """
+        # AIDEV-NOTE-GEMINI: Increased window to 150 to catch delayed messages.
+        search_window = 150
+        search_end = min(len(self.all_lines), start_index + search_window)
+        
+        success_found = False
+        for i in range(start_index, search_end):
+            line = clean_ansi(self.all_lines[i])
+            
+            # First, check for explicit failure
+            for pattern in FAILED_POSITION_PATTERNS:
+                if re.search(pattern, line, re.IGNORECASE):
+                    if DETAILED_POSITION_LOGGING:
+                        logger.warning(f"FAILED (Explicit): Position creation for {token_pair} at line {start_index + 1} failed with error on line {i + 1}.")
+                    return True  # Failure detected
+
+            # If no failure, check for explicit success
+            if not success_found:
+                for pattern in SUCCESS_CONFIRMATION_PATTERNS:
+                    if re.search(pattern, line, re.IGNORECASE):
+                        success_found = True
+                        break # Success found, no need to check other success patterns for this line
+        
+        # After checking the whole window, decide the outcome
+        if not success_found:
+            if DETAILED_POSITION_LOGGING:
+                logger.warning(f"FAILED (Silent): No success confirmation found for {token_pair} opened at line {start_index + 1} within {search_window} lines.")
+            return True # No success confirmation means it's a silent failure
+
+        # If we get here, it means success was found and no failure was found.
+        if DETAILED_POSITION_LOGGING:
+            logger.debug(f"SUCCESS: Position creation for {token_pair} at line {start_index + 1} confirmed successfully.")
+        return False
 
 
 def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool:
@@ -281,6 +553,10 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     if CONTEXT_EXPORT_ENABLED and parser.debug_analyzer.get_context_count() > 0:
         context_stats = parser.debug_analyzer.export_analysis(CONTEXT_EXPORT_FILE)
         logger.info(f"Context export statistics: {dict(context_stats)}")
+    
+    if STRATEGY_DIAGNOSTIC_ENABLED:
+        strategy_stats = parser.strategy_diagnostic.export_diagnostic(STRATEGY_DIAGNOSTIC_FILE)
+        logger.info(f"Strategy diagnostic statistics: {dict(strategy_stats)}")
     
     if not extracted_data:
         logger.error("Failed to extract any complete positions. CSV file will not be created.")

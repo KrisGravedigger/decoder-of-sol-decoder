@@ -48,10 +48,9 @@ class PriceCacheManager:
         Returns:
             List[Dict]: Price data with timestamp and close keys, aligned to candle boundaries
         """
-        logger.info(f"Getting price data for {pool_address} ({timeframe}): {start_dt} to {end_dt}")
-        
+                
         # AIDEV-NOTE-CLAUDE: Conservative approach - use original timestamps for cache keys, alignment post-processing only
-        logger.info(f"Getting price data for {pool_address} ({timeframe}): {start_dt} to {end_dt}")
+        logger.debug(f"Getting price data for {pool_address} ({timeframe}): {start_dt} to {end_dt}")
         
         # Step 1: Split request into monthly periods using ORIGINAL timestamps (no cache invalidation)
         monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
@@ -79,7 +78,7 @@ class PriceCacheManager:
         # Step 4: Post-processing alignment (conservative approach - no cache impact)
         aligned_data = self._align_to_candle_boundaries(filtered_data, timeframe)
         
-        logger.info(f"Returning {len(aligned_data)} price points for {pool_address} (post-processing aligned)")
+        logger.debug(f"Returning {len(aligned_data)} price points for {pool_address} (post-processing aligned)")
         
         return aligned_data
     
@@ -147,7 +146,7 @@ class PriceCacheManager:
         gaps = self._find_data_gaps(existing_data, month_start, month_end, timeframe)
         
         if not gaps:
-            logger.info(f"No gaps found for {pool_address} in {month_str}")
+            logger.debug(f"No gaps found for {pool_address} in {month_str}")
             return self._filter_existing_data(existing_data, month_start, month_end)
         
         if not api_key:

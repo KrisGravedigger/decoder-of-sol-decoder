@@ -31,6 +31,10 @@ class Position:
         self.retry_count: int = 0  # Track retry attempts
         self.wallet_id = wallet_id
         self.source_file = source_file
+        self.initial_investment: Optional[float] = None
+        self.final_pnl: Optional[float] = None
+        self.take_profit: Optional[float] = None
+        self.stop_loss: Optional[float] = None
 
     @property
     def universal_position_id(self) -> str:
@@ -76,19 +80,24 @@ class Position:
         return errors
 
     def to_csv_row(self) -> Dict[str, Any]:
-        """Convert position to CSV row dictionary."""
+        """Convert position data to a dictionary for CSV export."""
         return {
-            "position_id": self.position_id, 
-            "token_pair": self.token_pair,
-            "pool_address": self.pool_address, 
-            "open_timestamp": self.open_timestamp,
-            "close_timestamp": self.close_timestamp, 
-            "investment_sol": self.initial_investment,
-            "pnl_sol": self.final_pnl, 
-            "strategy_raw": self.actual_strategy,
-            "close_reason": self.close_reason, 
-            "bot_version": self.bot_version,
+            "position_id": self.position_id,
             "wallet_id": self.wallet_id,
             "source_file": self.source_file,
-            "strategy_instance_id": "",  # Empty, will be filled by strategy_instance_detector
+            "token_pair": self.token_pair,
+            "pool_address": self.pool_address,
+            "strategy_raw": self.actual_strategy,
+            # AIDEV-NOTE-GEMINI: Added take_profit and stop_loss to the CSV output.
+            "takeProfit": self.take_profit,
+            "stopLoss": self.stop_loss,
+            "investment_sol": self.initial_investment,
+            "pnl_sol": self.final_pnl,
+            "open_timestamp": self.open_timestamp,
+            "close_timestamp": self.close_timestamp,
+            "close_reason": self.close_reason,
+            "bot_version": self.bot_version,
+            "retry_count": self.retry_count,
+            "open_line_index": self.open_line_index,
+            "close_line_index": self.close_line_index
         }
