@@ -157,11 +157,10 @@ class AnalysisRunner:
             Optional[Dict]: Analysis result or None if failed
         """
         try:
-            # AIDEV-NOTE-CLAUDE: Debug logging for missing column investigation
-            logger.debug(f"Position {position_dict.get('position_id', 'UNKNOWN')} keys: {sorted(position_dict.keys())}")
+            # DEEP DEBUG: Setup logger
+            deep_logger = logging.getLogger('DEEP_DEBUG')
             
             # Check for required columns before proceeding
-            # AIDEV-NOTE-CLAUDE: Use actual runtime column names, not CSV header names
             required_columns = ['investment_sol', 'open_timestamp', 'close_timestamp', 'pool_address', 'token_pair']
             missing_columns = [col for col in required_columns if col not in position_dict]
             
@@ -170,29 +169,26 @@ class AnalysisRunner:
                 logger.error(f"Available keys: {list(position_dict.keys())}")
                 return None
             
-            # AIDEV-NOTE-CLAUDE: Smart timestamp parsing - handle both SOL Decoder and standard formats
+            # Smart timestamp parsing - handle both SOL Decoder and standard formats
             start_dt = self._smart_timestamp_parser(str(position_dict['open_timestamp']))
             end_dt = self._smart_timestamp_parser(str(position_dict['close_timestamp']))
 
-            if pd.isna(start_dt) or pd.isna(end_dt) or start_dt >= end_dt:
-                logger.warning(f"Invalid or unparseable timestamps for position {position_dict.get('position_id', 'N/A')}. open='{position_dict['open_timestamp']}', close='{position_dict['close_timestamp']}'")
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                logger.warning(f"Unparseable timestamps for position {position_dict.get('position_id', 'N/A')}. open='{position_dict['open_timestamp']}', close='{position_dict['close_timestamp']}'")
+                return None
+            
+            # Critical fix for the "Time Machine" bug
+            if end_dt <= start_dt:
+                logger.error(f"FATAL DATA ERROR: Position {position_dict.get('position_id', 'N/A')} has close_timestamp BEFORE open_timestamp. Skipping.")
+                logger.error(f"Open: {start_dt}, Close: {end_dt}")
                 return None
                 
             price_history = fetch_price_history(
                 position_dict['pool_address'], start_dt, end_dt, self.api_key
             )
             
-            # AIDEV-DEBUG-CLAUDE: Check price data structure and content
-            if price_history:
-                logger.debug(f"Got {len(price_history)} price points. First: {price_history[0] if price_history else 'NONE'}, Last: {price_history[-1] if price_history else 'NONE'}")
-                
-                # Check for zero prices and warn
-                zero_count = sum(1 for p in price_history if p.get('close', 0) <= 0)
-                if zero_count > 0:
-                    logger.warning(f"⚠️  DATA QUALITY WARNING: {zero_count}/{len(price_history)} price points have zero/negative values for {position_dict['token_pair']}")
-                
-                # Apply forward fill to clean zero prices
-                price_history = self._forward_fill_price_history(price_history, position_dict['token_pair'])
+            # Apply forward fill to clean zero prices
+            price_history = self._forward_fill_price_history(price_history, position_dict['token_pair'])
             
             if not price_history:
                 logger.warning(f"No price history for {position_dict['token_pair']}. Skipping simulation for this position.")
@@ -208,9 +204,67 @@ class AnalysisRunner:
             step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', str(strategy_str), re.IGNORECASE)
             step_size = step_match.group(1).upper() if step_match else "UNKNOWN"
             
+            # Explicitly cast numeric types before passing them to the simulator
+            try:
+                investment_sol_float = float(position_dict['investment_sol'])
+                raw_pnl_sol = position_dict.get('pnl_sol')
+                pnl_sol_float = float(raw_pnl_sol) if pd.notna(raw_pnl_sol) else None
+
+            except (ValueError, TypeError) as e:
+                logger.error(f"FATAL DATA ERROR: Could not convert numeric values for position {position_dict.get('position_id', 'N/A')}. Skipping simulation.")
+                logger.error(f"Investment: '{position_dict['investment_sol']}', PnL: '{position_dict.get('pnl_sol')}'. Error: {e}")
+                return {
+                    'position_id': position_dict.get('position_id'),
+                    'token_pair': position_dict.get('token_pair'),
+                    'best_strategy': 'ERROR - Invalid Input Data',
+                    'simulation_results': {'error': 'Invalid numeric input data for simulation.'}
+                }
+
+            # DEEP DEBUG: Log everything before calling simulator
+            deep_logger.debug("\n" + "="*80)
+            deep_logger.debug(f"BEFORE CALLING SIMULATOR for {position_dict['token_pair']}")
+            deep_logger.debug(f"Position data:")
+            deep_logger.debug(f"  position_id: {position_dict.get('position_id')}")
+            deep_logger.debug(f"  investment_sol: {investment_sol_float} (from CSV: {position_dict['investment_sol']})")
+            deep_logger.debug(f"  pnl_sol: {pnl_sol_float} (from CSV: {position_dict.get('pnl_sol')})")
+            deep_logger.debug(f"  step_size: {step_size}")
+            deep_logger.debug(f"  close_reason: {position_dict.get('close_reason')}")
+
+            # Check price history content
+            if price_history:
+                deep_logger.debug(f"\nPrice history check:")
+                deep_logger.debug(f"  Total points: {len(price_history)}")
+                deep_logger.debug(f"  First entry: {price_history[0]}")
+                deep_logger.debug(f"  Last entry: {price_history[-1]}")
+                
+                # Extract and analyze prices
+                prices = [p.get('close', 0) for p in price_history if p.get('close', 0) > 0]
+                if prices:
+                    deep_logger.debug(f"  Valid prices: {len(prices)}")
+                    deep_logger.debug(f"  Min price: {min(prices):.15e}")
+                    deep_logger.debug(f"  Max price: {max(prices):.15e}")
+                    deep_logger.debug(f"  Price ratio: {max(prices)/min(prices) if min(prices) > 0 else 'N/A'}")
+
             analyzer = SpotVsBidAskSimulator(bin_step=100, step_size=step_size)
-            simulation_results = analyzer.run_all_simulations(position_dict, price_history)
             
+            simulation_results = analyzer.run_all_simulations(
+                investment_sol=investment_sol_float,
+                pnl_sol=pnl_sol_float,
+                price_history=price_history,
+                open_timestamp=start_dt,
+                close_timestamp=end_dt,
+                close_reason=position_dict.get('close_reason', 'other')
+            )
+            
+            # DEEP DEBUG: Log results
+            if simulation_results and not simulation_results.get('error'):
+                deep_logger.debug(f"\nSimulation results:")
+                for strategy_name, result in simulation_results.items():
+                    deep_logger.debug(f"  {strategy_name}:")
+                    deep_logger.debug(f"    PnL: {result.get('pnl_sol', 0):.15e}")
+                    deep_logger.debug(f"    PnL from fees: {result.get('pnl_from_fees', 0):.15e}")
+                    deep_logger.debug(f"    PnL from IL: {result.get('pnl_from_il', 0):.15e}")
+                    
             if not simulation_results or 'error' in simulation_results:
                 best_strategy_name = 'ERROR - Simulation Failed'
             else:
@@ -341,39 +395,4 @@ def run_spot_vs_bidask_analysis(api_key: Optional[str]):
         original_position_series = positions_df[positions_df['position_id'] == result['position_id']]
         if original_position_series.empty:
             logger.warning(f"Could not find original data for position_id: {result['position_id']}")
-            continue
-        original_position = original_position_series.iloc[0].to_dict()
-        
-        final_row = {
-            **original_position, 
-            "best_sim_strategy": result.get('best_strategy'),
-        }
-
-        sim_results = result.get('simulation_results', {})
-        if sim_results and 'error' not in sim_results:
-            best_strategy_pnl = sim_results.get(result.get('best_strategy'), {}).get('pnl_sol')
-            final_row["best_sim_pnl"] = best_strategy_pnl
-            for name, res in sim_results.items():
-                column_name = f"pnl_{name.replace(' ','_').lower()}"
-                final_row[column_name] = res.get('pnl_sol')
-        
-        processed_results_for_df.append(final_row)
-        
-        # Generate text report for each position
-        report_filename_safe = f"{result['token_pair'].replace('/', '_')}_{str(original_position['open_timestamp']).replace('/','-').replace(':','-')}.txt"
-        report_filename = os.path.join(DETAILED_REPORTS_DIR, report_filename_safe)
-        
-        text_report = generate_text_report(original_position, sim_results)
-        with open(report_filename, 'w', encoding='utf-8') as f: 
-            f.write(text_report)
-        logger.info(f"Saved detailed report: {report_filename}")
-
-    logger.info(f"\nSaving final Spot vs. Bid-Ask comprehensive report...")
-    if processed_results_for_df:
-        final_df = pd.DataFrame(processed_results_for_df)
-        final_df.to_csv(FINAL_REPORT_CSV, index=False, encoding='utf-8')
-        logger.info(f"Saved final report to: {FINAL_REPORT_CSV}")
-    else:
-        logger.warning("No final results were generated for the comprehensive report.")
-        
-    logger.info("\nSpot vs. Bid-Ask analysis completed!")
+           

@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 class InfrastructureCostAnalyzer:
     def __init__(self, config_path: str = "reporting/config/portfolio_config.yaml", api_key: Optional[str] = None):
         self.config = self._load_config(config_path)
-        # AIDEV-NOTE-CLAUDE: API key is passed during initialization. Can be None for cache-only mode.
         self.api_key = api_key
         
         self.monthly_costs = self.config.get('infrastructure_costs', {}).get('monthly', {})
@@ -34,28 +33,24 @@ class InfrastructureCostAnalyzer:
             logger.error(f"Error loading config {config_path}: {e}")
             raise
 
-    # AIDEV-NOTE-CLAUDE: Removed old, faulty cache/fetch methods:
-    # _ensure_cache_directory, _load_price_cache, _save_price_cache, _fetch_sol_usdc_price
-    # All price logic is now delegated to PriceCacheManager.
-            
     def get_sol_usdc_rates(self, start_date: str, end_date: str) -> Dict[str, Optional[float]]:
         """
         Get daily SOL/USDC prices using the centralized PriceCacheManager.
+        AIDEV-NOTE-GEMINI: This function now specifically requests 1-day candles.
         """
         logger.info(f"Fetching SOL/USDC rates from {start_date} to {end_date} via PriceCacheManager.")
         cache_manager = PriceCacheManager()
         sol_usdc_pool = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
         
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        # Request one extra day to ensure the end_date is fully covered
         end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
         
-        # Using 1h timeframe is a good balance for getting daily resolution
+        # AIDEV-NOTE-GEMINI: Switched to '1d' timeframe for SOL/USDC portfolio-level analysis, as requested.
         price_data = cache_manager.get_price_data(
             pool_address=sol_usdc_pool,
             start_dt=start_dt,
             end_dt=end_dt,
-            timeframe='1h',
+            timeframe='1d',
             api_key=self.api_key
         )
         
@@ -63,35 +58,24 @@ class InfrastructureCostAnalyzer:
             logger.warning("No SOL/USDC price data returned from PriceCacheManager.")
             return {d.strftime("%Y-%m-%d"): None for d in pd.date_range(start_date, end_date)}
             
-        # Process raw candle data into a clean daily price series
         df = pd.DataFrame(price_data)
         df['date'] = pd.to_datetime(df['timestamp'], unit='s').dt.date
         
-        # Get the last available 'close' price for each day
         daily_prices_df = df.sort_values('timestamp').groupby('date')['close'].last()
         
-        # Create a complete date range and map prices
         all_dates = pd.date_range(start=start_date, end=end_date)
         rates_series = daily_prices_df.reindex(all_dates.date, method=None)
         
-        # Forward-fill any gaps (e.g., weekends with no new data)
-        rates_series_filled = rates_series.ffill()
-        
-        # Back-fill any initial NaNs
-        rates_series_filled = rates_series_filled.bfill()
+        rates_series_filled = rates_series.ffill().bfill()
 
         final_rates = {date.strftime('%Y-%m-%d'): price for date, price in rates_series_filled.items()}
-
-        missing_before_fill = rates_series.isnull().sum()
-        if missing_before_fill > 0:
-            logger.info(f"Found {missing_before_fill} days with no price data; used forward/backward fill to ensure complete series.")
             
         return final_rates
 
-    def calculate_daily_costs(self, analysis_start: str, analysis_end: str) -> Dict[str, Dict[str, float]]:
-        sol_rates = self.get_sol_usdc_rates(analysis_start, analysis_end)
+    def calculate_daily_costs(self, sol_rates: Dict[str, Optional[float]]) -> Dict[str, Dict[str, float]]:
+        """Calculates daily costs using pre-fetched SOL rates."""
         daily_costs = {}
-        fallback_price = 150.0  # Used if a specific day's price is unavailable
+        fallback_price = 150.0
 
         for date_str, sol_price in sol_rates.items():
             price_to_use = sol_price if sol_price is not None else fallback_price
@@ -103,24 +87,28 @@ class InfrastructureCostAnalyzer:
             }
         return daily_costs
         
-    def allocate_costs_to_positions(self, positions_df: pd.DataFrame) -> pd.DataFrame:
+    def allocate_costs_to_positions(self, positions_df: pd.DataFrame, sol_rates: Dict[str, Optional[float]]) -> pd.DataFrame:
+        """
+        Allocates daily infrastructure costs to active positions.
+        AIDEV-NOTE-GEMINI: This method now accepts pre-fetched sol_rates to avoid redundant API calls.
+        """
         if positions_df.empty: return positions_df
         
         df = positions_df.copy()
         df['open_timestamp'] = pd.to_datetime(df['open_timestamp'])
         df['close_timestamp'] = pd.to_datetime(df['close_timestamp'])
         
-        min_date, max_date = df['open_timestamp'].min(), df['close_timestamp'].max()
-        if pd.isna(min_date) or pd.isna(max_date):
-            logger.warning("Could not determine date range from positions. Skipping cost allocation.")
+        if not sol_rates:
+            logger.warning("No SOL rates provided. Skipping cost allocation.")
             df['infrastructure_cost_sol'] = 0
             df['infrastructure_cost_usd'] = 0
             return df
-
-        daily_costs = self.calculate_daily_costs(min_date.strftime("%Y-%m-%d"), max_date.strftime("%Y-%m-%d"))
+        
+        # We no longer need to fetch rates here, we just use what was passed in.
+        daily_costs = self.calculate_daily_costs(sol_rates)
         
         if not daily_costs:
-            logger.warning("No daily cost data available. Skipping cost allocation.")
+            logger.warning("No daily cost data calculated. Skipping cost allocation.")
             df['infrastructure_cost_sol'] = 0
             df['infrastructure_cost_usd'] = 0
             return df

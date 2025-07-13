@@ -1182,3 +1182,36 @@ Professional Quality: Enhanced styling and consistent color schemes ✅
 Issues Identified: 14 data quality problems grouped into 5 priority categories for systematic resolution
 System Status: v4.3 - Professional Charts Integration Complete ✅
 Ready for Next Priority: Data Quality & Simulation Pipeline Debugging 🚀
+
+**2025-07-12: Simulation & Data Pipeline Debugging (Session 6)**
+
+**Goal:** Resolve 5 priority groups of data quality issues, starting with the critical simulation errors.
+
+**Achievements:**
+- **Market Data Pipeline Stabilized:** Fixed the market data pipeline by implementing a historical buffer for EMA calculations. The market correlation analysis module now works correctly and generates charts.
+- **"Time Machine" Bug Eliminated:** Positions with `close_timestamp` before `open_timestamp` are now correctly filtered out, preventing fatal data errors.
+- **Negative Fee Budget Bug Fixed:** Corrected the logic to prevent negative `pnl_from_log` from creating a negative fee budget in simulations.
+- **Advanced Heuristic Logic Implemented:** A sophisticated, non-linear heuristic matrix (v4.3) for calculating fee potential, including a `reversal_factor`, was implemented in the simulator.
+
+**Critical Failure (Unresolved):**
+- The core issue of **absurdly high PnL values (~150M SOL)** and identical results for both Spot and Bid-Ask strategies in the simulation **persists**.
+- **Root Cause Hypothesis:** The issue is no longer believed to be in the simulation's business logic (which is now robust), but in a **fundamental data corruption or type mismatch** occurring in `analysis_runner.py` *before* the data is passed to the simulator. The current theory is that a value is being misinterpreted, causing `price_ratio` or `pnl_from_assets` to explode.
+
+**Next Priority:** Isolate and fix the source of data corruption feeding the `spot_vs_bidask_simulator.py`.
+
+**2025-07-13: Architectural Refactoring & Data Pipeline Stabilization**
+
+**Goal:** Resolve critical data integrity issues in the market data pipeline causing cascading failures in correlation, cost, and weekend analysis. The root cause was identified as a chaotic data fetching architecture where multiple modules requested the same SOL/USDC price data with different, conflicting parameters, leading to a "poisoned cache" and massive API credit waste.
+
+**Achievements:**
+
+*   **Architectural Refactoring (Single Source of Truth):** Implemented a major architectural change. SOL/USDC price data is now fetched **only once** by the `PortfolioAnalytics` module at the beginning of the workflow, with the correct historical buffer needed for technical analysis.
+*   **Data Flow Consolidation:** This single, authoritative dataset (`sol_rates`) is now passed down as an argument to all downstream modules (`MarketCorrelationAnalyzer`, `InfrastructureCostAnalyzer`), which have been refactored to accept this data instead of performing their own API calls.
+*   **Critical Bug Fix (`1d` Timeframe):** Discovered and fixed a critical bug in `PriceCacheManager` where the `'1d'` timeframe was incorrectly handled as hourly, causing erroneous gap detection and chaotic caching behavior.
+
+**Impact on Project Issues:**
+
+*   **Market Data Pipeline (Priority 2):** **Conditionally Resolved.** The implemented changes directly address the root cause of this problem. Full validation is pending API credit refresh and cache cleanup.
+*   **Financial Metrics - Infrastructure Cost (Part of Priority 3):** **Conditionally Resolved.** The accuracy of infrastructure cost calculation in SOL will be significantly improved due to the reliable price feed. The Max Drawdown issue remains outstanding.
+
+**System Status:** The core data architecture has been stabilized. The system is now logically prepared to handle market data correctly and efficiently. Full validation of the fix is blocked by the temporary lack of API credits.

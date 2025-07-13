@@ -28,6 +28,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- Configure Deep Debug Logging ---
+deep_debug_handler = logging.FileHandler('deep_debug.log', mode='w')
+deep_debug_handler.setLevel(logging.DEBUG)
+deep_debug_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+deep_debug_handler.setFormatter(deep_debug_formatter)
+
+deep_logger = logging.getLogger('DEEP_DEBUG')
+deep_logger.setLevel(logging.DEBUG)
+deep_logger.addHandler(deep_debug_handler)
+deep_logger.propagate = False  # Don't send to root logger
+
+diag_logger = logging.getLogger('DIAGNOSTIC')
+diag_logger.setLevel(logging.DEBUG)
+diag_logger.addHandler(deep_debug_handler)
+diag_logger.propagate = True  # Also show in console
+
 
 def load_main_config() -> dict:
     """Loads the main YAML configuration."""
@@ -129,6 +145,9 @@ def main_menu():
     orchestrator = PortfolioAnalysisOrchestrator(api_key=api_key)
 
     while True:
+        print("\n" + "="*70)
+        print("--- MAIN MENU ---")
+        print("="*70)
         print("1. Step 1: Process Logs and Extract Positions")
         print("2. Step 2: Detect Strategy Instances (generates strategy_instances.csv)")
         print("3. Step 3: Fetch SOL/USDC Historical Rates (for portfolio analysis)")
