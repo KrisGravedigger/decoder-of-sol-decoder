@@ -65,14 +65,12 @@ def calculate_sol_metrics(positions_df: pd.DataFrame, daily_df: pd.DataFrame, ri
     if len(daily_df) > 1 and not daily_df['cumulative_pnl_sol'].expanding().max().eq(0).all():
         cumulative = daily_df['cumulative_pnl_sol']
         running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max.abs().replace(0, np.nan)
+        # AIDEV-NOTE-CLAUDE: Using safe_running_max to prevent division by zero, harmonizing with USDC logic
+        safe_running_max = running_max.abs().replace(0, np.nan)
+        drawdown = (cumulative - running_max) / safe_running_max
         max_drawdown = drawdown.min() * 100 if not drawdown.empty and not drawdown.isnull().all() else 0.0
 
-    # Net PnL
-    total_cost_sol = positions_df['infrastructure_cost_sol'].sum() if 'infrastructure_cost_sol' in positions_df.columns else 0
-    net_pnl_sol = total_pnl_sol - total_cost_sol
-
-# Net PnL and Cost Impact
+    # Net PnL and Cost Impact
     total_cost_sol = positions_df['infrastructure_cost_sol'].sum() if 'infrastructure_cost_sol' in positions_df.columns else 0
     net_pnl_sol = total_pnl_sol - total_cost_sol
     cost_impact_percent = (total_cost_sol / abs(total_pnl_sol) * 100) if total_pnl_sol != 0 else 0

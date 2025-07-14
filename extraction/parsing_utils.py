@@ -97,95 +97,107 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
 def parse_open_details_from_context(lines: List[str], start_index: int, lookback: int, lookahead: int = 50, debug_enabled: bool = False) -> Dict[str, Any]:
     """
     Parse position opening details (strategy, TP, SL) from log context.
-    Finds the most complete log line within the search window.
-    
+    It searches for the MOST COMPLETE log line within the search window, prioritizing lines
+    that contain both strategy and step_size, and greedily extracts TP/SL from them.
+
     Args:
         lines: All log lines
         start_index: Starting line index
         lookback: Number of lines to look back
         lookahead: Number of lines to look ahead
         debug_enabled: Whether debug logging is enabled
-        
+
     Returns:
         A dictionary with 'strategy', 'tp', and 'sl' keys.
     """
-    force_debug = True # Keep this for now
-
     search_start = max(0, start_index - lookback)
     search_end = min(len(lines), start_index + lookahead)
 
-    best_fallback_strategy = "UNKNOWN"
-    # AIDEV-NOTE-GEMINI: Default result dictionary.
+    # AIDEV-NOTE-CLAUDE: Rewritten logic. We now search for the best possible match, not the first acceptable one.
+    # Default values are crucial. 0.0 for "not set" TP/SL to avoid NaN issues.
     final_details = {
         'strategy': "UNKNOWN",
-        'tp': None,
-        'sl': None
+        'tp': 0.0,
+        'sl': 0.0
     }
+    # This will hold the best strategy found so far that might be missing a step_size.
+    best_fallback_strategy = "UNKNOWN"
 
     # Search backwards to find the most recent, definitive log line first.
     for i in range(search_end - 1, search_start - 1, -1):
         line = clean_ansi(lines[i])
-        
-        # --- Attempt to parse all details from the current line ---
+
         base_strategy = None
         step_size = None
         tp = None
         sl = None
 
-        # Check for a line that could contain strategy info
+        # Check if the line contains any potential strategy info. This is a broad check.
         is_strategy_line = re.search(r'(bidask|spot-onesided|spot|\[(Spot|Bid-Ask) \(1-Sided\))', line, re.IGNORECASE)
-        
-        if is_strategy_line:
-            # 1. Parse Strategy Type
-            log_summary_match = re.search(r'(bidask|spot-onesided|spot):\s*\d+', line, re.IGNORECASE)
-            if log_summary_match:
-                strategy_text = log_summary_match.group(1).lower()
-                if "spot" in strategy_text: base_strategy = "Spot (1-Sided)"
-                elif "bidask" in strategy_text: base_strategy = "Bid-Ask (1-Sided)"
-            else: # Fallback to bracket format
-                bracket_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
-                if bracket_match:
-                    base_strategy = f"{bracket_match.group(1)} (1-Sided)"
+        if not is_strategy_line:
+            continue
 
-            # 2. Parse Step Size
-            step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', line, re.IGNORECASE)
-            if step_size_match:
-                step_size = step_size_match.group(1).upper()
+        # --- Attempt to parse all details from this single line ---
 
-            # 3. Parse Take Profit & Stop Loss
-            tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', line)
-            if tp_match:
-                tp = float(tp_match.group(1))
+        # 1. Parse Strategy Type (either "bidask: 123" or "[Bid-Ask (1-Sided)]")
+        log_summary_match = re.search(r'(bidask|spot-onesided|spot):\s*\d+', line, re.IGNORECASE)
+        if log_summary_match:
+            strategy_text = log_summary_match.group(1).lower()
+            if "spot" in strategy_text:
+                base_strategy = "Spot (1-Sided)"
+            elif "bidask" in strategy_text:
+                base_strategy = "Bid-Ask (1-Sided)"
+        else: # Fallback for older bracket format
+            bracket_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
+            if bracket_match:
+                base_strategy = f"{bracket_match.group(1)} (1-Sided)"
 
-            sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', line)
-            if sl_match:
-                sl = float(sl_match.group(1))
+        # If we couldn't even find a base strategy, this line is not useful.
+        if not base_strategy:
+            continue
 
-            # --- Decision Logic ---
-            if base_strategy:
-                # Perfect Match: We have strategy and step size. This is the definitive line.
-                if step_size:
-                    final_details['strategy'] = f"{base_strategy} {step_size}"
-                    final_details['tp'] = tp
-                    final_details['sl'] = sl
-                    if debug_enabled or force_debug:
-                        logger.debug(f"Found COMPLETE match on line {i + 1}: {final_details}. Returning.")
-                    return final_details
-                
-                # Partial Match: Store as fallback if we don't have one yet, and KEEP SEARCHING.
-                if best_fallback_strategy == "UNKNOWN":
-                    best_fallback_strategy = base_strategy
-                    # Also store TP/SL if found on this partial line
-                    final_details['tp'] = tp if final_details['tp'] is None else final_details['tp']
-                    final_details['sl'] = sl if final_details['sl'] is None else final_details['sl']
-                    if debug_enabled or force_debug:
-                        logger.debug(f"Found PARTIAL match on line {i + 1}: '{base_strategy}'. Storing as fallback and continuing.")
+        # 2. Parse Step Size
+        step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', line, re.IGNORECASE)
+        if step_size_match:
+            step_size = step_size_match.group(1).upper()
 
-    # If loop finishes, return the best we could find.
-    final_details['strategy'] = best_fallback_strategy
-    if debug_enabled or force_debug:
+        # 3. Parse Take Profit & Stop Loss
+        tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', line)
+        if tp_match:
+            tp = float(tp_match.group(1))
+
+        sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', line)
+        if sl_match:
+            sl = float(sl_match.group(1))
+
+        # --- Decision Logic ---
+        # A definitive match is one with both a base strategy and a step size.
+        # The backward loop ensures we find the most RECENT definitive match.
+        if base_strategy and step_size:
+            final_details['strategy'] = f"{base_strategy} {step_size}"
+            final_details['tp'] = tp if tp is not None else 0.0
+            final_details['sl'] = sl if sl is not None else 0.0
+            if debug_enabled:
+                logger.debug(f"Found DEFINITIVE match on line {i + 1}: {final_details}. Returning.")
+            return final_details # This is the source of truth. Stop searching.
+
+        # If it's not a definitive match, it might be a fallback (e.g., old log format)
+        # We only store the FIRST fallback we encounter (which is the most recent).
+        if base_strategy and best_fallback_strategy == "UNKNOWN":
+            best_fallback_strategy = base_strategy
+            # Also store TP/SL if they happened to be on this line
+            final_details['tp'] = tp if tp is not None else 0.0
+            final_details['sl'] = sl if sl is not None else 0.0
+            if debug_enabled:
+                logger.debug(f"Found FALLBACK match on line {i + 1}: '{base_strategy}'. Storing and continuing search for definitive match.")
+
+    # If the loop finishes without a definitive match, use the best fallback we found.
+    if final_details['strategy'] == "UNKNOWN":
+        final_details['strategy'] = best_fallback_strategy
+
+    if debug_enabled:
         logger.debug(f"Search complete. Returning best found details: {final_details}")
-    
+
     return final_details
 
 

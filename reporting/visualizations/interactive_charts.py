@@ -934,7 +934,8 @@ def create_professional_cost_impact(portfolio_analysis: Dict[str, Any]) -> str:
                 x=0.5
             ),
             template='plotly_white',
-            showlegend=True
+            showlegend=True,
+            barmode='group'  # AIDEV-NOTE-CLAUDE: Added to display bars side-by-side instead of stacking
         )
         
         # Update axes
