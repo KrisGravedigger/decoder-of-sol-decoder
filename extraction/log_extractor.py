@@ -44,8 +44,8 @@ DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event 
 from core.models import Position
 from extraction.parsing_utils import (
     clean_ansi, find_context_value, normalize_token_pair,
-    extract_close_timestamp, parse_open_details_from_context,
-    parse_initial_investment, parse_final_pnl_with_line_info
+    extract_close_timestamp, parse_position_from_open_line,
+    parse_final_pnl_with_line_info
 )
 from tools.debug_analyzer import DebugAnalyzer
 
@@ -246,104 +246,74 @@ class LogParser:
         self.strategy_diagnostic = StrategyParsingDiagnostic(enabled=STRATEGY_DIAGNOSTIC_ENABLED)
         self.file_line_mapping: List[Dict[str, Any]] = []
 
-    def _process_open_event(self, timestamp: str, version: str, index: int):
+    def _process_open_event(self, line_content: str, index: int):
         """
-        Process a position opening event.
-        
+        Process a position opening event using the new single-line parsing logic.
+        Implements "Superseded" logic for handling position restarts.
+
         Args:
-            timestamp: Event timestamp
-            version: Bot version
-            index: Line index in log
+            line_content (str): The full log line that matched the 'OPENED' event.
+            index (int): The line index in the log.
         """
-        token_pair = normalize_token_pair(
-            find_context_value([r'TARGET POOL:\s*(.*-SOL)'], self.all_lines, index, 50)
+        if self._check_for_failed_position(index, "unknown_pair"):
+            return
+
+        details = parse_position_from_open_line(
+            line_content, index, self.all_lines, 
+            debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
         )
+
+        if not details:
+            return
+
+        token_pair = normalize_token_pair(details.get('token_pair'))
         if not token_pair:
-            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
-                logger.debug(f"Skipped opening at line {index + 1}, missing token pair.")
             return
+
+        # AIDEV-NOTE-CLAUDE: New "Superseded" logic implementation as discussed.
+        # This handles cases where a new position for a pair is opened before the old one was closed.
+        if token_pair in self.active_positions:
+            old_position = self.active_positions[token_pair]
+            old_position.close_reason = "Superseded"
+            old_position.close_timestamp = details['timestamp']
+            old_position.close_line_index = index
+            self.finalized_positions.append(old_position)
+            del self.active_positions[token_pair]
+            logger.warning(
+                f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
+                f"was superseded by a new one at line {index + 1}. Closing the old one."
+            )
+
+        # Create and populate the new position object
+        folder_wallet_id, source_file = self._get_file_info_for_line(index)
         
-        # AIDEV-NOTE-GEMINI: Check if position creation will fail BEFORE creating the object.
-        if self._check_for_failed_position(index, token_pair):
-            # Detailed logging for failure is now inside _check_for_failed_position
-            return
+        # AIDEV-NOTE-CLAUDE: The Position's wallet_id is now the source of truth from the log line.
+        # The folder_wallet_id is used for file tracking/grouping if needed elsewhere.
+        pos = Position(
+            details['timestamp'], details['version'], index,
+            wallet_id=details.get('wallet_address', folder_wallet_id), 
+            source_file=source_file
+        )
         
-        existing_position = next((pos for pos in self.active_positions.values() if pos.token_pair == token_pair), None)
-
-        if existing_position:
-            existing_position.retry_count += 1
-            existing_position.open_timestamp = timestamp
-            existing_position.bot_version = version
-            existing_position.open_line_index = index
-            existing_position.pool_address = find_context_value([
-                r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', 
-                r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
-            ], self.all_lines, index, 50)
-            
-            # AIDEV-NOTE-GEMINI: Call the new function and unpack the details dictionary.
-            open_details = parse_open_details_from_context(
-                self.all_lines, index, lookback=50, lookahead=150, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
-            )
-            existing_position.actual_strategy = open_details['strategy']
-            existing_position.take_profit = open_details['tp']
-            existing_position.stop_loss = open_details['sl']
-
-            existing_position.initial_investment = parse_initial_investment(
-                self.all_lines, index, 100, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
-            )
-            
-            # ADD DIAGNOSTIC CHECK:
-            self.strategy_diagnostic.detect_missing_step_size(
-                existing_position.actual_strategy, 
-                index, 
-                existing_position.initial_investment
-            )
-            return
-            
-        wallet_id, source_file = self._get_file_info_for_line(index)
-
-        pos = Position(timestamp, version, index, wallet_id=wallet_id, source_file=source_file)
         pos.token_pair = token_pair
-        pos.pool_address = find_context_value([
-            r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', 
-            r'dexscreener\.com/solana/([a-zA-Z0-9]+)'
-        ], self.all_lines, index, 50)
-
-        # AIDEV-NOTE-GEMINI: Call the new function and unpack the details dictionary.
-        open_details = parse_open_details_from_context(
-            self.all_lines, index, lookback=50, lookahead=150, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
-        )
-        pos.actual_strategy = open_details['strategy']
-        pos.take_profit = open_details['tp']
-        pos.stop_loss = open_details['sl']
-
-        pos.initial_investment = parse_initial_investment(
-            self.all_lines, index, 100, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
-        )
-        
-        # ADD DIAGNOSTIC CHECK:
-        self.strategy_diagnostic.detect_missing_step_size(
-            pos.actual_strategy, 
-            index, 
-            pos.initial_investment
-        )
+        pos.pool_address = details.get('pool_address')
+        pos.actual_strategy = details.get('actual_strategy', 'UNKNOWN')
+        pos.take_profit = details.get('take_profit', 0.0)
+        pos.stop_loss = details.get('stop_loss', 0.0)
+        pos.initial_investment = details.get('initial_investment')
         
         self.active_positions[pos.position_id] = pos
         
-        # AIDEV-NOTE-GEMINI: Moved the enhanced logging block here to fix the UnboundLocalError.
-        # This code now only runs after a new `pos` object has been successfully created.
+        self.strategy_diagnostic.detect_missing_step_size(
+            pos.actual_strategy, index, pos.initial_investment
+        )
+
         if DETAILED_POSITION_LOGGING:
-            file_info = next((f for f in self.file_line_mapping if f['start'] <= index < f['end']), None)
-            if file_info:
-                local_line_num = index - file_info['start'] + 1
-                source_file_name = file_info['source_file'].replace("\\", "/") # Ensure consistent path separators
-                logger.info(
-                    f"Opened position: {pos.position_id} ({pos.token_pair}) | "
-                    f"Detected at Global Line: {index + 1} (File: {source_file_name}, Line: {local_line_num})"
-                )
-            else:
-                # Fallback to the old logging style if file info isn't found for some reason
-                logger.info(f"Opened position: {pos.position_id} ({pos.token_pair}) | Open detected at line {index + 1}")
+            logger.info(
+                f"Opened position: {pos.position_id} ({pos.token_pair}) | "
+                f"TP: {pos.take_profit}% SL: {pos.stop_loss}% | "
+                f"File: {source_file}, Line: {index + 1}"
+            )
 
     def _process_close_event_without_timestamp(self, index: int):
         """
@@ -460,18 +430,12 @@ class LogParser:
         self.strategy_diagnostic.set_log_data(self.all_lines, self.file_line_mapping)
 
         for i, line_content in enumerate(self.all_lines):
-            if "position and withdrew liquidity" in line_content:
+            # AIDEV-NOTE-CLAUDE: The main loop now triggers on the specific "| OPENED " string,
+            # making the entry point for opening positions much more reliable.
+            if "| OPENED " in line_content:
+                self._process_open_event(line_content, i)
+            elif "position and withdrew liquidity" in line_content:
                 self._process_close_event_without_timestamp(i)
-                continue
-            
-            timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', clean_ansi(line_content))
-            if not timestamp_match: continue
-            
-            timestamp = timestamp_match.group(1)
-            version = re.search(r'(v[\d.]+)', clean_ansi(line_content)).group(1) if re.search(r'(v[\d.]+)', clean_ansi(line_content)) else "vUNKNOWN"
-
-            if "Creating a position" in line_content:
-                self._process_open_event(timestamp, version, i)
 
         for pos in self.active_positions.values():
             pos.close_reason = "active_at_log_end"

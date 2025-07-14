@@ -93,171 +93,79 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
         logger.debug(f"No timestamp found in {search_range} lines around close at line {close_line_index + 1}")
     return "UNKNOWN"
 
-
-def parse_open_details_from_context(lines: List[str], start_index: int, lookback: int, lookahead: int = 50, debug_enabled: bool = False) -> Dict[str, Any]:
+# AIDEV-NOTE-CLAUDE: New unified parsing function for position opening events.
+# This function is the core of the new, simplified extraction logic.
+def parse_position_from_open_line(line: str, line_index: int, all_lines: List[str], debug_enabled: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Parse position opening details (strategy, TP, SL) from log context.
-    It searches for the MOST COMPLETE log line within the search window, prioritizing lines
-    that contain both strategy and step_size, and greedily extracts TP/SL from them.
+    Parses all position details from a single "OPENED" log line and its immediate context.
 
     Args:
-        lines: All log lines
-        start_index: Starting line index
-        lookback: Number of lines to look back
-        lookahead: Number of lines to look ahead
-        debug_enabled: Whether debug logging is enabled
+        line (str): The single log line containing the "...OPENED..." event.
+        line_index (int): The index of the line in all_lines.
+        all_lines (List[str]): All log lines for context searching (e.g., pool_address).
+        debug_enabled (bool): Whether to enable debug logging.
 
     Returns:
-        A dictionary with 'strategy', 'tp', and 'sl' keys.
+        A dictionary containing all parsed position details, or None if parsing fails.
     """
-    search_start = max(0, start_index - lookback)
-    search_end = min(len(lines), start_index + lookahead)
+    cleaned_line = clean_ansi(line)
 
-    # AIDEV-NOTE-CLAUDE: Rewritten logic. We now search for the best possible match, not the first acceptable one.
-    # Default values are crucial. 0.0 for "not set" TP/SL to avoid NaN issues.
-    final_details = {
-        'strategy': "UNKNOWN",
-        'tp': 0.0,
-        'sl': 0.0
-    }
-    # This will hold the best strategy found so far that might be missing a step_size.
-    best_fallback_strategy = "UNKNOWN"
+    # AIDEV-NOTE-CLAUDE: This regex is the new single point of truth for parsing open events.
+    open_pattern = re.compile(
+        r'v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2}).*'
+        r'(?P<strategy_type>bidask|spot|spot-onesided):\s*\d+\s*\|\s*OPENED\s*'
+        r'(?P<token_pair>[\w\s().-]+-SOL)'
+    )
+    
+    match = open_pattern.search(cleaned_line)
+    if not match:
+        if debug_enabled:
+            logger.debug(f"Line {line_index + 1} did not match the main 'OPENED' pattern.")
+        return None
 
-    # Search backwards to find the most recent, definitive log line first.
-    for i in range(search_end - 1, search_start - 1, -1):
-        line = clean_ansi(lines[i])
+    details = match.groupdict()
 
-        base_strategy = None
-        step_size = None
-        tp = None
-        sl = None
+    # --- Extract additional details from the same line ---
+    # Step Size
+    step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', cleaned_line, re.IGNORECASE)
+    step_size = step_size_match.group(1).upper() if step_size_match else "UNKNOWN"
+    
+    base_strategy = "Spot (1-Sided)" if "spot" in details['strategy_type'].lower() else "Bid-Ask (1-Sided)"
+    details['actual_strategy'] = f"{base_strategy} {step_size}"
 
-        # Check if the line contains any potential strategy info. This is a broad check.
-        is_strategy_line = re.search(r'(bidask|spot-onesided|spot|\[(Spot|Bid-Ask) \(1-Sided\))', line, re.IGNORECASE)
-        if not is_strategy_line:
-            continue
+    # Take Profit & Stop Loss (defaulting to 0.0 to avoid NaN issues)
+    tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', cleaned_line, re.IGNORECASE)
+    details['take_profit'] = float(tp_match.group(1)) if tp_match else 0.0
+    
+    sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', cleaned_line, re.IGNORECASE)
+    details['stop_loss'] = float(sl_match.group(1)) if sl_match else 0.0
 
-        # --- Attempt to parse all details from this single line ---
+    # Initial Investment
+    investment_match = re.search(r'Deposit \(Fixed Amount\)\s*:\s*([\d.]+)\s*SOL', cleaned_line, re.IGNORECASE)
+    details['initial_investment'] = float(investment_match.group(1)) if investment_match else None
+    
+    # Wallet Address (as per our discussion)
+    wallet_match = re.search(r'Wallet:\s*([a-zA-Z0-9]+)', cleaned_line)
+    details['wallet_address'] = wallet_match.group(1) if wallet_match else None
 
-        # 1. Parse Strategy Type (either "bidask: 123" or "[Bid-Ask (1-Sided)]")
-        log_summary_match = re.search(r'(bidask|spot-onesided|spot):\s*\d+', line, re.IGNORECASE)
-        if log_summary_match:
-            strategy_text = log_summary_match.group(1).lower()
-            if "spot" in strategy_text:
-                base_strategy = "Spot (1-Sided)"
-            elif "bidask" in strategy_text:
-                base_strategy = "Bid-Ask (1-Sided)"
-        else: # Fallback for older bracket format
-            bracket_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
-            if bracket_match:
-                base_strategy = f"{bracket_match.group(1)} (1-Sided)"
-
-        # If we couldn't even find a base strategy, this line is not useful.
-        if not base_strategy:
-            continue
-
-        # 2. Parse Step Size
-        step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', line, re.IGNORECASE)
-        if step_size_match:
-            step_size = step_size_match.group(1).upper()
-
-        # 3. Parse Take Profit & Stop Loss
-        tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', line)
-        if tp_match:
-            tp = float(tp_match.group(1))
-
-        sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', line)
-        if sl_match:
-            sl = float(sl_match.group(1))
-
-        # --- Decision Logic ---
-        # A definitive match is one with both a base strategy and a step size.
-        # The backward loop ensures we find the most RECENT definitive match.
-        if base_strategy and step_size:
-            final_details['strategy'] = f"{base_strategy} {step_size}"
-            final_details['tp'] = tp if tp is not None else 0.0
-            final_details['sl'] = sl if sl is not None else 0.0
+    # --- Find Pool Address in context (looking backwards) ---
+    pool_address = None
+    # AIDEV-NOTE-CLAUDE: Context search is now minimal and highly specific.
+    for i in range(line_index, max(-1, line_index - 60), -1):
+        context_line = clean_ansi(all_lines[i])
+        pool_match = re.search(r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', context_line)
+        if pool_match:
+            pool_address = pool_match.group(1)
             if debug_enabled:
-                logger.debug(f"Found DEFINITIVE match on line {i + 1}: {final_details}. Returning.")
-            return final_details # This is the source of truth. Stop searching.
-
-        # If it's not a definitive match, it might be a fallback (e.g., old log format)
-        # We only store the FIRST fallback we encounter (which is the most recent).
-        if base_strategy and best_fallback_strategy == "UNKNOWN":
-            best_fallback_strategy = base_strategy
-            # Also store TP/SL if they happened to be on this line
-            final_details['tp'] = tp if tp is not None else 0.0
-            final_details['sl'] = sl if sl is not None else 0.0
-            if debug_enabled:
-                logger.debug(f"Found FALLBACK match on line {i + 1}: '{base_strategy}'. Storing and continuing search for definitive match.")
-
-    # If the loop finishes without a definitive match, use the best fallback we found.
-    if final_details['strategy'] == "UNKNOWN":
-        final_details['strategy'] = best_fallback_strategy
+                logger.debug(f"Found pool address '{pool_address}' at line {i + 1} for open event at line {line_index + 1}.")
+            break
+    
+    details['pool_address'] = pool_address
 
     if debug_enabled:
-        logger.debug(f"Search complete. Returning best found details: {final_details}")
+        logger.debug(f"Parsed details from line {line_index + 1}: {details}")
 
-    return final_details
-
-
-def parse_initial_investment(lines: List[str], start_index: int, lookahead: int, debug_enabled: bool = False) -> Optional[float]:
-    """
-    Parse initial investment amount from log context.
-    
-    Args:
-        lines: All log lines
-        start_index: Starting line index
-        lookahead: Lines to look ahead
-        debug_enabled: Whether debug logging is enabled
-        
-    Returns:
-        Initial investment amount in SOL or None
-    """
-    search_start = start_index
-    search_end = min(len(lines), start_index + lookahead)
-
-    for i in range(search_start, search_end):
-        line = clean_ansi(lines[i])
-
-        # Pattern 1: Most reliable - PnL line with "Start:"
-        # Example: PnL: 0.05403 SOL (Return: +0.49%) | Start: 11.10968 SOL → Current: 11.16371 SOL
-        if "PnL:" in line and "Start:" in line:
-            match = re.search(r'Start:\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'PnL+Start' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-
-        # Pattern 2: PnL line with "Initial"
-        # Example: Pnl Calculation: ... - Initial 11.10968 SOL
-        if "Pnl Calculation:" in line and "Initial" in line:
-            match = re.search(r'Initial\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'Pnl Calculation+Initial' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-        
-        # Pattern 3: Position opening line - more specific
-        if ("Creating a position and adding liquidity" in line or 
-            "Creating a position with" in line) and "Error" not in line:
-            match = re.search(r'with\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'Creating+with' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-            
-        # Pattern 4: Direct liquidity addition line
-        if "adding liquidity of" in line and "SOL" in line and "Error" not in line:
-            match = re.search(r'and\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'adding liquidity' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-
-    logger.warning(f"Could not find investment amount for position opened at line {start_index + 1}")
-    return None
-        
+    return details
 
 def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback: int, debug_enabled: bool = False) -> Dict[str, Any]:
     """
