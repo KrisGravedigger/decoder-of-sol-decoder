@@ -1,9 +1,44 @@
 import re
 import logging
 from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+import pandas as pd
 
 # Get logger
 logger = logging.getLogger('ParsingUtils')
+
+
+def _parse_custom_timestamp(ts_str: str) -> Optional[datetime]:
+    """
+    Parse non-standard timestamps like "MM/DD-HH:MM:SS" into datetime objects.
+    Handles the "24:XX" hour format by rolling over to the next day.
+    """
+    if not isinstance(ts_str, str) or not ts_str:
+        return None
+
+    try:
+        # Format: "05/12-20:57:08" -> "2025-05-12 20:57:08"
+        date_part, time_part = ts_str.split('-')
+        month, day = date_part.split('/')
+
+        hour, minute, second = time_part.split(':')
+        hour = int(hour)
+
+        # Assume current year
+        current_year = datetime.now().year
+        base_date = datetime(current_year, int(month), int(day))
+
+        # Handle hour 24 as next day hour 0
+        if hour >= 24:
+            hour = hour - 24
+            base_date = base_date + timedelta(days=1)
+
+        final_datetime = base_date.replace(hour=hour, minute=int(minute), second=int(second))
+        return final_datetime
+
+    except (ValueError, IndexError) as e:
+        logger.warning(f"Failed to parse custom timestamp '{ts_str}': {e}")
+        return None
 
 
 def clean_ansi(text: str) -> str:
@@ -48,19 +83,19 @@ def normalize_token_pair(text: Optional[str]) -> Optional[str]:
     return match.group(1).strip() if match else None
 
 
-def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabled: bool = False) -> str:
+def extract_close_timestamp(lines: List[str], close_line_index: int, open_line_index: int, debug_enabled: bool = False) -> str:
     """
-    Extract timestamp from close event context.
+    Extract timestamp from close event context, respecting the open_line_index boundary.
     
     Args:
         lines: All log lines
         close_line_index: Line index where close was detected
+        open_line_index: Line index where the position was opened. This is a hard boundary.
         debug_enabled: Whether debug logging is enabled
         
     Returns:
         Timestamp string or "UNKNOWN" if not found
     """
-    # Try to extract timestamp from close line itself
     close_line = clean_ansi(lines[close_line_index])
     timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', close_line)
     if timestamp_match:
@@ -68,11 +103,14 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
             logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from close line {close_line_index + 1}")
         return timestamp_match.group(1)
     
-    # Look for timestamp in nearby lines (prefer lines before close)
-    search_range = 10  # Look 10 lines before and after
+    search_range = 25
     
-    # First search backwards (more likely to have relevant timestamp)
-    for i in range(close_line_index - 1, max(-1, close_line_index - search_range), -1):
+    # Search backwards, but not past the line where the position was opened.
+    # This hard boundary is the definitive fix for the "Time Machine" problem.
+    start_search = close_line_index - 1
+    end_search = max(open_line_index, close_line_index - search_range)
+
+    for i in range(start_search, end_search, -1):
         line = clean_ansi(lines[i])
         timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line)
         if timestamp_match:
@@ -80,7 +118,7 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
                 logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from context line {i + 1} (backward search)")
             return timestamp_match.group(1)
     
-    # Then search forward if nothing found backward
+    # Forward search remains a useful fallback.
     for i in range(close_line_index + 1, min(len(lines), close_line_index + search_range)):
         line = clean_ansi(lines[i])
         timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line)
@@ -90,11 +128,10 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
             return timestamp_match.group(1)
     
     if debug_enabled:
-        logger.debug(f"No timestamp found in {search_range} lines around close at line {close_line_index + 1}")
+        logger.warning(f"No timestamp found in context for close event at line {close_line_index + 1}. Boundary was line {open_line_index + 1}.")
     return "UNKNOWN"
 
-# AIDEV-NOTE-CLAUDE: New unified parsing function for position opening events.
-# This function is the core of the new, simplified extraction logic.
+
 def parse_position_from_open_line(line: str, line_index: int, all_lines: List[str], debug_enabled: bool = False) -> Optional[Dict[str, Any]]:
     """
     Parses all position details from a single "OPENED" log line and its immediate context.
@@ -110,7 +147,6 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
     """
     cleaned_line = clean_ansi(line)
 
-    # AIDEV-NOTE-CLAUDE: This regex is the new single point of truth for parsing open events.
     open_pattern = re.compile(
         r'v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2}).*'
         r'(?P<strategy_type>bidask|spot|spot-onesided):\s*\d+\s*\|\s*OPENED\s*'
@@ -125,32 +161,25 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
 
     details = match.groupdict()
 
-    # --- Extract additional details from the same line ---
-    # Step Size
     step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', cleaned_line, re.IGNORECASE)
     step_size = step_size_match.group(1).upper() if step_size_match else "UNKNOWN"
     
     base_strategy = "Spot (1-Sided)" if "spot" in details['strategy_type'].lower() else "Bid-Ask (1-Sided)"
     details['actual_strategy'] = f"{base_strategy} {step_size}"
 
-    # Take Profit & Stop Loss (defaulting to 0.0 to avoid NaN issues)
     tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', cleaned_line, re.IGNORECASE)
     details['take_profit'] = float(tp_match.group(1)) if tp_match else 0.0
     
     sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', cleaned_line, re.IGNORECASE)
     details['stop_loss'] = float(sl_match.group(1)) if sl_match else 0.0
 
-    # Initial Investment
     investment_match = re.search(r'Deposit \(Fixed Amount\)\s*:\s*([\d.]+)\s*SOL', cleaned_line, re.IGNORECASE)
     details['initial_investment'] = float(investment_match.group(1)) if investment_match else None
     
-    # Wallet Address (as per our discussion)
     wallet_match = re.search(r'Wallet:\s*([a-zA-Z0-9]+)', cleaned_line)
     details['wallet_address'] = wallet_match.group(1) if wallet_match else None
 
-    # --- Find Pool Address in context (looking backwards) ---
     pool_address = None
-    # AIDEV-NOTE-CLAUDE: Context search is now minimal and highly specific.
     for i in range(line_index, max(-1, line_index - 60), -1):
         context_line = clean_ansi(all_lines[i])
         pool_match = re.search(r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', context_line)

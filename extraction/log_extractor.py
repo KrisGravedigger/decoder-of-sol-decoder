@@ -43,6 +43,7 @@ DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event 
 # AIDEV-NOTE-CLAUDE: Imports updated to reflect new project structure.
 from core.models import Position
 from extraction.parsing_utils import (
+    _parse_custom_timestamp,
     clean_ansi, find_context_value, normalize_token_pair,
     extract_close_timestamp, parse_position_from_open_line,
     parse_final_pnl_with_line_info
@@ -58,7 +59,7 @@ STRATEGY_DIAGNOSTIC_ENABLED = True  # Enable strategy parsing diagnostics
 STRATEGY_DIAGNOSTIC_FILE = "strategy_parsing_diagnostic.txt"
 
 # Logging configuration
-log_level = logging.DEBUG if (DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG") else logging.INFO
+log_level = logging.DEBUG if (DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG") else logging.WARNING
 logging.basicConfig(
     level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -255,9 +256,6 @@ class LogParser:
             line_content (str): The full log line that matched the 'OPENED' event.
             index (int): The line index in the log.
         """
-        if self._check_for_failed_position(index, "unknown_pair"):
-            return
-
         details = parse_position_from_open_line(
             line_content, index, self.all_lines, 
             debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
@@ -270,25 +268,24 @@ class LogParser:
         if not token_pair:
             return
 
-        # AIDEV-NOTE-CLAUDE: New "Superseded" logic implementation as discussed.
-        # This handles cases where a new position for a pair is opened before the old one was closed.
+        if self._check_for_failed_position(index, token_pair):
+            return
+
         if token_pair in self.active_positions:
             old_position = self.active_positions[token_pair]
             old_position.close_reason = "Superseded"
             old_position.close_timestamp = details['timestamp']
             old_position.close_line_index = index
+            # AIDEV-NOTE-CLAUDE: Positions closed as Superseded have no known PnL at this point.
+            # This should be left as None, which is the default.
             self.finalized_positions.append(old_position)
-            del self.active_positions[token_pair]
             logger.warning(
                 f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
                 f"was superseded by a new one at line {index + 1}. Closing the old one."
             )
-
-        # Create and populate the new position object
+        
         folder_wallet_id, source_file = self._get_file_info_for_line(index)
         
-        # AIDEV-NOTE-CLAUDE: The Position's wallet_id is now the source of truth from the log line.
-        # The folder_wallet_id is used for file tracking/grouping if needed elsewhere.
         pos = Position(
             details['timestamp'], details['version'], index,
             wallet_id=details.get('wallet_address', folder_wallet_id), 
@@ -302,7 +299,7 @@ class LogParser:
         pos.stop_loss = details.get('stop_loss', 0.0)
         pos.initial_investment = details.get('initial_investment')
         
-        self.active_positions[pos.position_id] = pos
+        self.active_positions[token_pair] = pos
         
         self.strategy_diagnostic.detect_missing_step_size(
             pos.actual_strategy, index, pos.initial_investment
@@ -333,11 +330,18 @@ class LogParser:
         if not closed_pair:
             return
         
-        matching_position = next((pos for pos in self.active_positions.values() if pos.token_pair == closed_pair), None)
+        # AIDEV-NOTE-CLAUDE: Core architectural fix. We directly get the position by its unique token_pair key.
+        # This eliminates ambiguity and prevents associating a close event with the wrong open event.
+        matching_position = self.active_positions.get(closed_pair)
         
         if matching_position:
             pos = matching_position
-            pos.close_timestamp = extract_close_timestamp(self.all_lines, index, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"))
+            pos.close_timestamp = extract_close_timestamp(
+                self.all_lines, 
+                index, 
+                pos.open_line_index,
+                debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
+            )
             pos.close_reason = self._classify_close_reason(index)
             pos.close_line_index = index
             pnl_result = parse_final_pnl_with_line_info(self.all_lines, index, 50, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"))
@@ -346,7 +350,8 @@ class LogParser:
             self.debug_analyzer.process_close_event(pos, index)
             
             self.finalized_positions.append(pos)
-            del self.active_positions[pos.position_id]
+            # AIDEV-NOTE-CLAUDE: Remove the position from active ones once it's closed.
+            del self.active_positions[closed_pair]
             
             if DETAILED_POSITION_LOGGING:
                 pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
@@ -382,23 +387,21 @@ class LogParser:
 
     def run(self, log_dir: str) -> List[Dict[str, Any]]:
         """
-        Run the complete log parsing process.
+        Run the complete log parsing process with rygorous validation.
         
         Args:
             log_dir: Directory containing log files or subdirectories
             
         Returns:
-            List of validated position dictionaries
+            List of validated position dictionaries ready for CSV writing.
         """
         log_files_info = []
         if os.path.exists(log_dir):
-            # AIDEV-NOTE-CLAUDE: Sort files chronologically to handle cross-file positions properly
             for item in sorted(os.listdir(log_dir)):
                 item_path = os.path.join(log_dir, item)
                 wallet_id = "main_wallet" if os.path.isfile(item_path) else item
                 
                 if os.path.isdir(item_path):
-                    # AIDEV-NOTE-CLAUDE: Sort files within subdirectories as well
                     files_to_scan = [os.path.join(item_path, f) for f in sorted(os.listdir(item_path)) if f.startswith("app") and ".log" in f]
                 elif item.startswith("app") and ".log" in item:
                     files_to_scan = [item_path]
@@ -430,8 +433,6 @@ class LogParser:
         self.strategy_diagnostic.set_log_data(self.all_lines, self.file_line_mapping)
 
         for i, line_content in enumerate(self.all_lines):
-            # AIDEV-NOTE-CLAUDE: The main loop now triggers on the specific "| OPENED " string,
-            # making the entry point for opening positions much more reliable.
             if "| OPENED " in line_content:
                 self._process_open_event(line_content, i)
             elif "position and withdrew liquidity" in line_content:
@@ -444,16 +445,46 @@ class LogParser:
 
         validated_positions = []
         skipped_low_pnl = 0
+        skipped_time_machine = 0
+        skipped_validation = 0
+
         for pos in self.finalized_positions:
-            if pos.get_validation_errors():
-                logger.warning(f"Rejected position {pos.position_id}: {', '.join(pos.get_validation_errors())}")
+            # Filter 1: Basic validation errors (e.g., missing essential fields)
+            validation_errors = pos.get_validation_errors()
+            if validation_errors:
+                logger.warning(f"Rejected position {pos.position_id} (validation error): {', '.join(validation_errors)}")
+                skipped_validation += 1
                 continue
-            if pos.final_pnl is not None and abs(pos.final_pnl) < MIN_PNL_THRESHOLD:
+
+            # Filter 2: "Time Machine" check for positions that are not active
+            if pos.close_reason != 'active_at_log_end' and pos.close_timestamp and pos.close_timestamp != "UNKNOWN":
+                try:
+                    open_dt = _parse_custom_timestamp(pos.open_timestamp)
+                    close_dt = _parse_custom_timestamp(pos.close_timestamp)
+                    if open_dt and close_dt and close_dt < open_dt:
+                        logger.error(
+                            f"FATAL DATA ERROR (Time Machine): Position {pos.position_id} has close_timestamp "
+                            f"({pos.close_timestamp}) before open_timestamp ({pos.open_timestamp}). Skipping."
+                        )
+                        skipped_time_machine += 1
+                        continue
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not parse timestamps for position {pos.position_id} during validation: {e}. Skipping.")
+                    continue
+            
+            # Filter 3: Low PnL for closed positions
+            if pos.close_reason != 'active_at_log_end' and pos.final_pnl is not None and abs(pos.final_pnl) < MIN_PNL_THRESHOLD:
                 skipped_low_pnl += 1
                 continue
+            
             validated_positions.append(pos.to_csv_row())
         
-        logger.info(f"Found {len(self.finalized_positions)} positions. {len(validated_positions)} have complete data. {skipped_low_pnl} skipped due to low PnL.")
+        logger.info(f"Found {len(self.finalized_positions)} total positions.")
+        logger.info(f"  - {len(validated_positions)} passed validation and will be written to CSV.")
+        logger.info(f"  - {skipped_validation} skipped due to missing essential data.")
+        logger.info(f"  - {skipped_time_machine} skipped due to 'Time Machine' error.")
+        logger.info(f"  - {skipped_low_pnl} skipped due to low PnL.")
+        
         return validated_positions
     
     def _check_for_failed_position(self, start_index: int, token_pair: str) -> bool:
@@ -520,7 +551,8 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     
     if STRATEGY_DIAGNOSTIC_ENABLED:
         strategy_stats = parser.strategy_diagnostic.export_diagnostic(STRATEGY_DIAGNOSTIC_FILE)
-        logger.info(f"Strategy diagnostic statistics: {dict(strategy_stats)}")
+        if strategy_stats:
+             logger.warning(f"Strategy diagnostic found issues: {dict(strategy_stats)}")
     
     if not extracted_data:
         logger.error("Failed to extract any complete positions. CSV file will not be created.")
@@ -533,80 +565,78 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
                 reader = csv.DictReader(f)
                 existing_data = [row for row in reader]
         
-        # AIDEV-NOTE-CLAUDE: Enhanced deduplication using pool_address + open_timestamp
-        existing_position_ids = {row['position_id'] for row in existing_data}
-        existing_universal_ids = {f"{row['pool_address']}_{row['open_timestamp']}" for row in existing_data if row['pool_address'] and row['open_timestamp']}
+        # AIDEV-NOTE-CLAUDE: Using universal ID (pool_address + open_timestamp) for robust deduplication.
+        # This will handle duplicates across different log files (e.g., app-1.log and app-1_1.log).
+        existing_universal_ids = {
+            f"{row['pool_address']}_{row['open_timestamp']}" 
+            for row in existing_data 
+            if row.get('pool_address') and row.get('open_timestamp')
+        }
 
-        # Create mapping of existing positions for update logic
-        existing_positions_map = {f"{row['pool_address']}_{row['open_timestamp']}" : row 
-                                for row in existing_data 
-                                if row['pool_address'] and row['open_timestamp']}
-
-        processed_data = []
-        updated_count = 0
-        skipped_count = 0
+        unique_new_positions = {}
+        processed_count = 0
+        duplicate_in_run_count = 0
 
         for pos in extracted_data:
-            # Skip positions missing pool_address (these would fail validation anyway)
-            if not pos['pool_address'] or not pos['open_timestamp']:
-                logger.warning(f"Skipping position {pos['position_id']} - missing pool_address or open_timestamp")
+            processed_count += 1
+            if not pos.get('pool_address') or not pos.get('open_timestamp'):
+                logger.warning(f"Skipping position due to missing identifier: {pos.get('position_id')}")
                 continue
                 
             universal_id = f"{pos['pool_address']}_{pos['open_timestamp']}"
-            
-            if pos['position_id'] in existing_position_ids:
-                # Skip exact duplicate
-                skipped_count += 1
-                continue
-            elif universal_id in existing_universal_ids:
-                # Found same position (pool_address + open_timestamp)
-                existing_pos = existing_positions_map[universal_id]
-                
-                # Check if we should update: existing is incomplete and new is complete
-                if (existing_pos['close_reason'] == 'active_at_log_end' and 
-                    pos['close_reason'] != 'active_at_log_end' and 
-                    pos['pnl_sol'] is not None):
-                    # Update existing position with complete data
-                    processed_data.append(pos)
-                    updated_count += 1
-                    logger.info(f"Updated position {universal_id}: {existing_pos['close_reason']} → {pos['close_reason']}")
-                else:
-                    # Skip duplicate (don't import second occurrence)
-                    skipped_count += 1
-                    logger.info(f"Skipped duplicate position {universal_id}")
-                    continue
-            else:
-                # New position
-                processed_data.append(pos)
 
-        new_data = processed_data
+            # Check for duplicates within this extraction run
+            if universal_id in unique_new_positions:
+                # Always prefer the more complete position (not active_at_log_end)
+                if unique_new_positions[universal_id]['close_reason'] == 'active_at_log_end' and pos['close_reason'] != 'active_at_log_end':
+                     unique_new_positions[universal_id] = pos
+                duplicate_in_run_count += 1
+                continue
+            
+            # Check for duplicates against existing CSV data
+            if universal_id not in existing_universal_ids:
+                unique_new_positions[universal_id] = pos
+
+        final_new_data = list(unique_new_positions.values())
         
-        if new_data or updated_count > 0:
-            # AIDEV-NOTE-CLAUDE: Merge existing + new data, removing positions that were updated
-            updated_universal_ids = {f"{pos['pool_address']}_{pos['open_timestamp']}" 
-                                   for pos in new_data 
-                                   if f"{pos['pool_address']}_{pos['open_timestamp']}" in existing_universal_ids}
+        logger.warning(
+            f"Extraction summary: "
+            f"Processed={processed_count}, "
+            f"Duplicates in this run={duplicate_in_run_count}, "
+            f"New unique positions to add/update={len(final_new_data)}"
+        )
+        
+        if final_new_data:
+            # We overwrite the entire file with the clean, deduplicated list.
+            # This is simpler and safer than trying to merge/update in place.
+            all_data = existing_data + final_new_data
             
-            # Keep existing positions that weren't updated
-            filtered_existing = [pos for pos in existing_data 
-                                if not (pos['pool_address'] and pos['open_timestamp'] and 
-                                       f"{pos['pool_address']}_{pos['open_timestamp']}" in updated_universal_ids)]
+            # Final deduplication pass on the combined data
+            final_unique_positions = {}
+            for pos in all_data:
+                if not pos.get('pool_address') or not pos.get('open_timestamp'):
+                    continue
+                universal_id = f"{pos['pool_address']}_{pos['open_timestamp']}"
+                if universal_id not in final_unique_positions or \
+                   (final_unique_positions[universal_id].get('close_reason') == 'active_at_log_end' and pos.get('close_reason') != 'active_at_log_end'):
+                    final_unique_positions[universal_id] = pos
             
-            all_data = filtered_existing + new_data
-            all_data.sort(key=lambda x: x['open_timestamp'])
+            final_all_data = sorted(list(final_unique_positions.values()), key=lambda x: x['open_timestamp'])
             
             with open(output_csv, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=all_data[0].keys())
-                writer.writeheader()
-                writer.writerows(all_data)
+                if final_all_data:
+                    writer = csv.DictWriter(f, fieldnames=final_all_data[0].keys())
+                    writer.writeheader()
+                    writer.writerows(final_all_data)
             
-            logger.info(f"Successfully processed {len(all_data)} total positions:")
-            logger.info(f"  - {len(filtered_existing)} existing positions retained")
-            logger.info(f"  - {len(new_data) - updated_count} new positions added")
-            logger.info(f"  - {updated_count} positions updated (incomplete → complete)")
-            logger.info(f"  - {skipped_count} duplicate positions skipped")
+            logger.warning(
+                f"CSV Write summary: "
+                f"Total unique positions in file: {len(final_all_data)}. "
+                f"Existing: {len(existing_data)}, "
+                f"New added: {len(final_all_data) - len(existing_data)}."
+            )
         else:
-            logger.info("No new positions to add. CSV file unchanged.")
+            logger.warning("No new unique positions found to add to the CSV file.")
             
         return True
         
