@@ -66,21 +66,28 @@ def load_and_prepare_positions(file_path: str, min_threshold: float) -> pd.DataF
         if col in positions_df.columns:
             # AIDEV-NOTE-CLAUDE: Logic now handles active positions by dropping them from analysis.
             initial_rows = len(positions_df)
-            
-            # Convert to pandas datetime, coercing errors to NaT (Not a Time)
-            # This handles both standard formats and blank values (like in active_at_log_end)
-            positions_df[col] = pd.to_datetime(positions_df[col], errors='coerce')
-            
-            failed_indices = positions_df[col].isnull()
+
+            # --- FIX START ---
+            # Preserve the original string values before attempting conversion.
+            original_timestamps = positions_df[col].copy()
+
+            # Attempt standard parsing first. It's fast and handles standard ISO formats, empty strings, etc.
+            # Values that can't be parsed will become NaT (Not a Time).
+            positions_df[col] = pd.to_datetime(original_timestamps, errors='coerce')
+
+            # Identify indices where standard parsing failed but we have an original non-null value.
+            failed_indices = positions_df[col].isnull() & original_timestamps.notnull()
+
             if failed_indices.any():
                 logger.info(f"Applying custom timestamp parser for {failed_indices.sum()} values in '{col}'")
-                # Apply custom parser only where standard parsing failed
-                # The custom parser returns datetime or None (which becomes NaT)
-                custom_parsed = positions_df.loc[failed_indices, col].astype(str).apply(_parse_custom_timestamp)
+                # Apply the custom parser to the ORIGINAL string values, not the NaT results.
+                custom_parsed = original_timestamps[failed_indices].astype(str).apply(_parse_custom_timestamp)
+                # Update the DataFrame with the results from the custom parser.
                 positions_df.loc[failed_indices, col] = pd.to_datetime(custom_parsed, errors='coerce')
+            # --- FIX END ---
 
             # AIDEV-NOTE-CLAUDE: This is a critical step. It removes any rows where the timestamp
-            # could not be parsed, which includes positions with 'active_at_log_end'
+            # could not be parsed after all attempts, which includes positions with 'active_at_log_end'
             # as they have a null close_timestamp. This makes the analysis resilient.
             positions_df = positions_df.dropna(subset=[col])
             if len(positions_df) < initial_rows:

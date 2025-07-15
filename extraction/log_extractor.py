@@ -542,6 +542,21 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     logger.info("Starting data extraction from logs...")
     os.makedirs(log_dir, exist_ok=True)
     
+    # AIDEV-NOTE-CLAUDE: Logic to manually skip positions based on an external file.
+    # This allows for manual data correction for known errors in bot logs.
+    skip_file = 'reporting/config/positions_to_skip.csv'
+    ids_to_skip = set()
+    if os.path.exists(skip_file):
+        try:
+            with open(skip_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                ids_to_skip = {row['position_id'] for row in reader if 'position_id' in row}
+            logger.info(f"Loaded {len(ids_to_skip)} position IDs to skip from {skip_file}.")
+        except Exception as e:
+            logger.error(f"Error reading {skip_file}: {e}. No positions will be skipped manually.")
+    else:
+        logger.info(f"{skip_file} not found. No positions will be manually skipped.")
+
     parser = LogParser()
     extracted_data = parser.run(log_dir)
     
@@ -554,6 +569,14 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
         if strategy_stats:
              logger.warning(f"Strategy diagnostic found issues: {dict(strategy_stats)}")
     
+    # Apply manual position skipping
+    if ids_to_skip:
+        original_count = len(extracted_data)
+        extracted_data = [pos for pos in extracted_data if pos.get('position_id') not in ids_to_skip]
+        skipped_count = original_count - len(extracted_data)
+        if skipped_count > 0:
+            logger.warning(f"Manually skipped {skipped_count} positions based on {skip_file}.")
+
     if not extracted_data:
         logger.error("Failed to extract any complete positions. CSV file will not be created.")
         return False

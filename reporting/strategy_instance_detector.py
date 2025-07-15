@@ -106,43 +106,61 @@ class StrategyInstanceDetector:
         Calculate performance metrics for strategy instance.
         
         Args:
-            positions: List of positions belonging to this instance
+            positions: List of all positions belonging to this instance
             
         Returns:
-            Dictionary with calculated metrics
+            Dictionary with calculated metrics. Returns zeroed metrics if no
+            financially valid positions are found.
         """
         if not positions:
             return {}
-        
-        # AIDEV-NOTE-CLAUDE: Use runtime column names (mapped from CSV)
+            
         pnl_column = 'pnl_sol'
         investment_column = 'investment_sol'
         
-        pnl_values = [pos[pnl_column] for pos in positions if pos.get(pnl_column) is not None]
-        investment_values = [pos[investment_column] for pos in positions if pos.get(investment_column) is not None]
+        # Krok 1: Rygorystyczne filtrowanie pozycji z poprawnym PnL
+        financially_valid_positions = [
+            pos for pos in positions if pd.notna(pos.get(pnl_column))
+        ]
         
-        if not pnl_values:
-            return {}
+        # Krok 2: Obsługa braku ważnych pozycji
+        if not financially_valid_positions:
+            return {
+                'total_pnl_sol': 0.0,
+                'avg_pnl_percent': 0.0,
+                'win_rate': 0.0,
+                'position_count': len(positions),
+                'analyzed_position_count': 0, # Nowa metryka
+                'total_invested': 0.0,
+                'pnl_per_sol_invested': 0.0,
+                'best_position': 0.0,
+                'worst_position': 0.0
+            }
         
-        # Calculate percentage returns
+        # Krok 3: Obliczenia na podstawie przefiltrowanych danych
+        pnl_values = [pos[pnl_column] for pos in financially_valid_positions]
+        investment_values = [pos[investment_column] for pos in financially_valid_positions if pd.notna(pos.get(investment_column))]
+        
+        # Obliczanie procentowego zwrotu tylko dla ważnych pozycji
         pnl_percentages = []
-        for i, pos in enumerate(positions):
+        for pos in financially_valid_positions:
             pnl = pos.get(pnl_column)
             investment = pos.get(investment_column)
-            if pnl is not None and investment is not None and investment > 0:
+            if pd.notna(investment) and investment > 0:
                 pnl_percent = (pnl / investment) * 100
                 pnl_percentages.append(pnl_percent)
         
         total_pnl = sum(pnl_values)
-        total_invested = sum(investment_values) if investment_values else 0
+        total_invested = sum(investment_values)
         win_count = sum(1 for pnl in pnl_values if pnl > 0)
-        win_rate = (win_count / len(pnl_values)) * 100 if pnl_values else 0
+        win_rate = (win_count / len(pnl_values)) * 100
         
         metrics = {
             'total_pnl_sol': total_pnl,
             'avg_pnl_percent': sum(pnl_percentages) / len(pnl_percentages) if pnl_percentages else 0,
             'win_rate': win_rate,
-            'position_count': len(positions),
+            'position_count': len(positions), # Całkowita liczba pozycji
+            'analyzed_position_count': len(financially_valid_positions), # Liczba przeanalizowanych
             'total_invested': total_invested,
             'pnl_per_sol_invested': total_pnl / total_invested if total_invested > 0 else 0,
             'best_position': max(pnl_percentages) if pnl_percentages else 0,
@@ -318,6 +336,7 @@ class StrategyInstanceDetector:
                     'stopLoss': params['stopLoss'],
                     'first_use_date': instance_data.get('first_use_date', 'unknown'),
                     'position_count': metrics.get('position_count', 0),
+                    'analyzed_position_count': metrics.get('analyzed_position_count', 0),
                     'total_pnl_sol': round(metrics.get('total_pnl_sol', 0), 4),
                     'avg_pnl_percent': round(metrics.get('avg_pnl_percent', 0), 2),
                     'win_rate': round(metrics.get('win_rate', 0), 1),
