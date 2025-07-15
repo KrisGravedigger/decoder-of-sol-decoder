@@ -68,8 +68,6 @@ class PortfolioAnalysisOrchestrator:
 
     def run_comprehensive_analysis(self, positions_file: str) -> Dict[str, Any]:
         """Run comprehensive analysis including portfolio, correlation, weekend, and HTML report."""
-        if not self.api_key and not self.config.get('api_settings', {}).get('cache_only', False):
-            return {'status': 'ERROR', 'error': 'API key is missing and not in cache-only mode.'}
 
         logger.info("=" * 60)
         logger.info("STARTING COMPREHENSIVE ANALYSIS")

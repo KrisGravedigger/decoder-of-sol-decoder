@@ -4,6 +4,7 @@ import sys
 from dotenv import load_dotenv
 import yaml
 from typing import Optional
+import pandas as pd
 
 # --- Setup Project Path & Environment ---
 load_dotenv()
@@ -71,45 +72,43 @@ def run_full_pipeline(api_key: Optional[str]):
 
     # Step 1: Log Extraction
     logger.info("Pipeline Step 1: Running log extraction...")
-    print("\n[1/4] Running log extraction...")
+    print("\n[1/5] Running log extraction...")
     if not run_extraction():
         logger.error("Pipeline stopped: Log extraction failed.")
-        print("Error during log extraction. Aborting pipeline.")
         return
     print("Log extraction completed successfully.")
 
     # Step 2: Strategy Instance Detection
     logger.info("Pipeline Step 2: Running strategy instance detection...")
-    print("\n[2/4] Running strategy instance detection...")
+    print("\n[2/5] Running strategy instance detection...")
     try:
         run_instance_detection()
-        print("Strategy instance detection completed successfully.")
     except Exception as e:
         logger.error(f"Pipeline stopped: Strategy instance detection failed: {e}", exc_info=True)
-        print(f"Error during instance detection: {e}. Aborting pipeline.")
         return
+    print("Strategy instance detection completed successfully.")
 
-    # Step 3: SOL/USDC Rates (optional - skip if cache exists)
-    logger.info("Pipeline Step 3: Checking SOL/USDC rates...")
-    print("\n[3/5] Checking SOL/USDC historical rates...")
-    # Note: This step is optional and will be skipped if sufficient cache exists
+    # Step 3: Central Data Fetching (The only online step)
+    logger.info("Pipeline Step 3: Running Central Data Fetching...")
+    print("\n[3/5] Fetching all historical data...")
+    run_all_data_fetching(api_key)
+    print("Data fetching completed.")
     
-    # Step 4: Spot vs. Bid-Ask Simulation  
-    logger.info("Pipeline Step 4: Running Spot vs. Bid-Ask simulation...")
+    # Step 4: Spot vs. Bid-Ask Simulation (Offline)
+    logger.info("Pipeline Step 4: Running Spot vs. Bid-Ask simulation (Offline)...")
     print("\n[4/5] Running Spot vs. Bid-Ask simulation...")
     try:
-        run_spot_vs_bidask_analysis(api_key)
-        print("Spot vs. Bid-Ask simulation completed successfully.")
+        run_spot_vs_bidask_analysis(api_key=None) # Explicitly offline
     except Exception as e:
         logger.error(f"Pipeline stopped: Spot vs. Bid-Ask simulation failed: {e}", exc_info=True)
-        print(f"Error during simulation: {e}. Aborting pipeline.")
         return
+    print("Spot vs. Bid-Ask simulation completed successfully.")
 
-    # Step 5: Comprehensive Reporting
-    logger.info("Pipeline Step 5: Generating comprehensive portfolio report...")
+    # Step 5: Comprehensive Reporting (Offline)
+    logger.info("Pipeline Step 5: Generating comprehensive portfolio report (Offline)...")
     print("\n[5/5] Generating comprehensive portfolio report...")
     try:
-        orchestrator = PortfolioAnalysisOrchestrator(api_key=api_key)
+        orchestrator = PortfolioAnalysisOrchestrator() # Explicitly offline
         result = orchestrator.run_comprehensive_analysis('positions_to_analyze.csv')
         if result.get('status') == 'SUCCESS':
             print("Comprehensive report generated successfully.")
@@ -118,10 +117,10 @@ def run_full_pipeline(api_key: Optional[str]):
             print(f"Error during reporting: {result.get('error', 'Unknown error')}")
     except Exception as e:
         logger.error(f"Pipeline stopped: Comprehensive reporting failed: {e}", exc_info=True)
-        print(f"Error during reporting: {e}. Aborting pipeline.")
         return
         
     print_header("Full Pipeline Completed")
+
 
 
 def main_menu():
@@ -133,7 +132,7 @@ def main_menu():
 
     if is_cache_only:
         print("\n" + "!"*70)
-        print("!!! CACHE-ONLY MODE IS ACTIVE !!!")
+        print("!!! CACHE-ONLY MODE IS ACTIVE (via config.yaml) !!!")
         print("!!! No API calls will be made. The program will rely         !!!")
         print("!!! exclusively on data from the /price_cache/ directory.    !!!")
         print("!"*70)
@@ -142,18 +141,19 @@ def main_menu():
         logger.error("MORALIS_API_KEY not found in .env file. API calls will fail.")
         print("\nWARNING: MORALIS_API_KEY not found in .env file.")
 
-    orchestrator = PortfolioAnalysisOrchestrator(api_key=api_key)
+    # Orchestrator for reporting menu is ALWAYS initialized in offline mode.
+    orchestrator = PortfolioAnalysisOrchestrator()
 
     while True:
         print("\n" + "="*70)
         print("--- MAIN MENU ---")
         print("="*70)
         print("1. Step 1: Process Logs and Extract Positions")
-        print("2. Step 2: Detect Strategy Instances (generates strategy_instances.csv)")
-        print("3. Step 3: Fetch SOL/USDC Historical Rates (for portfolio analysis)")
-        print("4. Step 4: Run Base Simulations (Spot vs. Bid-Ask)")
-        print("5. Step 5: Generate Portfolio Reports & Analysis (Menu)")
-        print("6. Run Full Pipeline (Step 1 -> 2 -> 3 -> 4 -> 5)")
+        print("2. Step 2: Detect Strategy Instances")
+        print("3. Step 3: Fetch ALL Historical Data (Online Step)")
+        print("4. Step 4: Run Base Simulations (Offline)")
+        print("5. Step 5: Generate Portfolio Reports (Offline)")
+        print("6. Run Full Pipeline (Steps 1 -> 2 -> 3 -> 4 -> 5)")
         print("7. Exit")
         
         choice = input("Select an option (1-7): ")
@@ -165,12 +165,14 @@ def main_menu():
             print_header("Step 2: Strategy Instance Detection")
             run_instance_detection()
         elif choice == '3':
-            print_header("Step 3: Fetch SOL/USDC Historical Rates")
-            fetch_sol_usdc_rates_menu(api_key)
+            # This is the ONLY step that should get the api_key
+            run_all_data_fetching(api_key)
         elif choice == '4':
-            print_header("Step 4: Spot vs. Bid-Ask Simulation")
-            run_spot_vs_bidask_analysis(api_key)
+            print_header("Step 4: Spot vs. Bid-Ask Simulation (Offline)")
+            # This step runs offline, so no api_key is passed
+            run_spot_vs_bidask_analysis(api_key=None)
         elif choice == '5':
+            # Orchestrator is already initialized in offline mode
             reporting_menu(orchestrator)
         elif choice == '6':
             run_full_pipeline(api_key)
@@ -179,6 +181,129 @@ def main_menu():
             break
         else:
             print("Invalid choice, please try again.")
+
+def run_full_pipeline(api_key: Optional[str]):
+    """Executes the entire analysis pipeline from start to finish."""
+    print_header("Executing Full Pipeline")
+
+    # Step 1 & 2: Data Preparation
+    print("\n[1-2/5] Running Log Extraction & Strategy Detection...")
+    if not run_extraction(): return
+    try:
+        run_instance_detection()
+    except Exception as e:
+        logger.error(f"Pipeline stopped: Strategy instance detection failed: {e}", exc_info=True)
+        return
+    print("Log Extraction & Strategy Detection completed.")
+
+    # Step 3: Central Data Fetching (The only online step)
+    print("\n[3/5] Fetching all historical data...")
+    run_all_data_fetching(api_key)
+    print("Data fetching completed.")
+    
+    # Step 4: Spot vs. Bid-Ask Simulation (Offline)
+    print("\n[4/5] Running Spot vs. Bid-Ask simulation (Offline)...")
+    try:
+        run_spot_vs_bidask_analysis(api_key=None) # Explicitly offline
+    except Exception as e:
+        logger.error(f"Pipeline stopped: Spot vs. Bid-Ask simulation failed: {e}", exc_info=True)
+        return
+    print("Spot vs. Bid-Ask simulation completed successfully.")
+
+    # Step 5: Comprehensive Reporting (Offline)
+    print("\n[5/5] Generating comprehensive portfolio report (Offline)...")
+    try:
+        orchestrator = PortfolioAnalysisOrchestrator() # Explicitly offline
+        result = orchestrator.run_comprehensive_analysis('positions_to_analyze.csv')
+        if result.get('status') == 'SUCCESS':
+            print("Comprehensive report generated successfully.")
+            print(f"Find your report at: {result.get('files_generated', {}).get('html_report')}")
+        else:
+            print(f"Error during reporting: {result.get('error', 'Unknown error')}")
+    except Exception as e:
+        logger.error(f"Pipeline stopped: Comprehensive reporting failed: {e}", exc_info=True)
+        return
+        
+    print_header("Full Pipeline Completed")
+
+def run_all_data_fetching(api_key: Optional[str]):
+    """
+    Central data fetching function. Populates cache for all positions and SOL/USDC rates.
+    This is the ONLY function that should use the API key for fetching.
+    """
+    if not api_key:
+        print("Error: No API key available. Cannot run data fetching.")
+        logger.warning("run_all_data_fetching called without API key. Aborting.")
+        return
+
+    print_header("Step 3: Central Data Fetching")
+    logger.info("--- Starting Central Data Fetching Step ---")
+
+    # --- Part 1: Fetch per-position price history for simulations ---
+    print("\n[Part 1/2] Fetching price history for each position to populate cache...")
+    try:
+        positions_df = pd.read_csv("positions_to_analyze.csv")
+        total_positions = len(positions_df)
+        print(f"Found {total_positions} positions to process.")
+    except FileNotFoundError:
+        print("Error: positions_to_analyze.csv not found. Please run Step 1 first.")
+        logger.error("Data fetching failed: positions_to_analyze.csv not found.")
+        return
+
+    from reporting.analysis_runner import fetch_price_history
+    from reporting.data_loader import _parse_custom_timestamp
+    
+    # Safety Valve: Ask for confirmation only once, after the 5th position.
+    if total_positions > 5:
+        try:
+            user_input = input(f"\n[SAFETY VALVE] This step will process {total_positions} positions and may use API credits. Continue? (Y/n): ")
+            if user_input.lower().strip() == 'n':
+                print("Stopping data fetching as requested.")
+                logger.warning("User stopped data fetching at safety valve.")
+                return # Exit the function entirely
+            else:
+                print("Continuing with all positions...")
+        except KeyboardInterrupt:
+            print("\nStopping data fetching as requested.")
+            logger.warning("User stopped data fetching via Ctrl+C.")
+            return
+
+    for idx, row in enumerate(positions_df.itertuples()):
+        position_id = getattr(row, 'position_id', f"index_{row.Index}")
+        print(f"Processing cache for position {idx + 1}/{total_positions} ({position_id})...", end='\r')
+
+        try:
+            start_dt = _parse_custom_timestamp(str(row.open_timestamp))
+            end_dt = _parse_custom_timestamp(str(row.close_timestamp))
+            if pd.notna(start_dt) and pd.notna(end_dt) and end_dt > start_dt:
+                fetch_price_history(row.pool_address, start_dt, end_dt, api_key)
+            else:
+                logger.warning(f"Skipping fetch for position {position_id} due to invalid timestamps.")
+        except Exception as e:
+            logger.error(f"Error fetching data for position {position_id}: {e}")
+    print("\nProcessing complete for all positions.                          ") # Whitespace to clear the line
+
+    print("\n[Part 2/2] Fetching SOL/USDC daily rates...")
+    # --- Part 2: Fetch SOL/USDC daily rates for reporting ---
+    try:
+        from reporting.infrastructure_cost_analyzer import InfrastructureCostAnalyzer
+        positions_df['open_dt'] = positions_df['open_timestamp'].apply(_parse_custom_timestamp)
+        positions_df['close_dt'] = positions_df['close_timestamp'].apply(_parse_custom_timestamp)
+        min_date = positions_df['open_dt'].min().strftime('%Y-%m-%d')
+        max_date = positions_df['close_dt'].max().strftime('%Y-%m-%d')
+        print(f"Fetching SOL/USDC rates for period: {min_date} to {max_date}")
+
+        cost_analyzer = InfrastructureCostAnalyzer(api_key=api_key)
+        sol_rates = cost_analyzer.get_sol_usdc_rates(min_date, max_date)
+        
+        successful = sum(1 for rate in sol_rates.values() if rate is not None)
+        print(f"Fetched/updated {successful} daily SOL/USDC rates.")
+    except Exception as e:
+        logger.error(f"Failed to fetch SOL/USDC rates: {e}")
+        print(f"Error fetching SOL/USDC rates: {e}")
+        
+    print("\nCentral Data Fetching complete. Cache is populated.")
+    logger.info("--- Central Data Fetching Step Finished ---")
 
 def reporting_menu(orchestrator: PortfolioAnalysisOrchestrator):
     """Displays the submenu for reporting and analysis."""

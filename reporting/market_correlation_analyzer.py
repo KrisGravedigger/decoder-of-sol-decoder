@@ -24,6 +24,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
     
 from reporting.infrastructure_cost_analyzer import InfrastructureCostAnalyzer
+from reporting.metrics_calculator import calculate_daily_returns
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -88,9 +89,12 @@ class MarketCorrelationAnalyzer:
                 return {'error': "SOL daily data is empty after processing. Cannot perform analysis."}
 
             # Step 2: Prepare portfolio daily returns
-            portfolio_daily = self._calculate_portfolio_daily_returns(positions_df)
-            if portfolio_daily.empty:
+            portfolio_daily_df = calculate_daily_returns(positions_df)
+            if portfolio_daily_df.empty:
                 return {'error': 'No daily portfolio data available for correlation analysis'}
+                
+            # Convert DataFrame to a Series indexed by date, as expected by subsequent functions
+            portfolio_daily = portfolio_daily_df.set_index('date')['daily_return']
                 
             # Step 3: Align data and calculate correlations
             correlation_results = self._calculate_correlations(portfolio_daily, sol_daily)

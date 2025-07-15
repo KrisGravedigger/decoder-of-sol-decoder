@@ -651,3 +651,22 @@ Advanced Features:
 - `CLAUDE.md` (documentation update)
 
 **System Status:** Manual data correction feature is stable and ready for use. ✅
+
+2025-07-15: Architectural Refactoring for True Offline Analysis
+Goal: Resolve a critical architectural flaw where multiple parts of the pipeline (simulations, reporting) were independently attempting to fetch data, leading to uncontrolled API credit usage and bypassing the cache, even on subsequent runs.
+Achieved:
+Centralized Data Fetching: Implemented a new, single function run_all_data_fetching in main.py which is now the only point of contact with the Moralis API. It populates the cache for both per-position price histories (for simulations) and daily SOL/USDC rates (for reporting).
+True Offline Mode Enforcement: Refactored the entire pipeline (main_menu, run_full_pipeline) to ensure that all analysis and simulation steps (run_spot_vs_bidask_analysis, PortfolioAnalysisOrchestrator) are executed explicitly without an API key, forcing them to rely 100% on pre-populated cache.
+Controlled API Usage (Safety Valve): The central data-fetching step now includes a one-time "Go/No-Go" prompt that asks the user for confirmation before initiating any online activity, providing full control over API credit expenditure.
+Critical Bug Fix: Corrected a faulty guard clause in PortfolioAnalysisOrchestrator that incorrectly prevented it from running in cache-only mode.
+Elimination of "Two Brains": Removed all rogue data-fetching logic and incorrect "safety valve" prompts from downstream modules (analysis_runner.py), ensuring a single, predictable data flow.
+Business Impact:
+Eliminated Uncontrolled API Spending: The system no longer makes unexpected API calls during analysis or simulation, guaranteeing cost control.
+Improved Pipeline Reliability: The clear separation between a single "online" fetching phase and multiple "offline" analysis phases makes the system's behavior predictable, robust, and easier to debug.
+Enhanced User Control: The "Safety Valve" gives the user a clear, decisive moment to authorize or prevent potential costs.
+Files Modified:
+main.py (major architectural changes, new central fetching function)
+reporting/orchestrator.py (bug fix for cache-only mode)
+reporting/analysis_runner.py (cleanup of redundant logic)
+CLAUDE.md (documentation update)
+System Status: Architecture is now stable with a clear online/offline separation. The root cause of uncontrolled API calls has been resolved. ✅
