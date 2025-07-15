@@ -212,8 +212,8 @@ class PriceCacheManager:
         return gaps
     
     def _get_interval_seconds(self, timeframe: str) -> int:
-        # AIDEV-NOTE-GEMINI: Added '1d' timeframe to fix a critical bug where daily requests were treated as hourly.
-        return {"10min": 600, "30min": 1800, "1h": 3600, "4h": 14400, "1d": 86400}.get(timeframe, 3600)
+        intervals = {"10min": 600, "30min": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
+        return intervals[timeframe]
     
     def _filter_existing_data(self, data: List[Dict], start_dt: datetime, end_dt: datetime) -> List[Dict]:
         start_unix = int(start_dt.timestamp())

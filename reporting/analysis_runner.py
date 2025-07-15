@@ -1,127 +1,47 @@
 import os
-import csv
-import time
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
-import shutil
 from typing import Dict, List, Optional, Any
 import sys
+import re
 
 # AIDEV-NOTE-CLAUDE: Ensure correct path for sibling imports
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
 from simulations.spot_vs_bidask_simulator import SpotVsBidAskSimulator
-# AIDEV-NOTE-CLAUDE: Import the custom timestamp parser as per CLAUDE.md
-from .data_loader import _parse_custom_timestamp
-from .price_cache_manager import PriceCacheManager
+from reporting.data_loader import _parse_custom_timestamp
+from reporting.price_cache_manager import PriceCacheManager
 
-# --- Configuration ---
-POSITIONS_CSV = "positions_to_analyze.csv"
-FINAL_REPORT_CSV = "final_analysis_report.csv"
-DETAILED_REPORTS_DIR = "detailed_reports"
-
-logger = logging.getLogger('AnalysisRunner')
-
-def fetch_price_history(pool_address: str, start_dt: datetime, end_dt: datetime, api_key: Optional[str]) -> List[Dict]:
-    """
-    Fetch price history with smart caching via PriceCacheManager.
-    
-    Args:
-        pool_address (str): Pool address
-        start_dt (datetime): Start datetime
-        end_dt (datetime): End datetime
-        api_key (Optional[str]): API key for fetching missing data
-        
-    Returns:
-        List[Dict]: Price data with timestamp and close keys
-    """
-    duration_hours = (end_dt - start_dt).total_seconds() / 3600
-    
-    if duration_hours <= 4: 
-        timeframe = "10min"
-    elif duration_hours <= 12: 
-        timeframe = "30min"
-    elif duration_hours <= 72: 
-        timeframe = "1h"
-    else: 
-        timeframe = "4h"
-    
-    cache_manager = PriceCacheManager()
-    return cache_manager.get_price_data(pool_address, start_dt, end_dt, timeframe, api_key)
-
-def generate_text_report(position_data: Dict, simulation_results: Dict) -> str:
-    """Generate a detailed text report for a position analysis."""
-    report = []
-    report.append("="*60)
-    report.append(f"POSITION ANALYSIS: {position_data['token_pair']}")
-    report.append(f"Pool: {position_data['pool_address']}")
-    report.append(f"Period: {position_data['open_timestamp']} -> {position_data['close_timestamp']}")
-    report.append("="*60)
-    report.append(f"\n--- INPUT DATA ---")
-    report.append(f"Investment: {position_data.get('investment_sol', 0):.4f} SOL")
-    report.append(f"Actual strategy: {position_data.get('strategy_raw', 'N/A')}")
-    report.append(f"Actual PnL (from log): {position_data.get('pnl_sol', 'N/A')}")
-    report.append(f"\n--- SIMULATION RESULTS (PnL in SOL) ---")
-    
-    if not simulation_results or 'error' in simulation_results:
-        report.append("Error during simulation or no results available.")
-    else:
-        # Use .get('pnl_sol', -9e9) for safe sorting even if a strategy fails
-        sorted_results = sorted(simulation_results.items(), key=lambda item: item[1].get('pnl_sol', -9e9), reverse=True)
-        for name, res in sorted_results:
-            report.append(f"\n- Strategy: {name}")
-            report.append(f"  > Total PnL: {res.get('pnl_sol', 0):+.5f} SOL ({res.get('return_pct', 0):.2f}%)")
-            report.append(f"    (Est. fees: {res.get('pnl_from_fees', 0):+.5f} | Est. value change/IL: {res.get('pnl_from_il', 0):+.5f})")
-        
-        if sorted_results:
-            report.append("\n" + "="*60)
-            report.append(f"BEST STRATEGY: {sorted_results[0][0]}")
-            report.append("="*60)
-    return "\n".join(report)
+logger = logging.getLogger(__name__)
 
 class AnalysisRunner:
     """
     Main analysis runner for Spot vs Bid-Ask strategy comparisons.
+    It now uses the centralized PriceCacheManager directly.
     """
-    
+
     def __init__(self, api_key: Optional[str] = None):
         """
         Initialize analysis runner.
-        
+
         Args:
-            api_key (Optional[str]): Moralis API key
+            api_key (Optional[str]): Moralis API key for the PriceCacheManager.
         """
         self.api_key = api_key
+        self.cache_manager = PriceCacheManager() # Use the central cache manager
         if not api_key:
-            logger.warning("AnalysisRunner initialized without API key - cache-only mode")
-    
-    def _smart_timestamp_parser(self, timestamp_str: str) -> Optional[datetime]:
-        """
-        Smart timestamp parser that handles both custom SOL Decoder format and standard format.
-        
-        Args:
-            timestamp_str (str): Timestamp string to parse
-            
-        Returns:
-            Optional[datetime]: Parsed datetime or None if parsing fails
-        """
-        if pd.isna(timestamp_str) or timestamp_str == '' or str(timestamp_str).lower() == 'nan':
-            return None
-            
-        # Check if it's SOL Decoder format (MM/DD-HH:MM:SS)
-        # Format has slash, dash, and when split by dash should give exactly 2 parts
-        if '/' in timestamp_str and '-' in timestamp_str and len(timestamp_str.split('-')) == 2:
-            return _parse_custom_timestamp(timestamp_str)
-        else:
-            # Standard format - use pandas directly
-            try:
-                return pd.to_datetime(timestamp_str)
-            except Exception as e:
-                logger.warning(f"Failed to parse standard timestamp '{timestamp_str}': {e}")
-                return None
+            logger.warning("AnalysisRunner initialized in CACHE-ONLY mode.")
+
+    def _get_timeframe_for_duration(self, start_dt: datetime, end_dt: datetime) -> str:
+        """Determines the optimal timeframe based on the position's duration."""
+        duration_hours = (end_dt - start_dt).total_seconds() / 3600
+        if duration_hours <= 4: return "10min"
+        if duration_hours <= 12: return "30min"
+        if duration_hours <= 72: return "1h"
+        return "4h"
 
     def analyze_all_positions(self, positions_df: pd.DataFrame) -> List[Dict]:
         """
@@ -134,8 +54,6 @@ class AnalysisRunner:
             List[Dict]: Analysis results for each position
         """
         results = []
-        # AIDEV-NOTE-CLAUDE: Use enumerate to get a correct loop counter (idx).
-        # The row index from iterrows() can be non-sequential after filtering.
         total_positions = len(positions_df)
         for idx, (original_index, position) in enumerate(positions_df.iterrows()):
             logger.debug(f"Analyzing position {idx + 1}/{total_positions}: {position['token_pair']} (pos_id: {position.get('position_id', 'N/A')})")
@@ -148,7 +66,7 @@ class AnalysisRunner:
     
     def analyze_single_position(self, position_dict: Dict) -> Optional[Dict]:
         """
-        Analyze single position with strategy comparison.
+        Analyze a single position with strategy comparison.
         
         Args:
             position_dict (Dict): Position data
@@ -157,96 +75,50 @@ class AnalysisRunner:
             Optional[Dict]: Analysis result or None if failed
         """
         try:
-            # DEEP DEBUG: Setup logger
-            deep_logger = logging.getLogger('DEEP_DEBUG')
-            
-            # Check for required columns before proceeding
             required_columns = ['investment_sol', 'open_timestamp', 'close_timestamp', 'pool_address', 'token_pair']
-            missing_columns = [col for col in required_columns if col not in position_dict]
-            
-            if missing_columns:
-                logger.error(f"Missing required columns for position {position_dict.get('position_id', 'UNKNOWN')}: {missing_columns}")
-                logger.error(f"Available keys: {list(position_dict.keys())}")
+            if any(col not in position_dict for col in required_columns):
+                logger.error(f"Skipping position due to missing required columns. Position ID: {position_dict.get('position_id', 'N/A')}")
                 return None
-            
-            # Smart timestamp parsing - handle both SOL Decoder and standard formats
-            start_dt = self._smart_timestamp_parser(str(position_dict['open_timestamp']))
-            end_dt = self._smart_timestamp_parser(str(position_dict['close_timestamp']))
 
-            if pd.isna(start_dt) or pd.isna(end_dt):
-                logger.warning(f"Unparseable timestamps for position {position_dict.get('position_id', 'N/A')}. open='{position_dict['open_timestamp']}', close='{position_dict['close_timestamp']}'")
+            # AIDEV-NOTE-GEMINI: Centralized parsing is now enforced upstream in main.py.
+            # We can rely on receiving datetime objects.
+            start_dt = position_dict.get('open_timestamp')
+            end_dt = position_dict.get('close_timestamp')
+
+            # This safety check is still valuable to catch any residual data issues.
+            if not isinstance(start_dt, (pd.Timestamp, datetime)) or not isinstance(end_dt, (pd.Timestamp, datetime)):
+                logger.error(f"FATAL DATA ERROR in analysis_runner: Invalid timestamp types for position {position_dict.get('position_id', 'N/A')}. open_dt: {type(start_dt)}, close_dt: {type(end_dt)}. Skipping.")
                 return None
             
-            # Critical fix for the "Time Machine" bug
             if end_dt <= start_dt:
-                logger.error(f"FATAL DATA ERROR: Position {position_dict.get('position_id', 'N/A')} has close_timestamp BEFORE open_timestamp. Skipping.")
-                logger.error(f"Open: {start_dt}, Close: {end_dt}")
+                logger.error(f"FATAL DATA ERROR in analysis_runner: close_timestamp is before open_timestamp for position {position_dict.get('position_id', 'N/A')}. Skipping.")
                 return None
                 
-            price_history = fetch_price_history(
-                position_dict['pool_address'], start_dt, end_dt, self.api_key
+            # Use the centralized cache manager to get price data
+            timeframe = self._get_timeframe_for_duration(start_dt, end_dt)
+            price_history = self.cache_manager.get_price_data(
+                pool_address=position_dict['pool_address'], 
+                start_dt=start_dt, 
+                end_dt=end_dt, 
+                timeframe=timeframe,
+                api_key=self.api_key
             )
             
-            # Apply forward fill to clean zero prices
-            price_history = self._forward_fill_price_history(price_history, position_dict['token_pair'])
-            
             if not price_history:
-                logger.warning(f"No price history for {position_dict['token_pair']}. Skipping simulation for this position.")
-                return {
-                    'position_id': position_dict.get('position_id'),
-                    'token_pair': position_dict.get('token_pair'),
-                    'best_strategy': 'ERROR - No Price History',
-                    'simulation_results': {'error': 'No price history available'}
-                }
-            
-            import re
-            strategy_str = position_dict.get('strategy_raw', '')
-            step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', str(strategy_str), re.IGNORECASE)
+                logger.warning(f"No price history for {position_dict['token_pair']}. Skipping simulation.")
+                return {'position_id': position_dict.get('position_id'), 'token_pair': position_dict['token_pair'], 'best_strategy': 'ERROR - No Price History', 'simulation_results': {'error': 'No price history available'}}
+
+            step_match = re.search(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', str(position_dict.get('strategy_raw', '')), re.IGNORECASE)
             step_size = step_match.group(1).upper() if step_match else "UNKNOWN"
             
-            # Explicitly cast numeric types before passing them to the simulator
             try:
                 investment_sol_float = float(position_dict['investment_sol'])
-                raw_pnl_sol = position_dict.get('pnl_sol')
-                pnl_sol_float = float(raw_pnl_sol) if pd.notna(raw_pnl_sol) else None
-
-            except (ValueError, TypeError) as e:
-                logger.error(f"FATAL DATA ERROR: Could not convert numeric values for position {position_dict.get('position_id', 'N/A')}. Skipping simulation.")
-                logger.error(f"Investment: '{position_dict['investment_sol']}', PnL: '{position_dict.get('pnl_sol')}'. Error: {e}")
-                return {
-                    'position_id': position_dict.get('position_id'),
-                    'token_pair': position_dict.get('token_pair'),
-                    'best_strategy': 'ERROR - Invalid Input Data',
-                    'simulation_results': {'error': 'Invalid numeric input data for simulation.'}
-                }
-
-            # DEEP DEBUG: Log everything before calling simulator
-            deep_logger.debug("\n" + "="*80)
-            deep_logger.debug(f"BEFORE CALLING SIMULATOR for {position_dict['token_pair']}")
-            deep_logger.debug(f"Position data:")
-            deep_logger.debug(f"  position_id: {position_dict.get('position_id')}")
-            deep_logger.debug(f"  investment_sol: {investment_sol_float} (from CSV: {position_dict['investment_sol']})")
-            deep_logger.debug(f"  pnl_sol: {pnl_sol_float} (from CSV: {position_dict.get('pnl_sol')})")
-            deep_logger.debug(f"  step_size: {step_size}")
-            deep_logger.debug(f"  close_reason: {position_dict.get('close_reason')}")
-
-            # Check price history content
-            if price_history:
-                deep_logger.debug(f"\nPrice history check:")
-                deep_logger.debug(f"  Total points: {len(price_history)}")
-                deep_logger.debug(f"  First entry: {price_history[0]}")
-                deep_logger.debug(f"  Last entry: {price_history[-1]}")
-                
-                # Extract and analyze prices
-                prices = [p.get('close', 0) for p in price_history if p.get('close', 0) > 0]
-                if prices:
-                    deep_logger.debug(f"  Valid prices: {len(prices)}")
-                    deep_logger.debug(f"  Min price: {min(prices):.15e}")
-                    deep_logger.debug(f"  Max price: {max(prices):.15e}")
-                    deep_logger.debug(f"  Price ratio: {max(prices)/min(prices) if min(prices) > 0 else 'N/A'}")
+                pnl_sol_float = float(position_dict['pnl_sol']) if pd.notna(position_dict.get('pnl_sol')) else None
+            except (ValueError, TypeError):
+                logger.error(f"Invalid numeric data for position {position_dict.get('position_id', 'N/A')}. Skipping.")
+                return {'position_id': position_dict.get('position_id'), 'token_pair': position_dict['token_pair'], 'best_strategy': 'ERROR - Invalid Input Data', 'simulation_results': {'error': 'Invalid numeric input data.'}}
 
             analyzer = SpotVsBidAskSimulator(bin_step=100, step_size=step_size)
-            
             simulation_results = analyzer.run_all_simulations(
                 investment_sol=investment_sol_float,
                 pnl_sol=pnl_sol_float,
@@ -256,18 +128,8 @@ class AnalysisRunner:
                 close_reason=position_dict.get('close_reason', 'other')
             )
             
-            # DEEP DEBUG: Log results
+            best_strategy_name = 'ERROR'
             if simulation_results and not simulation_results.get('error'):
-                deep_logger.debug(f"\nSimulation results:")
-                for strategy_name, result in simulation_results.items():
-                    deep_logger.debug(f"  {strategy_name}:")
-                    deep_logger.debug(f"    PnL: {result.get('pnl_sol', 0):.15e}")
-                    deep_logger.debug(f"    PnL from fees: {result.get('pnl_from_fees', 0):.15e}")
-                    deep_logger.debug(f"    PnL from IL: {result.get('pnl_from_il', 0):.15e}")
-                    
-            if not simulation_results or 'error' in simulation_results:
-                best_strategy_name = 'ERROR - Simulation Failed'
-            else:
                 best_strategy_name = max(simulation_results, key=lambda k: simulation_results[k].get('pnl_sol', -9e9))
             
             return {
@@ -278,121 +140,5 @@ class AnalysisRunner:
             }
             
         except Exception as e:
-            logger.error(f"Analysis failed for position {position_dict.get('position_id')}: {e}", exc_info=True)
+            logger.error(f"Analysis failed for position {position_dict.get('position_id', 'N/A')}: {e}", exc_info=True)
             return None
-        
-    def _forward_fill_price_history(self, price_history: List[Dict], token_pair: str) -> List[Dict]:
-        """
-        Apply forward fill to handle missing price data.
-        
-        Args:
-            price_history (List[Dict]): Raw price data from cache
-            token_pair (str): Token pair name for logging
-            
-        Returns:
-            List[Dict]: Cleaned price data with forward-filled prices
-        """
-        if not price_history:
-            return price_history
-            
-        cleaned_history = []
-        last_valid_price = None
-        missing_periods = []
-        
-        for i, item in enumerate(price_history):
-            price = item.get('close', 0)
-            timestamp = item.get('timestamp', 0)
-            
-            if price <= 0:
-                if last_valid_price is not None:
-                    # Forward-fill with last valid price
-                    new_item = item.copy()
-                    new_item['close'] = last_valid_price
-                    new_item['forward_filled'] = True
-                    cleaned_history.append(new_item)
-                    
-                    # Track missing period for warning
-                    if not missing_periods or missing_periods[-1]['end_idx'] != i - 1:
-                        missing_periods.append({'start_idx': i, 'end_idx': i, 'timestamp': timestamp})
-                    else:
-                        missing_periods[-1]['end_idx'] = i
-                        
-                    logger.debug(f"Forward-filled price gap for {token_pair}")
-                else:
-                    # Skip until we find first valid price
-                    logger.debug(f"Skipping invalid price at start for {token_pair}")
-                    continue
-            else:
-                # Valid price found
-                last_valid_price = price
-                new_item = item.copy()
-                new_item['forward_filled'] = False
-                cleaned_history.append(new_item)
-        
-        # Generate comprehensive warnings for missing data periods
-        if missing_periods:
-            logger.warning(f"📊 MISSING DATA WARNING for {token_pair}:")
-            for period in missing_periods:
-                start_time = datetime.fromtimestamp(period['timestamp']).strftime('%Y-%m-%d %H:%M')
-                if period['start_idx'] == period['end_idx']:
-                    logger.warning(f"   • Missing price data at {start_time}")
-                else:
-                    count = period['end_idx'] - period['start_idx'] + 1
-                    logger.warning(f"   • Missing price data for {count} consecutive periods starting {start_time}")
-        
-        # If all prices were zero, create minimal fallback
-        if not cleaned_history and price_history:
-            logger.warning(f"⚠️  CRITICAL: All prices were zero for {token_pair}, creating fallback data")
-            fallback_price = 0.000001  # Minimal non-zero price to prevent division by zero
-            for item in price_history:
-                new_item = item.copy()
-                new_item['close'] = fallback_price
-                new_item['forward_filled'] = True
-                new_item['fallback_data'] = True
-                cleaned_history.append(new_item)
-        
-        return cleaned_history
-
-def run_spot_vs_bidask_analysis(api_key: Optional[str]):
-    """Main analysis function that coordinates the Spot vs. Bid-Ask simulation."""
-    if not api_key:
-        logger.warning("No API key provided. Running in cache-only mode for Spot vs Bid-Ask analysis.")
-
-    logger.info(f"Loading positions from file {POSITIONS_CSV}")
-    try:
-        positions_df = pd.read_csv(POSITIONS_CSV)
-        logger.info(f"Loaded {len(positions_df)} positions for Spot vs. Bid-Ask analysis.")
-    except FileNotFoundError:
-        logger.error(f"File {POSITIONS_CSV} not found or empty. Run log extraction first.")
-        print(f"Error: File {POSITIONS_CSV} not found. Please run step 1 first.")
-        return
-
-    # AIDEV-NOTE-CLAUDE: API rate limiting - test mode with x positions max
-    """
-    test_limit = 5
-    if len(positions_df) > test_limit:
-        positions_to_run = positions_df.head(test_limit)
-        logger.info(f"Test mode: analyzing first {test_limit} positions (out of {len(positions_df)} total).")
-    else:
-        positions_to_run = positions_df
-        logger.info(f"Analyzing all {len(positions_to_run)} positions.")
-    """
-
-    positions_to_run = positions_df
-
-    os.makedirs(DETAILED_REPORTS_DIR, exist_ok=True)
-    
-    runner = AnalysisRunner(api_key=api_key)
-    all_simulation_results = runner.analyze_all_positions(positions_to_run)
-
-    # Process results for final CSV report
-    processed_results_for_df = []
-    for result in all_simulation_results:
-        if not result or 'position_id' not in result:
-            continue
-            
-        # Find original position data to merge with results
-        original_position_series = positions_df[positions_df['position_id'] == result['position_id']]
-        if original_position_series.empty:
-            logger.warning(f"Could not find original data for position_id: {result['position_id']}")
-           

@@ -265,12 +265,17 @@ class StrategyInstanceDetector:
                 # Create new instance
                 instance_id = self._generate_strategy_id(strategy, tp, sl, investment)
                 
+                # AIDEV-NOTE-GEMINI: CRITICAL FIX - Extract and store step_size.
+                step_size_match = pd.Series(strategy).str.extract(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', expand=False).iloc[0]
+                step_size = step_size_match if pd.notna(step_size_match) else 'UNKNOWN'
+
                 self.strategy_instances[instance_id] = {
                     'parameters': {
                         'strategy': strategy,
                         'takeProfit': tp,
                         'stopLoss': sl,
-                        'initial_investment': investment
+                        'initial_investment': investment,
+                        'step_size': step_size # Add the extracted step_size
                     },
                     'positions': [],
                     'first_use_date': row.get('open_timestamp', 'unknown')
@@ -331,7 +336,8 @@ class StrategyInstanceDetector:
                 row = {
                     'strategy_instance_id': instance_id,
                     'strategy': params['strategy'],
-                    'initial_investment': params['initial_investment'],
+                    'step_size': params.get('step_size', 'UNKNOWN'),
+                    'investment_sol': params['initial_investment'],
                     'takeProfit': params['takeProfit'],
                     'stopLoss': params['stopLoss'],
                     'first_use_date': instance_data.get('first_use_date', 'unknown'),

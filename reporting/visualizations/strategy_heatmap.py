@@ -60,9 +60,11 @@ def plot_heatmap_from_instances(fig, axes, analysis_result: Dict[str, Any], conf
         else:
             strategy_instances_df.loc[idx, 'sharpe_ratio'] = 0.0
     
+    # AIDEV-NOTE-GEMINI: CORRECTED KEYERROR. Changed 'initial_investment' to 'investment_sol'
+    # to align with the project's standardized column names.
     strategy_instances_df['strategy_name'] = (
         strategy_instances_df['strategy_clean'] + ' ' + strategy_instances_df['step_size'] + ' ' +
-        strategy_instances_df['initial_investment'].astype(str) + 'SOL (' +
+        strategy_instances_df['investment_sol'].astype(str) + 'SOL (' +
         strategy_instances_df['position_count'].astype(str) + ')'
     )
 

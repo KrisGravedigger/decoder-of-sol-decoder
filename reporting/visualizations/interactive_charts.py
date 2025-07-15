@@ -322,7 +322,9 @@ def create_strategy_heatmap_chart(strategy_instances_path: str = "strategy_insta
         sort_metric = 'performance_score' if 'performance_score' in df.columns else 'avg_pnl_percent'
         df = df.sort_values(sort_metric, ascending=False).head(top_strategies)
         
-        df['strategy_label'] = df['strategy_clean'] + ' ' + df['initial_investment'].round(3).astype(str) + ' SOL'
+        # AIDEV-NOTE-GEMINI: Column Standardization Fix.
+        # Adhering to the project standard 'investment_sol' to prevent KeyError.
+        df['strategy_label'] = df['strategy_clean'] + ' ' + df['investment_sol'].round(3).astype(str) + ' SOL'
         
         pivot_df = df.pivot(index='strategy_label', columns='step_size', values='avg_pnl_percent')
         
