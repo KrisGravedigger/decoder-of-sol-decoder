@@ -57,6 +57,11 @@ CONTEXT_EXPORT_FILE = "close_contexts_analysis.txt"
 MIN_PNL_THRESHOLD = 0.01  # Skip positions with PnL between -0.01 and +0.01 SOL
 STRATEGY_DIAGNOSTIC_ENABLED = True  # Enable strategy parsing diagnostics
 STRATEGY_DIAGNOSTIC_FILE = "strategy_parsing_diagnostic.txt"
+# AIDEV-NOTE-CLAUDE: High-confidence patterns indicating an unrecoverable position failure.
+# Positions matching these in their close context will be discarded entirely.
+CRITICAL_FAILURE_PATTERNS = {
+    'Accounting Contradiction': re.compile(r'calculated:\s*(?!0\.000000)[\d.]+\s*,\s*Got:\s*0\.000000', re.IGNORECASE)
+}
 
 # Logging configuration
 log_level = logging.DEBUG if (DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG") else logging.WARNING
@@ -315,47 +320,77 @@ class LogParser:
     def _process_close_event_without_timestamp(self, index: int):
         """
         Process a position closing event that doesn't have a timestamp in the line.
+        This is triggered by a definitive 'withdrew liquidity' message. It then looks
+        backwards to find the associated pair and check for critical failure patterns.
         
         Args:
-            index: Line index in log
+            index: Line index in log where the close was confirmed.
         """
         closed_pair = None
-        for i in range(index, max(-1, index - 50), -1):
+        # AIDEV-NOTE-GEMINI: Increased lookback from 50 to 150. The pair name can be many lines before the final close confirmation.
+        for i in range(index, max(-1, index - 150), -1):
             line = clean_ansi(self.all_lines[i])
+            # Primary, more specific pattern, robust against leading characters (e.g., emoji)
+            direct_close_match = re.search(r'\W*Closed\s+([A-Za-z0-9\s\-_()]+-SOL)', line, re.IGNORECASE)
+            if direct_close_match:
+                closed_pair = direct_close_match.group(1).strip()
+                break
+            # Fallback for the older "Removing..." pattern
             remove_match = re.search(r'Removing positions in\s+([A-Za-z0-9\s\-_()]+\-SOL)', line)
             if remove_match:
                 closed_pair = remove_match.group(1).strip()
                 break
 
         if not closed_pair:
+            logger.warning(f"Could not identify a closed pair for event at line {index+1}. This may indicate a parsing issue and the position might be skipped.")
             return
         
-        # AIDEV-NOTE-CLAUDE: Core architectural fix. We directly get the position by its unique token_pair key.
-        # This eliminates ambiguity and prevents associating a close event with the wrong open event.
         matching_position = self.active_positions.get(closed_pair)
+        if not matching_position:
+            logger.debug(f"Found a close event for '{closed_pair}' at line {index+1}, but no matching active position was found.")
+            return
+
+        pos = matching_position
+
+        # AIDEV-NOTE-CLAUDE: THE ACTUAL FIX. The critical failure message can appear AFTER the trigger line.
+        # We must scan BOTH backwards and forwards from the "withdrew liquidity" trigger.
+        context_lookback = 150
+        context_lookforward = 50  # Scan 50 lines ahead of the trigger.
+        start_scan = max(pos.open_line_index, index - context_lookback)
+        end_scan = min(len(self.all_lines), index + context_lookforward + 1)
+        context_slice = self.all_lines[start_scan : end_scan]
+
+        for line_content in context_slice:
+            for reason, pattern in CRITICAL_FAILURE_PATTERNS.items():
+                if pattern.search(clean_ansi(line_content)):
+                    logger.warning(
+                        f"CRITICAL FAILURE DETECTED: Discarding position {pos.position_id} ({pos.token_pair}) "
+                        f"due to pattern '{reason}' found near close event at line {index + 1}."
+                    )
+                    # Remove from active positions and do not add to finalized list.
+                    del self.active_positions[closed_pair]
+                    return # Stop all further processing for this corrupted position.
         
-        if matching_position:
-            pos = matching_position
-            pos.close_timestamp = extract_close_timestamp(
-                self.all_lines, 
-                index, 
-                pos.open_line_index,
-                debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
-            )
-            pos.close_reason = self._classify_close_reason(index)
-            pos.close_line_index = index
-            pnl_result = parse_final_pnl_with_line_info(self.all_lines, index, 50, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"))
-            pos.final_pnl = pnl_result['pnl']
-            
-            self.debug_analyzer.process_close_event(pos, index)
-            
-            self.finalized_positions.append(pos)
-            # AIDEV-NOTE-CLAUDE: Remove the position from active ones once it's closed.
-            del self.active_positions[closed_pair]
-            
-            if DETAILED_POSITION_LOGGING:
-                pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
-                logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
+        # If no critical failures were found, proceed with normal closing logic.
+        pos.close_timestamp = extract_close_timestamp(
+            self.all_lines, 
+            index, 
+            pos.open_line_index,
+            debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
+        )
+        pos.close_reason = self._classify_close_reason(index)
+        pos.close_line_index = index
+        pnl_result = parse_final_pnl_with_line_info(self.all_lines, index, 50, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"))
+        pos.final_pnl = pnl_result['pnl']
+        
+        self.debug_analyzer.process_close_event(pos, index)
+        
+        self.finalized_positions.append(pos)
+        del self.active_positions[closed_pair]
+        
+        if DETAILED_POSITION_LOGGING:
+            pnl_line_info = f" | PnL found at line {pnl_result['line_number']}" if pnl_result['line_number'] else " | PnL not found"
+            logger.info(f"Closed position: {pos.position_id} ({pos.token_pair}) | Close detected at line {index + 1} | Reason: {pos.close_reason} | PnL: {pos.final_pnl}{pnl_line_info}")
 
     def _classify_close_reason(self, close_line_index: int) -> str:
         """
@@ -541,6 +576,24 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     """
     logger.info("Starting data extraction from logs...")
     os.makedirs(log_dir, exist_ok=True)
+
+    # AIDEV-NOTE-CLAUDE: Logic to manually skip positions based on an external file.
+    # This allows for manual data correction for known errors in bot logs.
+    skip_file = 'reporting/config/positions_to_skip.csv'
+    ids_to_skip = set()
+    if os.path.exists(skip_file):
+        try:
+            with open(skip_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                ids_to_skip = {row['position_id'] for row in reader if 'position_id' in row}
+            logger.info(f"Loaded {len(ids_to_skip)} position IDs to skip from {skip_file}.")
+        except Exception as e:
+            logger.error(f"Error reading {skip_file}: {e}. No positions will be skipped manually.")
+    else:
+        logger.info(f"{skip_file} not found. No positions will be manually skipped.")
+
+    parser = LogParser()
+    extracted_data = parser.run(log_dir)
     
     # AIDEV-NOTE-CLAUDE: Logic to manually skip positions based on an external file.
     # This allows for manual data correction for known errors in bot logs.
@@ -568,6 +621,13 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
         strategy_stats = parser.strategy_diagnostic.export_diagnostic(STRATEGY_DIAGNOSTIC_FILE)
         if strategy_stats:
              logger.warning(f"Strategy diagnostic found issues: {dict(strategy_stats)}")
+    # Apply manual position skipping
+    if ids_to_skip:
+        original_count = len(extracted_data)
+        extracted_data = [pos for pos in extracted_data if pos.get('position_id') not in ids_to_skip]
+        skipped_count = original_count - len(extracted_data)
+        if skipped_count > 0:
+            logger.warning(f"Manually skipped {skipped_count} positions based on {skip_file}.")
     
     # Apply manual position skipping
     if ids_to_skip:

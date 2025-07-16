@@ -652,7 +652,7 @@ Advanced Features:
 
 **System Status:** Manual data correction feature is stable and ready for use. ✅
 
-2025-07-15: Architectural Refactoring for True Offline Analysis
+**2025-07-15: Architectural Refactoring for True Offline Analysis**
 Goal: Resolve a critical architectural flaw where multiple parts of the pipeline (simulations, reporting) were independently attempting to fetch data, leading to uncontrolled API credit usage and bypassing the cache, even on subsequent runs.
 Achieved:
 Centralized Data Fetching: Implemented a new, single function run_all_data_fetching in main.py which is now the only point of contact with the Moralis API. It populates the cache for both per-position price histories (for simulations) and daily SOL/USDC rates (for reporting).
@@ -670,3 +670,53 @@ reporting/orchestrator.py (bug fix for cache-only mode)
 reporting/analysis_runner.py (cleanup of redundant logic)
 CLAUDE.md (documentation update)
 System Status: Architecture is now stable with a clear online/offline separation. The root cause of uncontrolled API calls has been resolved. ✅
+
+**2025-07-16: Resolving Cascading Data Errors & Pipeline Stabilization**
+
+**Goal:** Diagnose and resolve a series of critical data integrity issues that emerged after major architectural refactoring, including timestamp errors, `KeyError`s, and inverted PnL values that corrupted the final analytics.
+
+**Problem Diagnosis & Resolution Steps:**
+
+1.  **Timestamp Type Mismatch (`FATAL DATA ERROR`):**
+    *   **Symptom:** The `analysis_runner` was rejecting most positions because it received timestamps as strings instead of `datetime` objects.
+    *   **Root Cause:** Analysis steps were reading `positions_to_analyze.csv` with `pd.read_csv` but were not applying the centralized timestamp parsing logic from `data_loader.py`.
+    *   **Fix:** Modified `main.py` to ensure that any function reading `positions_to_analyze.csv` immediately uses the project's standard data loading and cleaning functions (`load_and_prepare_positions`), guaranteeing correct data types throughout the pipeline.
+
+2.  **Heatmap Generation Failure (`KeyError: 'initial_investment'`):**
+    *   **Symptom:** The strategy heatmap chart failed to generate, throwing a `KeyError`.
+    *   **Root Cause:** The visualization code in `strategy_heatmap.py` was still referencing the old column name (`initial_investment`) instead of the project's standardized name (`investment_sol`).
+    *   **Fix:** Updated the column name in `strategy_heatmap.py` to align with the unified naming system, resolving the error.
+
+3.  **Critical Data Corruption (Inverted PnL & "Equity Curve Cliff"):**
+    *   **Symptom:** After fixing the initial errors, the final report showed dramatically incorrect metrics: `Net PnL` flipped from positive to negative, and the equity curve chart showed a sharp, unrealistic drop after June 22nd.
+    *   **Root Cause:** The analysis was being performed on a **stale and corrupted `positions_to_analyze.csv` file**. This artifact was a leftover from a previous, faulty run of the log parser, which had incorrectly calculated PnL for some positions. Subsequent fixes in the code were not reflected in this "poisoned" intermediate file.
+    *   **Resolution (The "Healing Pipeline"):** Running the full pipeline from Step 1 (`run_extraction`) forced the system to **overwrite the stale CSV with a fresh, correctly parsed version** based on the latest, stable code. This single action purged the corrupted data and restored the integrity of all subsequent calculations and visualizations.
+
+**Key Insight:** This session highlighted the critical importance of data lineage. When a parser or data generation step is fixed, it is crucial to re-run the entire pipeline from the beginning to ensure all downstream artifacts are regenerated and free of legacy errors.
+
+**Files Modified:**
+- `main.py` (to enforce centralized data cleaning)
+- `reporting/visualizations/strategy_heatmap.py` (to fix `KeyError`)
+- `reporting/analysis_runner.py` (to strengthen data validation)
+
+**System Status:** The data pipeline is now stable and robust. All identified data corruption issues have been resolved. The system correctly handles offline analysis based on a reliably generated central data artifact. ✅
+
+**2025-07-16: Manual Position Filtering for Data Correction**
+
+**Goal:** Implement a mechanism to manually exclude specific positions from the analysis pipeline to handle known data errors in source logs.
+
+**Achieved:**
+- **Manual Skip Functionality:** Implemented logic in `log_extractor.py` to read a new file, `positions_to_skip.csv`.
+- **Targeted Filtering:** The system now loads a set of `position_id`s from this file and filters them out from the extracted data before writing the final `positions_to_analyze.csv`.
+- **Robust Implementation:** The feature is designed to be fault-tolerant. If `positions_to_skip.csv` is missing or contains errors, the extraction process continues without manual filtering, logging an appropriate message.
+- **Clear Logging:** Added logs to indicate when the skip file is loaded and how many positions are manually excluded, ensuring transparency in the data processing pipeline.
+
+**Business Impact:**
+- Provides a crucial "escape hatch" for data quality issues originating from the bot's logs that cannot be fixed programmatically.
+- Increases the reliability of the final analysis by allowing for the manual removal of erroneous data points (e.g., positions with absurd PnL values due to log corruption).
+
+**Files Modified:**
+- `extraction/log_extractor.py` (added filtering logic)
+- `CLAUDE.md` (documentation update)
+
+**System Status:** Manual data correction feature is stable and ready for use. ✅

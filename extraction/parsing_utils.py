@@ -42,8 +42,24 @@ def _parse_custom_timestamp(ts_str: str) -> Optional[datetime]:
 
 
 def clean_ansi(text: str) -> str:
-    """Remove ANSI escape sequences from text."""
-    return re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    """Remove ANSI escape sequences, emoji, and other problematic Unicode characters."""
+    if not text:
+        return text
+    
+    # Remove ANSI escape sequences
+    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    
+    # Remove emoji and other problematic Unicode characters
+    text = re.sub(r'[\U0001F600-\U0001F64F]', '', text)  # Emoticons
+    text = re.sub(r'[\U0001F300-\U0001F5FF]', '', text)  # Symbols & pictographs
+    text = re.sub(r'[\U0001F680-\U0001F6FF]', '', text)  # Transport & map symbols
+    text = re.sub(r'[\U0001F1E0-\U0001F1FF]', '', text)  # Flags (iOS)
+    text = re.sub(r'[\U00002600-\U000027BF]', '', text)  # Miscellaneous symbols
+    text = re.sub(r'[\U0001f900-\U0001f9ff]', '', text)  # Supplemental Symbols and Pictographs
+    text = re.sub(r'[\U00002700-\U000027bf]', '', text)  # Dingbats
+    text = re.sub(r'[\u200b-\u200d\ufeff]', '', text)  # Zero-width spaces and BOM
+    
+    return text.strip()
 
 
 def find_context_value(patterns: List[str], lines: List[str], start_index: int, lookback: int) -> Optional[str]:
