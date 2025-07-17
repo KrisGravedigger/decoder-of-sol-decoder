@@ -79,8 +79,9 @@ def plot_heatmap_from_instances(fig, axes, analysis_result: Dict[str, Any], conf
         if metric not in strategy_instances_df.columns: continue
         heatmap_data = strategy_instances_df.set_index('strategy_name')[[metric]]
 
-        # AIDEV-TODO-CLAUDE: Revisit Win Rate display. Brute-force normalization applied as formatting attempts failed.
-        # The value is divided by 100 to be displayed as a decimal (e.g., 0.85).
+        # The 'win_rate' from strategy_instances.csv is a percentage (e.g., 85.0).
+        # To display it as a decimal (e.g., 0.85), it must be divided by 100 before plotting.
+        # The fmt='.2f' will then correctly format it.
         if metric == 'win_rate':
             heatmap_data[metric] = heatmap_data[metric] / 100.0
 
