@@ -7,35 +7,34 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from typing import Dict, Any
 
-def plot_equity_curve(ax1, ax2, analysis_result: Dict[str, Any]):
+def plot_equity_curve(ax1, analysis_result: Dict[str, Any]):
     """
-    Plots the equity curve and SOL price chart on the provided axes.
+    Plots the equity curve on a single provided axis.
 
     Args:
         ax1: Matplotlib axis for the main equity curve.
-        ax2: Matplotlib axis for the SOL price subplot.
         analysis_result (Dict[str, Any]): The portfolio analysis results.
     """
-    daily_df = analysis_result['raw_data']['daily_returns_df']
+    daily_df = analysis_result['raw_data']['daily_returns_df'].copy()
     sol_rates = analysis_result['raw_data']['sol_rates']
+    cost_summary = analysis_result['infrastructure_cost_impact']
+    daily_cost_usd = cost_summary['daily_cost_usd']
 
     # Prepare data
-    daily_df = daily_df.copy()
-    cost_summary = analysis_result['infrastructure_cost_impact']
-    daily_cost_usd = cost_summary.get('daily_cost_usd', 11.67)
-    
+    daily_df['daily_cost_sol'] = 0.0
     daily_df['cumulative_pnl_usdc'] = 0.0
-    cumulative_cost = 0.0
+
+    # Calculate daily costs first
     for idx, row in daily_df.iterrows():
         date_str = row['date'].strftime("%Y-%m-%d")
-        if date_str in sol_rates:
-            sol_price = sol_rates[date_str]
+        sol_price = sol_rates.get(date_str)
+        if sol_price and sol_price > 0:
+            daily_df.loc[idx, 'daily_cost_sol'] = daily_cost_usd / sol_price
             daily_df.loc[idx, 'cumulative_pnl_usdc'] = row['cumulative_pnl_sol'] * sol_price
-            daily_cost_sol = daily_cost_usd / sol_price
-            cumulative_cost += daily_cost_sol
-            daily_df.loc[idx, 'cumulative_cost_sol'] = cumulative_cost
-    
-    daily_df['net_pnl_sol'] = daily_df['cumulative_pnl_sol'] - daily_df.get('cumulative_cost_sol', 0)
+
+    # Correctly calculate cumulative cost and net PnL
+    daily_df['cumulative_cost_sol'] = daily_df['daily_cost_sol'].cumsum()
+    daily_df['net_pnl_sol'] = daily_df['cumulative_pnl_sol'] - daily_df['cumulative_cost_sol']
 
     # Main equity curve
     ax1.plot(daily_df['date'], daily_df['cumulative_pnl_sol'], label='Gross SOL PnL', linewidth=2, color='#FF6B35')
@@ -60,13 +59,3 @@ def plot_equity_curve(ax1, ax2, analysis_result: Dict[str, Any]):
     ax1.legend(loc='upper left')
     ax1_twin.legend(loc='upper right')
     ax1.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-
-    # SOL price chart subplot
-    if sol_rates:
-        sol_dates = [datetime.strptime(date, "%Y-%m-%d") for date in sol_rates.keys()]
-        sol_prices = list(sol_rates.values())
-        ax2.plot(sol_dates, sol_prices, color='#7209B7', linewidth=2)
-        ax2.set_ylabel('SOL/USDC Price', fontsize=10, color='#7209B7')
-        ax2.set_xlabel('Date', fontsize=10)
-        ax2.grid(True, alpha=0.3)
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))

@@ -62,17 +62,18 @@ def calculate_sol_metrics(positions_df: pd.DataFrame, daily_df: pd.DataFrame, ri
 
     # Max drawdown
     max_drawdown = 0.0
-    if len(daily_df) > 1 and not daily_df['cumulative_pnl_sol'].expanding().max().eq(0).all():
+    if len(daily_df) > 1:
         cumulative = daily_df['cumulative_pnl_sol']
         running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max.abs().replace(0, np.nan)
-        max_drawdown = drawdown.min() * 100 if not drawdown.empty and not drawdown.isnull().all() else 0.0
+        # Using .replace(0, 1) on the absolute value of the peak prevents division by zero
+        # and handles the initial phase where peak PnL can be zero or negative. This is the most
+        # robust and simple way to ensure calculation stability.
+        safe_running_max = running_max.abs().replace(0, 1)
+        drawdown = (cumulative - running_max) / safe_running_max
+        # The metric should return a raw decimal value. Formatting is handled by the UI.
+        max_drawdown = drawdown.min() if not drawdown.empty and not drawdown.isnull().all() else 0.0
 
-    # Net PnL
-    total_cost_sol = positions_df['infrastructure_cost_sol'].sum() if 'infrastructure_cost_sol' in positions_df.columns else 0
-    net_pnl_sol = total_pnl_sol - total_cost_sol
-
-# Net PnL and Cost Impact
+    # Net PnL and Cost Impact
     total_cost_sol = positions_df['infrastructure_cost_sol'].sum() if 'infrastructure_cost_sol' in positions_df.columns else 0
     net_pnl_sol = total_pnl_sol - total_cost_sol
     cost_impact_percent = (total_cost_sol / abs(total_pnl_sol) * 100) if total_pnl_sol != 0 else 0
@@ -149,20 +150,27 @@ def calculate_usdc_metrics(positions_df: pd.DataFrame, sol_rates: Dict[str, Any]
         sharpe_ratio = excess_returns.mean() / excess_returns.std(ddof=0) * np.sqrt(365)
 
     max_drawdown = 0.0
-    if len(daily_usdc_df) > 1 and not daily_usdc_df['cumulative_pnl_usdc'].expanding().max().eq(0).all():
+    if len(daily_usdc_df) > 1:
         cumulative = daily_usdc_df['cumulative_pnl_usdc']
         running_max = cumulative.expanding().max()
-        safe_running_max = running_max.abs().replace(0, np.nan)
+        # Using .replace(0, 1) on the absolute value of the peak prevents division by zero
+        # and handles the initial phase where peak PnL can be zero or negative.
+        safe_running_max = running_max.abs().replace(0, 1)
         drawdown = (cumulative - running_max) / safe_running_max
-        max_drawdown = drawdown.min() * 100 if not drawdown.empty and not drawdown.isnull().all() else 0.0
+        # The metric should return a raw decimal value (e.g., -0.5 for -50%).
+        # The final formatting to a percentage string happens in the reporting layer.
+        max_drawdown = drawdown.min() if not drawdown.empty and not drawdown.isnull().all() else 0.0
 
     total_cost_usdc = positions_usdc['infrastructure_cost_usdc'].sum()
     net_pnl_usdc = total_pnl_usdc - total_cost_usdc
+
+    cost_impact_percent = (total_cost_usdc / abs(total_pnl_usdc) * 100) if total_pnl_usdc != 0 else 0
 
     return {
         'total_pnl_usdc': total_pnl_usdc, 'sharpe_ratio': sharpe_ratio,
         'max_drawdown_percent': max_drawdown, 'win_rate': win_rate,
         'profit_factor': profit_factor, 'net_pnl_after_costs': net_pnl_usdc,
+        'cost_impact_percent': cost_impact_percent,
         'total_positions': len(positions_usdc)
     }
 

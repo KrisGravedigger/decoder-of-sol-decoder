@@ -50,9 +50,19 @@ class StrategyInstanceDetector:
             Unique strategy instance ID
         """
         # AIDEV-NOTE-CLAUDE: Consistent formatting to avoid float precision issues
+        # AIDEV-NOTE-GEMINI: Added NaN check to prevent crashes.
         investment_rounded = round(investment, 3)
-        tp_formatted = int(tp) if tp == int(tp) else round(tp, 1)  # 6.0 -> 6, 6.5 -> 6.5
-        sl_formatted = int(sl) if sl == int(sl) else round(sl, 1)  # 18.0 -> 18, 12.5 -> 12.5
+        
+        # Handle potential NaN values for tp and sl
+        if pd.isna(tp):
+            tp_formatted = 'NaN'
+        else:
+            tp_formatted = int(tp) if tp == int(tp) else round(tp, 1)
+
+        if pd.isna(sl):
+            sl_formatted = 'NaN'
+        else:
+            sl_formatted = int(sl) if sl == int(sl) else round(sl, 1)
         
         # Create readable ID: strategy_investment_tp_sl
         strategy_id = f"{strategy}_{investment_rounded}_{tp_formatted}_{sl_formatted}"
@@ -96,43 +106,61 @@ class StrategyInstanceDetector:
         Calculate performance metrics for strategy instance.
         
         Args:
-            positions: List of positions belonging to this instance
+            positions: List of all positions belonging to this instance
             
         Returns:
-            Dictionary with calculated metrics
+            Dictionary with calculated metrics. Returns zeroed metrics if no
+            financially valid positions are found.
         """
         if not positions:
             return {}
-        
-        # AIDEV-NOTE-CLAUDE: Use runtime column names (mapped from CSV)
+            
         pnl_column = 'pnl_sol'
         investment_column = 'investment_sol'
         
-        pnl_values = [pos[pnl_column] for pos in positions if pos.get(pnl_column) is not None]
-        investment_values = [pos[investment_column] for pos in positions if pos.get(investment_column) is not None]
+        # Krok 1: Rygorystyczne filtrowanie pozycji z poprawnym PnL
+        financially_valid_positions = [
+            pos for pos in positions if pd.notna(pos.get(pnl_column))
+        ]
         
-        if not pnl_values:
-            return {}
+        # Krok 2: Obsługa braku ważnych pozycji
+        if not financially_valid_positions:
+            return {
+                'total_pnl_sol': 0.0,
+                'avg_pnl_percent': 0.0,
+                'win_rate': 0.0,
+                'position_count': len(positions),
+                'analyzed_position_count': 0, # Nowa metryka
+                'total_invested': 0.0,
+                'pnl_per_sol_invested': 0.0,
+                'best_position': 0.0,
+                'worst_position': 0.0
+            }
         
-        # Calculate percentage returns
+        # Krok 3: Obliczenia na podstawie przefiltrowanych danych
+        pnl_values = [pos[pnl_column] for pos in financially_valid_positions]
+        investment_values = [pos[investment_column] for pos in financially_valid_positions if pd.notna(pos.get(investment_column))]
+        
+        # Obliczanie procentowego zwrotu tylko dla ważnych pozycji
         pnl_percentages = []
-        for i, pos in enumerate(positions):
+        for pos in financially_valid_positions:
             pnl = pos.get(pnl_column)
             investment = pos.get(investment_column)
-            if pnl is not None and investment is not None and investment > 0:
+            if pd.notna(investment) and investment > 0:
                 pnl_percent = (pnl / investment) * 100
                 pnl_percentages.append(pnl_percent)
         
         total_pnl = sum(pnl_values)
-        total_invested = sum(investment_values) if investment_values else 0
+        total_invested = sum(investment_values)
         win_count = sum(1 for pnl in pnl_values if pnl > 0)
-        win_rate = (win_count / len(pnl_values)) * 100 if pnl_values else 0
+        win_rate = (win_count / len(pnl_values)) * 100
         
         metrics = {
             'total_pnl_sol': total_pnl,
             'avg_pnl_percent': sum(pnl_percentages) / len(pnl_percentages) if pnl_percentages else 0,
             'win_rate': win_rate,
-            'position_count': len(positions),
+            'position_count': len(positions), # Całkowita liczba pozycji
+            'analyzed_position_count': len(financially_valid_positions), # Liczba przeanalizowanych
             'total_invested': total_invested,
             'pnl_per_sol_invested': total_pnl / total_invested if total_invested > 0 else 0,
             'best_position': max(pnl_percentages) if pnl_percentages else 0,
@@ -221,8 +249,8 @@ class StrategyInstanceDetector:
 
             # Extract required parameters with proper column names
             strategy = row.get(column_mapping['strategy'], 'unknown')
-            tp = row.get('takeProfit', 0)  # This should match CSV exactly
-            sl = row.get('stopLoss', 0)    # This should match CSV exactly  
+            tp = row.get('takeProfit', float('nan'))  # This should match CSV exactly
+            sl = row.get('stopLoss', float('nan'))    # This should match CSV exactly  
             investment = row.get(column_mapping['investment'], 0)
             
             # Skip rows with missing critical data
@@ -237,12 +265,17 @@ class StrategyInstanceDetector:
                 # Create new instance
                 instance_id = self._generate_strategy_id(strategy, tp, sl, investment)
                 
+                # AIDEV-NOTE-GEMINI: CRITICAL FIX - Extract and store step_size.
+                step_size_match = pd.Series(strategy).str.extract(r'(WIDE|MEDIUM|NARROW|SIXTYNINE)', expand=False).iloc[0]
+                step_size = step_size_match if pd.notna(step_size_match) else 'UNKNOWN'
+
                 self.strategy_instances[instance_id] = {
                     'parameters': {
                         'strategy': strategy,
                         'takeProfit': tp,
                         'stopLoss': sl,
-                        'initial_investment': investment
+                        'initial_investment': investment,
+                        'step_size': step_size # Add the extracted step_size
                     },
                     'positions': [],
                     'first_use_date': row.get('open_timestamp', 'unknown')
@@ -303,11 +336,13 @@ class StrategyInstanceDetector:
                 row = {
                     'strategy_instance_id': instance_id,
                     'strategy': params['strategy'],
-                    'initial_investment': params['initial_investment'],
+                    'step_size': params.get('step_size', 'UNKNOWN'),
+                    'investment_sol': params['initial_investment'],
                     'takeProfit': params['takeProfit'],
                     'stopLoss': params['stopLoss'],
                     'first_use_date': instance_data.get('first_use_date', 'unknown'),
                     'position_count': metrics.get('position_count', 0),
+                    'analyzed_position_count': metrics.get('analyzed_position_count', 0),
                     'total_pnl_sol': round(metrics.get('total_pnl_sol', 0), 4),
                     'avg_pnl_percent': round(metrics.get('avg_pnl_percent', 0), 2),
                     'win_rate': round(metrics.get('win_rate', 0), 1),

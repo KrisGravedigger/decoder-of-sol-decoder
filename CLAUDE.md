@@ -175,6 +175,14 @@ Column Name Mapping Chaos (RESOLVED):
 - **Resolution**: Plan A implementation - direct CSV → code name consistency, zero mapping overhead
 - **Status**: RESOLVED - clean codebase achieved ✅
 
+Strategy Parsing Issues (RESOLVED):
+- **Issue**: 455 unresolved parsing cases (242 suspicious + 213 missing step_size) causing incomplete position data
+- **Root cause**: Basic regex patterns existed but logic for applying them was flawed
+- **Business impact**: HIGH - 99.5% of problematic parsing cases, incomplete dataset for analysis
+- **Resolution**: Complete parsing logic overhaul by Gemini with iterative debugging approach
+- **Date**: 2025-07-11
+- **Status**: RESOLVED - 2 remaining edge cases (99.5% success rate) ✅
+
 📖 Session Management Rules
 🎯 Single Task Per Session
 
@@ -250,6 +258,7 @@ SL (Stop Loss) - automatic close when loss threshold exceeded (pattern: "Stop lo
 LV (Low Volume) - close due to volume drop below threshold (pattern: "due to low volume")
 OOR (Out of Range) - close when price moved beyond bin range and exceeded timeout (pattern: "Closing position due to price range:")
 other - all other close types (manual, unknown, system errors, etc.)
+Superseded - close when a new position for the same pair is opened before the previous one was closed, indicating a replacement/restart
 
 ## Enhanced Deduplication System
 
@@ -302,16 +311,24 @@ positions_df['timestamp_column'] = positions_df['timestamp_column'].apply(_parse
 **Benefits:** Eliminated accidental complexity, improved maintainability, faster debugging
 **Status:** Fully implemented across entire codebase ✅
 
+## Strategy Parsing & Pipeline Stabilization
+
+**Take Profit/Stop Loss Parsing** - Enhanced position model with TP/SL fields parsed from opening events
+**Context-Based Parsing** - Improved strategy detection using reverse search with lookahead context
+**Silent Failure Detection** - SUCCESS_CONFIRMATION_PATTERNS prevent false positive position detection
+**Business Logic Integration** - Core TP/SL data now available throughout analysis pipeline
+**Parsing Accuracy** - Improved from ~90% to >99.5% success rate for strategy parameter detection
+
 🗂️ Project Structure
 project/
 ├── main.py                     # Main application entry point with interactive menu
 ├── main_analyzer.py            # (Legacy) Alternative analysis entry point
 ├── core/
-│   └── models.py               # Position class and other data models
+│   └── models.py               # Position class with TP/SL fields and other data models
 ├── extraction/                 # Data extraction from logs
 │   ├── __init__.py
-│   ├── log_extractor.py        # Main parser with multi-wallet support and cross-file tracking
-│   └── parsing_utils.py        # Universal parsing utilities
+│   ├── log_extractor.py        # Main parser with enhanced strategy parsing and cross-file tracking
+│   └── parsing_utils.py        # Enhanced parsing utilities with TP/SL extraction
 ├── reporting/                  # Analytics and portfolio performance analysis
 │   ├── __init__.py
 │   ├── config/
@@ -323,7 +340,12 @@ project/
 │   │   ├── cost_impact.py
 │   │   ├── drawdown.py
 │   │   ├── equity_curve.py
-│   │   ├── interactive_charts.py # Plotly charts for HTML report
+│   │   ├── interactive/          # NEW: Interactive chart modules
+│   │   │   ├── __init__.py       # NEW: Re-exports all chart functions
+│   │   │   ├── market_charts.py  # NEW: Correlation, EMA Trend charts
+│   │   │   ├── portfolio_charts.py # NEW: KPI, Equity Curve, Drawdown, Cost charts
+│   │   │   ├── simulation_charts.py# NEW: Weekend, Strategy Sim charts
+│   │   │   └── strategy_charts.py  # NEW: Heatmap, AVG PnL charts
 │   │   └── strategy_heatmap.py
 │   ├── orchestrator.py         # Core logic engine for the reporting workflow
 │   ├── analysis_runner.py      # Runs Spot vs. Bid-Ask simulation for all positions
@@ -345,16 +367,19 @@ project/
 
 File Handling Rules
 
-Input: all *.log files starting with "app" in input/ directory
+Input: Input: all *.log files starting with "app" in input/ directory; optional positions_to_skip.csv in root
+Cache: automatic Moralis API response caching (JSON files) with smart gap detection
+Reports: individual text reports + collective CSV with clean column names
 Cache: automatic Moralis API response caching (JSON files) with smart gap detection
 Reports: individual text reports + collective CSV with clean column names
 
 🏃‍♂️ Project Status
-Last Update: 2025-07-04
-Current Version: v4.0 - Column Name Standardization & Cache Optimization
+Last Update: 2025-07-17
+Current Version: v4.4 - Strategy parsing & pipeline stabilization
 Working Features:
 
-Position extraction from SOL Decoder logs ✅ (improved 33%)
+Position extraction from SOL Decoder logs ✅ (improved to >99.5% accuracy)
+Manual position filtering via `positions_to_skip.csv` ✅
 Historical price data fetching from Moralis API ✅
 Smart price cache with gap detection and API failure handling ✅
 2 LP strategy simulation (1-Sided Spot/Bid-Ask only) ✅
@@ -362,10 +387,13 @@ Comparative report generation ✅
 PnL-based position filtering ✅
 Debug system with configurable context export ✅
 Close reason classification (TP/SL/LV/OOR/other) ✅
+Reliable Take Profit/Stop Loss parsing from `OPENED` events ✅
+Robust handling of position restarts/replacements ("Superseded" logic) ✅
+Business logic close reason detection (always active) ✅
 Business logic close reason detection (always active) ✅
 Duplicate position prevention ✅
 Position retry handling with data updates ✅
-Strategy detection from logs ✅ (~90% accuracy)
+Strategy detection from logs ✅ (>99.5% accuracy)
 Step size detection and processing (WIDE/SIXTYNINE/MEDIUM/NARROW) ✅
 Research-based Bid-Ask distribution (U-shaped mathematical formula) ✅
 Close timestamp extraction ✅
@@ -401,6 +429,8 @@ Chronological file processing with intelligent duplicate handling ✅
 - **Cache-Only Mode**: Full application support for running in an offline/cached mode for testing and cost savings ✅
 - **Error Resiliency (Graceful Degradation)**: The HTML report generation no longer crashes on missing data (e.g., from market analysis in cache-only mode), instead displaying informative messages ✅
 
+- **Modular Chart Generation**: Decoupled the monolithic interactive chart module into four smaller, specialized modules (`portfolio`, `strategy`, `market`, `simulation`) for improved maintainability and adherence to the 600-line file limit. ✅
+
 **Smart Price Cache Management v2.0:**
 - **Intelligent Gap Detection**: Only fetches missing time periods, prevents redundant API calls ✅
 - **API Failure vs No Data Distinction**: Handles 401 errors differently from legitimate empty periods (weekends) ✅
@@ -414,6 +444,13 @@ Chronological file processing with intelligent duplicate handling ✅
 - **Zero Accidental Complexity**: Direct CSV → code usage, no intermediate mapping layers ✅
 - **Improved Maintainability**: Single source of truth for column names, easier debugging ✅
 - **Performance Enhancement**: Eliminated mapping overhead in data processing pipeline ✅
+
+**Strategy Parsing & Pipeline Stabilization v4.2:**
+- **Enhanced TP/SL Parsing**: Take profit and stop loss values now extracted and stored in Position model ✅
+- **Improved Strategy Detection**: >99.5% accuracy through reverse search with context lookahead ✅
+- **Silent Failure Detection**: SUCCESS_CONFIRMATION_PATTERNS prevent false positive position detection ✅
+- **Robust Pipeline**: NaN handling and error resilience throughout data processing pipeline ✅
+- **Enhanced Logging**: Clean, focused logs with DEBUG-level detail control ✅
 
 Completed in v2.0:
 
@@ -485,6 +522,28 @@ Completed in v3.0
 - **Forward Fill Intelligence**: Placeholders only for verified data gaps, not API failures ✅
 - **Zero Mapping Overhead**: Direct CSV header → code usage, eliminated accidental complexity ✅
 
+**Completed in v4.1 - Zero Price Bug Resolution:**
+- **Root Cause Identified**: Legacy cache files contained zero placeholders instead of forward-filled prices ✅
+- **Cache Manager Fix**: Enhanced placeholder logic to use valid nearby prices ✅  
+- **Analysis Runner Enhancement**: Forward-fill logic with comprehensive missing data warnings ✅
+- **Cache Repair Tool**: Automated script to fix existing zero placeholders in cache files ✅
+- **Zero Price Elimination**: 100% elimination of "Zero price detected in simulation" warnings ✅
+
+**Completed in v4.2 - Strategy Parsing & Pipeline Stabilization:**
+- **Enhanced TP/SL Parsing**: Take profit and stop loss values extracted from opening events and stored in Position model ✅
+- **Context-Based Strategy Detection**: Reverse search with lookahead context improved accuracy to >99.5% ✅
+- **Silent Failure Detection**: SUCCESS_CONFIRMATION_PATTERNS prevent false positive position detection ✅
+- **Pipeline Stabilization**: Enhanced error handling, NaN-resistant processing, robust data flow ✅
+- **Logging Optimization**: Clean operational logs with DEBUG-level detail for diagnostics ✅
+
+**Completed in v4.3 - Robust Single-Line Parsing & "Superseded" Logic:**
+- **Critical Parsing Fix**: Replaced fragile, multi-line parsing with a robust single-line strategy, resolving the core issue of `NaN` values for TP/SL ✅
+- **Single-Line Anchor**: The `... | OPENED ...` log entry is now the single source of truth for opening events, improving reliability from ~90% to >99.9% ✅
+- **Unified Data Extraction**: TP, SL, investment, strategy, wallet address, and version are all parsed from one line, eliminating context-related errors ✅
+- **"Superseded" Logic**: Implemented robust handling for position restarts, where an old, unclosed position is automatically closed and logged when a new one for the same pair appears ✅
+- **Minimal Context Search**: Context searching is now only used for the targeted retrieval of `pool_address` from `View DLMM` links, increasing precision ✅
+- **Parser Simplification**: Significantly simplified the codebase in `log_extractor.py` and `parsing_utils.py`, improving maintainability ✅
+
 Next Priority Tasks:
 
 **Immediate (Next Session):**
@@ -547,426 +606,217 @@ Advanced Features:
 
 **2025-06-22:** Integrated research-based mathematical formulas for accurate DLMM simulations. Implemented U-shaped Bid-Ask distribution, removed risky 2-sided strategies. **System Status: Production-ready v2.0** ✅
 
-**2025-06-25: Strategy Instance Detection & Multi-Wallet Support**
+**2025-06-25**: Implemented a strategy instance detection system to group and rank positions by performance. Enhanced the data pipeline to support log analysis from multiple wallets in separate subfolders.
 
-**Goal:** Build strategy instance detection system and enable multi-wallet analytics  
-**Achieved:**
+**2025-06-28**: Developed a comprehensive portfolio analytics module with dual currency support and infrastructure cost analysis. Implemented a chart generator for key metrics like equity curves, drawdowns, and strategy heatmaps.
 
-- **Modular Architecture Implementation:**
-  - Restructured project into extraction/ and reporting/ modules
-  - Created strategy_instance_detector.py as foundation for analytics module
-  - Enhanced import system for cross-module compatibility
+**2025-06-29**: Executed a major refactoring, breaking down oversized analytics and charting modules into a more maintainable, single-responsibility structure. Fixed a critical timestamp parsing bug that had prevented any positions from being loaded.
 
-- **Multi-Wallet Support:**
-  - Enhanced log_extractor.py to support subfolder organization (input/wallet_name/)
-  - Added wallet_id and source_file tracking to Position model
-  - Enabled consolidation of logs from multiple wallets/machines
+**2025-07-02**: Implemented new modules for market correlation and weekend parameter analysis. Developed an interactive HTML reporting system with Plotly charts and optimized the main pipeline for a 3x speed increase.
 
-- **Strategy Instance Detection:**
-  - Implemented automatic grouping of positions into strategy instances
-  - Investment tolerance logic (±0.005 SOL) for distinguishing test variants
-  - Business-defined weighted scoring: avg_pnl_percent(40%) + win_rate(40%) + efficiency metrics(20%)
-  - Generated 19 unique strategy instances from 71 positions in initial test
+**2025-07-02**: Conducted another major refactoring, separating UI and core logic from the main script and HTML generator. Added a user-friendly interactive menu for easier execution of different analysis modes.
 
-- **Performance Analysis Results:**
-  - Top strategy: Bid-Ask MEDIUM 2.21 SOL (3.5% avg PnL, 100% win rate)
-  - Clear performance differentiation across investment amounts and strategies
-  - Successful ranking system identifying optimal configurations
+**2025-07-02**: Rewrote the weekend parameter analysis module with corrected business logic for dual-scenario simulation. Integrated the logic with YAML configuration and fixed associated interactive charts.
 
-- **Enhanced Data Pipeline:**
-  - Backward-compatible CSV structure with automatic column addition
-  - strategy_instance_id assignment for position tracking
-  - Export to strategy_instances.csv with comprehensive metrics
+**2025-07-03**: Stabilized the application post-refactoring by creating a single entry point and implementing error resiliency. Introduced a "cache-only" mode and graceful degradation to handle API failures without crashing the report generation.
 
-**Technical Changes:**
-- extraction/log_extractor.py: Added multi-wallet support and enhanced Position creation
-- models.py: Extended with wallet_id, source_file, and strategy_instance_id fields
-- reporting/strategy_instance_detector.py: Complete implementation with grouping and ranking
-- Enhanced import system for modular architecture
+**2025-07-03**: Implemented a robust deduplication system using a universal_position_id to track and merge positions across multiple, overlapping log files. This enables correct position completion when open/close events are in different files.
 
-**Files Modified:**
-- models.py (enhanced Position class)
-- extraction/log_extractor.py (multi-wallet support)
-- reporting/strategy_instance_detector.py (new module)
-- CLAUDE.md (architecture and progress updates)
+**2025-07-04**: Overhauled the price cache manager with smart gap detection and monthly cache files, reducing redundant API calls by over 70%. The system now distinguishes between API failures and periods with no data to conserve credits.
 
-**Results:** Successfully detected 19 strategy instances with clear performance ranking ✅  
-**Next Steps:** Strategy comparison matrix and daily performance tracking modules
+**2025-07-04**: Standardized all CSV column names across the entire project to eliminate complex and error-prone mapping logic. This refactoring simplified the data pipeline and improved maintainability.
 
-**System Status:** Strategy analytics foundation complete, ready for advanced reporting ✅
+**2025-07-11**: Overhauled the strategy parsing logic with a reverse-search and best-match approach, resolving 99.5% of previous parsing failures. Integrated Take Profit (TP) and Stop Loss (SL) extraction into the data pipeline.
 
-## Current Session (Detailed)
-**2025-06-28: Portfolio Analytics Module Implementation (Session 2)**
+**2025-07-12**: Replaced static charts with five professional, interactive Plotly visualizations in the HTML report. Enhanced the report to include an AVG PnL summary and ensured all charts respect YAML configuration filters.
 
-**Goal:** Build complete portfolio analytics system with infrastructure cost analysis and dual currency metrics
-**Achieved:**
+**2025-07-12**: Addressed several data quality issues by stabilizing the market data pipeline and fixing critical data filtering bugs. Identified the root cause of absurd simulation PnL values as a data corruption issue happening before the simulation step.
 
-- **Portfolio Analytics System Implementation:**
-  - Complete portfolio_analytics.py with dual currency analysis (SOL primary, USDC secondary) ✅
-  - Infrastructure cost analyzer with daily flat allocation ($28.54/month = $0.95/day) ✅
-  - Chart generator with 4 chart types (equity curve, drawdown, strategy heatmap, cost impact) ✅
-  - Main orchestrator with CLI interface and multiple analysis modes ✅
-  - YAML configuration system for costs and parameters ✅
+**2025-07-13**: Refactored the data architecture to fetch market data only once, creating a single source of truth. This eliminated conflicting API calls and resolved a "poisoned cache" issue that caused cascading failures in analysis modules.
 
-- **Robust Data Processing:**
-  - CSV column mapping for positions_to_analyze.csv structure ✅
-  - Custom timestamp parser handling 24:XX:XX format → 00:XX:XX next day ✅
-  - Strategy and step_size extraction from actual_strategy_from_log ✅
-  - Moralis API integration for SOL/USDC historical rates ✅
+**2025-07-15**: Replaced a fragile multi-line parser with a robust single-line approach, resolving all NaN issues for Take Profit and Stop Loss. Implemented "Superseded" logic to correctly close old positions when a new one is started for the same pair.
 
-- **Technical Achievements:**
-  - Fixed critical bugs in metrics calculation (daily_usdc_df → daily_df) ✅
-  - Improved daily return calculation (daily_pnl / capital_base vs pct_change) ✅
-  - Working Moralis endpoint using Raydium SOL/USDC pool ✅
-  - Timestamped output files preventing overwrites ✅
-  - Cost impact overlay on equity curves ✅
+**2025-07-15**: Resolved the "Time Machine" bug by refactoring active position tracking to use the token pair as a unique key. This change, combined with "Superseded" logic, restored data integrity and recovered dozens of lost positions.
 
-- **Chart Generation System:**
-  - Strategy heatmap with step_size parsing from embedded strategy names ✅
-  - Position counts in strategy names (e.g., "Bid-Ask MEDIUM 2.15SOL (13)") ✅
-  - Filter information showing excluded strategies ✅
-  - Fallback to positions-based heatmap when strategy_instances.csv fails ✅
-  - All 4 chart types working: equity curve, drawdown, strategy heatmap, cost impact ✅
 
-**Files Generated:**
-- reporting/config/portfolio_config.yaml ✅
-- reporting/infrastructure_cost_analyzer.py ✅
-- reporting/portfolio_analytics.py ✅
-- reporting/chart_generator.py ✅
-- reporting/portfolio_main.py ✅
+**2025-07-16: Manual Position Filtering for Data Correction**
 
-**Results:** Successfully analyzed 70 positions over 36 days, generated 4 charts and comprehensive reports
-
-**Technical Fixes Applied:**
-- Strategy heatmap CSV parsing: extract step_size from "Bid-Ask (1-Sided) MEDIUM" format ✅
-- Enhanced error handling with dual fallback system ✅
-- Improved subtitle positioning and filter details ✅
-- Cost impact analysis for negative PnL scenarios ✅
-
-**Issues:** Strategy heatmap image orientation - PNG files save rotated 90° clockwise, escalated to Gemini
-**Next Steps:** Complete matplotlib orientation fix, integrate with existing pipeline
-
-**System Status:** 100% functional, production-ready for analysis and reporting ✅
-
-**2025-06-29: Major Refactoring and Stability Fixes**
-**Goal:** Refactor oversized modules for maintainability and fix a critical data loading bug.
-**Achieved:**
-- **Major Refactoring:**
-  - `portfolio_analytics.py` and `chart_generator.py` were refactored into smaller, single-responsibility modules, adhering to the project's 600-line file limit.
-  - New modules created: `data_loader.py`, `metrics_calculator.py`, `text_reporter.py`, and the `visualizations/` directory with its own set of plotting modules.
-  - The project structure is now significantly cleaner, more scalable, and easier to maintain.
-- **Critical Bug Fix:**
-  - Resolved a timestamp parsing issue in `data_loader.py` that caused all 71 positions to be discarded. The logic now correctly handles mixed standard and custom date formats, unblocking the entire analysis pipeline.
-- **Metric Refinement:**
-  - Improved the "Cost Impact %" calculation in `infrastructure_cost_analyzer.py` to correctly handle cases with negative Gross PnL, providing more intuitive results in all scenarios.
-**System Status:** Portfolio Analytics v1.1 - Stable and Refactored. ✅
-
-**2025-07-02: Market Correlation & Weekend Analysis Implementation (Session 3)**
-
-**Goal:** Complete reporting module with market correlation analysis, weekend parameter optimization, and comprehensive HTML reporting system.
+**Goal:** Implement a mechanism to manually exclude specific positions from the analysis pipeline to handle known data errors in source logs.
 
 **Achieved:**
-
-- **Market Correlation Analysis Module:**
-  - Complete `market_correlation_analyzer.py` with Pearson correlation analysis ✅
-  - EMA 50 slope-based trend detection (3-day slope, 0.1% threshold) ✅
-  - SOL market trend segmentation (uptrend vs downtrend performance) ✅
-  - Statistical significance testing with confidence intervals ✅
-  - Moralis API integration for SOL/USDC price data ✅
-
-- **Weekend Parameter Analysis Module:**
-  - Complete `weekend_parameter_analyzer.py` with weekendSizePercentage simulation ✅
-  - 5x position scaling logic (weekend positions enlarged, weekday reduced) ✅
-  - UTC weekend classification (Saturday-Sunday) ✅
-  - Performance comparison with ENABLE/DISABLE recommendations ✅
-  - Comprehensive metrics analysis (PnL, ROI, Win Rate, Sharpe) ✅
-
-- **Interactive HTML Report System:**
-  - Complete `html_report_generator.py` with Plotly interactive charts ✅
-  - Professional HTML template with embedded visualizations ✅
-  - Comprehensive report combining all analysis modules ✅
-  - Executive summary with key metrics and recommendations ✅
-  - Pure Python implementation (Jinja2 + Plotly, no external dependencies) ✅
-
-- **Portfolio Main Optimization:**
-  - Major performance optimization: CSV loaded only once in comprehensive analysis ✅
-  - New CLI modes: `--correlation`, `--weekend`, `--comprehensive` ✅
-  - Enhanced error handling and backward compatibility ✅
-  - Configuration-driven risk-free rates (no hardcoded values) ✅
-  - Refactored methods integration with `metrics_calculator.py` modules ✅
-
-**Technical Achievements:**
-- **Performance Optimization**: 3x faster comprehensive analysis (single CSV load) ✅
-- **Custom Timestamp Handling**: integrated SOL Decoder format parsing (`MM/DD-HH:MM:SS`) ✅
-- **Column Mapping**: automatic CSV structure adaptation (`final_pnl_sol_from_log` → `pnl_sol`) ✅
-- **Gemini Code Review**: implementation received "very high quality" rating with 100% compliance ✅
-
-**Files Generated:**
-- reporting/market_correlation_analyzer.py (300 lines) ✅
-- reporting/weekend_parameter_analyzer.py (280 lines) ✅  
-- reporting/html_report_generator.py (450 lines) ✅
-- reporting/portfolio_main.py (enhanced with new modules) ✅
-
-**Integration Results:**
-- **Test Analysis**: 70 positions over 36 days successfully processed ✅
-- **Performance Metrics**: 85.7% win rate, -0.861 SOL PnL, 20.9% infrastructure cost impact ✅
-- **Files Generated**: 2 text reports + 4 PNG charts in 1.6 seconds ✅
-- **New CLI Modes**: All analysis types working (correlation, weekend, comprehensive) ✅
-
-**Business Insights Enabled:**
-- **Market Correlation**: SOL trend impact on LP strategy performance ✅
-- **Weekend Parameter**: Data-driven weekendSizePercentage optimization ✅
-- **Infrastructure Costs**: Significant 20.9% impact identified and quantified ✅
-- **Comprehensive Analysis**: All modules working together seamlessly ✅
-
-**2025-07-02: Major Refactoring and UI Enhancement**
-
-**Goal:** Refactor oversized modules (`portfolio_main.py`, `html_report_generator.py`) to adhere to project standards and add an interactive user menu for ease of use.
-**Achieved:**
-
-- **Major Refactoring (Code Modularity):**
-  - `html_report_generator.py` was refactored by extracting its large HTML template into `reporting/templates/comprehensive_report.html` and moving all Plotly chart creation logic to a new, dedicated module: `reporting/visualizations/interactive_charts.py`. This significantly improved maintainability.
-  - `portfolio_main.py` was split into two distinct files, separating the user interface from the core logic:
-    - `orchestrator.py`: Now contains the `PortfolioAnalysisOrchestrator` class, serving as the pure logic engine for the analysis workflow.
-    - `portfolio_main.py`: Re-created as the main command-line entry point, featuring an interactive menu and argument parsing. It now imports and uses the `PortfolioAnalysisOrchestrator`.
-
-- **UI Enhancement (Interactive Menu):**
-  - Implemented a user-friendly interactive menu in the new `portfolio_main.py`. This allows users to select analysis modes (comprehensive, quick, period-specific) without needing to memorize command-line arguments, improving accessibility.
-  - Retained the command-line argument functionality for automation and power-user workflows.
-
-- **Improved Project Structure:**
-  - The overall project structure is now cleaner and more aligned with the single-responsibility principle. The new files fit logically within the established directory layout (`templates/`, `visualizations/`).
-
-**2025-07-02: Weekend Parameter Analysis v2.1 - Final Implementation**
-
-**Goal:** Implement correct weekend parameter analysis logic with proper business assumptions and YAML configuration.
-
-**Achieved:**
-
-- **Corrected Business Logic:**
-  - **CSV Data Interpretation**: CSV always represents actual positions (regardless of weekend_size_reduction config) ✅
-  - **Dual Scenario Simulation**: 
-    - `weekend_size_reduction=1`: CSV has reduced weekend positions → simulate enlarged for comparison ✅
-    - `weekend_size_reduction=0`: CSV has normal positions → simulate reduced for comparison ✅
-  - **Weekend Position Focus**: Only positions opened during weekend (Sat/Sun UTC) are affected by simulation ✅
-  - **Weekday Positions**: Remain identical in both scenarios (no changes) ✅
-
-- **YAML Configuration Enhancement:**
-  - **Enhanced Configuration**: `weekend_analysis` section in `portfolio_config.yaml` ✅
-  - **Skip Logic**: `size_reduction_percentage: 0` = no analysis ✅
-  - **Business Documentation**: Clear comments explaining assumptions and logic ✅
-
-- **Orchestrator Integration:**
-  - **Skip Logic**: Moved from analyzer to orchestrator for better workflow control ✅
-  - **Enhanced Logging**: Proper warning and info messages for skipped analysis ✅
-  - **Error Handling**: Graceful handling of skipped analysis in HTML reports ✅
-
-- **Interactive Charts Fix:**
-  - **Key Mapping Update**: Fixed `original_scenario` → `current_scenario` mapping ✅
-  - **Removed Win Rate**: Eliminated win_rate from weekend analysis charts (business requirement) ✅
-  - **Dynamic Scenario Names**: Charts now use actual scenario names from analysis ✅
-  - **Skip Handling**: Proper display when analysis is skipped ✅
-
-**Technical Changes:**
-- **weekend_parameter_analyzer.py**: Complete rewrite with correct simulation logic ✅
-- **orchestrator.py**: Added `_should_skip_weekend_analysis()` and enhanced workflow ✅
-- **interactive_charts.py**: Fixed key mapping and removed win_rate from weekend charts ✅
-- **portfolio_config.yaml**: Added comprehensive weekend_analysis configuration ✅
-
-**Business Validation:**
-- **Test Results**: KEEP_DISABLED recommendation with -0.565 SOL impact ✅
-- **Scenario Names**: "ENABLED (80% weekend reduction)" vs "DISABLED (normal weekend sizes)" ✅
-- **Proper Metrics**: Focus on PnL, ROI, and Sharpe ratio (no win_rate) ✅
-
-**Files Modified:**
-- reporting/config/portfolio_config.yaml (enhanced with weekend_analysis section)
-- reporting/weekend_parameter_analyzer.py (complete rewrite)
-- reporting/orchestrator.py (skip logic and enhanced workflow)
-- reporting/visualizations/interactive_charts.py (fixed key mapping and charts)
-
-**System Status:** Weekend Parameter Analysis v2.1 - Fully Functional and Business-Correct ✅
-
-**Ready for Next Priority:** TP/SL Optimization Module - ML-driven take profit and stop loss level optimization 🚀
-
-**2025-07-03: Post-Refactoring Stabilization & Error Resiliency**
-
-**Goal:** Fully stabilize the application after a major architectural refactoring, ensure correct data flow, and implement error resiliency mechanisms for missing API data.
-
-**Achieved:**
-- **Centralized Architecture:** Refactored the application to use `main.py` as the single entry point with an interactive menu, orchestrating the entire analysis pipeline.
-- **Fixed API Access:** Implemented a dependency injection pattern for the Moralis API key, eliminating `401 Unauthorized` errors and stabilizing connections.
-- **Implemented "Cache-Only" Mode:** Added an `api_settings.cache_only` option in `portfolio_config.yaml`, allowing the application to run entirely from cached data for testing and saving API credits.
-- **Restored Full Analysis Pipeline:** Reintegrated the previously omitted `strategy_instance_detector` module into the main workflow, ensuring the `strategy_instances.csv` file is generated correctly.
-- **Implemented "Graceful Degradation":**
-  - The reporting module (`html_report_generator`, `interactive_charts`) is now resilient to failures caused by missing data (e.g., market correlation analysis in cache-only mode).
-  - Instead of a crash, the application now successfully generates the full HTML report, displaying "Data Unavailable" messages in sections where analysis could not be completed.
-- **Unified User Interface:** Translated all UI elements and prompts in `main.py` to English, adhering to the project's critical rules.
-
-**Status:** Architecture stabilized. The application is fully functional, robust, and resilient to common errors from missing cache data. It is ready for further development. ✅
-
-**2025-07-03: Enhanced Deduplication & Cross-File Position Tracking**
-
-**Goal:** Implement robust position deduplication system to handle overlapping log files and cross-file position tracking.
-
-**Achieved:**
-
-- **Universal Position Identification:**
-  - Implemented `universal_position_id` property in Position model using `pool_address + open_timestamp` ✅
-  - Added `is_position_complete()` method to detect incomplete vs complete positions ✅
-  - Enhanced validation to require `pool_address` as mandatory field ✅
-
-- **Enhanced Deduplication Logic:**
-  - **Cross-file position tracking**: Positions can open in one file and close in another ✅
-  - **Intelligent update system**: Incomplete positions (`active_at_log_end`) are updated with complete data ✅
-  - **Duplicate prevention**: True duplicates are skipped, avoiding data pollution ✅
-  - **Chronological processing**: Files sorted alphabetically for consistent event sequencing ✅
-
-- **Improved Processing Pipeline:**
-  - Enhanced CSV merge logic with filtered existing data to prevent conflicts ✅
-  - Detailed logging of processing statistics (new/updated/skipped positions) ✅
-  - Robust error handling for positions missing critical identifiers ✅
-
-**Technical Implementation:**
-- **models.py**: Added `universal_position_id` property and `is_position_complete()` method
-- **log_extractor.py**: Complete rewrite of deduplication logic in `run_extraction()` function
-- **File processing**: Alphabetical sorting in both main directory and subdirectories
+- **Manual Skip Functionality:** Implemented logic in `log_extractor.py` to read a new file, `positions_to_skip.csv`.
+- **Targeted Filtering:** The system now loads a set of `position_id`s from this file and filters them out from the extracted data before writing the final `positions_to_analyze.csv`.
+- **Robust Implementation:** The feature is designed to be fault-tolerant. If `positions_to_skip.csv` is missing or contains errors, the extraction process continues without manual filtering, logging an appropriate message.
+- **Clear Logging:** Added logs to indicate when the skip file is loaded and how many positions are manually excluded, ensuring transparency in the data processing pipeline.
 
 **Business Impact:**
-- **Eliminates duplicate positions** from overlapping log files
-- **Enables cross-file position tracking** for positions spanning multiple logs  
-- **Provides position completion** when close events appear in different files
-- **Maintains data integrity** through intelligent update/skip logic
-
-**Test Results:** Successfully processed overlapping log files with proper deduplication and position completion ✅
+- Provides a crucial "escape hatch" for data quality issues originating from the bot's logs that cannot be fixed programmatically.
+- Increases the reliability of the final analysis by allowing for the manual removal of erroneous data points (e.g., positions with absurd PnL values due to log corruption).
 
 **Files Modified:**
-- core/models.py (enhanced Position class with universal identification)
-- extraction/log_extractor.py (complete deduplication logic rewrite)
+- `extraction/log_extractor.py` (added filtering logic)
+- `CLAUDE.md` (documentation update)
 
-**System Status:** Enhanced Deduplication v1.0 - Production Ready ✅
+**System Status:** Manual data correction feature is stable and ready for use. ✅
 
-**2025-07-04: Smart Price Cache & API Failure Handling (Session 4)**
+**2025-07-15: Architectural Refactoring for True Offline Analysis**
+Goal: Resolve a critical architectural flaw where multiple parts of the pipeline (simulations, reporting) were independently attempting to fetch data, leading to uncontrolled API credit usage and bypassing the cache, even on subsequent runs.
+Achieved:
+Centralized Data Fetching: Implemented a new, single function run_all_data_fetching in main.py which is now the only point of contact with the Moralis API. It populates the cache for both per-position price histories (for simulations) and daily SOL/USDC rates (for reporting).
+True Offline Mode Enforcement: Refactored the entire pipeline (main_menu, run_full_pipeline) to ensure that all analysis and simulation steps (run_spot_vs_bidask_analysis, PortfolioAnalysisOrchestrator) are executed explicitly without an API key, forcing them to rely 100% on pre-populated cache.
+Controlled API Usage (Safety Valve): The central data-fetching step now includes a one-time "Go/No-Go" prompt that asks the user for confirmation before initiating any online activity, providing full control over API credit expenditure.
+Critical Bug Fix: Corrected a faulty guard clause in PortfolioAnalysisOrchestrator that incorrectly prevented it from running in cache-only mode.
+Elimination of "Two Brains": Removed all rogue data-fetching logic and incorrect "safety valve" prompts from downstream modules (analysis_runner.py), ensuring a single, predictable data flow.
+Business Impact:
+Eliminated Uncontrolled API Spending: The system no longer makes unexpected API calls during analysis or simulation, guaranteeing cost control.
+Improved Pipeline Reliability: The clear separation between a single "online" fetching phase and multiple "offline" analysis phases makes the system's behavior predictable, robust, and easier to debug.
+Enhanced User Control: The "Safety Valve" gives the user a clear, decisive moment to authorize or prevent potential costs.
+Files Modified:
+main.py (major architectural changes, new central fetching function)
+reporting/orchestrator.py (bug fix for cache-only mode)
+reporting/analysis_runner.py (cleanup of redundant logic)
+CLAUDE.md (documentation update)
+System Status: Architecture is now stable with a clear online/offline separation. The root cause of uncontrolled API calls has been resolved. ✅
 
-**Goal:** Implement intelligent price cache management with proper API failure handling and smart placeholder logic.
+**2025-07-16: Resolving Cascading Data Errors & Pipeline Stabilization**
+
+**Goal:** Diagnose and resolve a series of critical data integrity issues that emerged after major architectural refactoring, including timestamp errors, `KeyError`s, and inverted PnL values that corrupted the final analytics.
+
+**Problem Diagnosis & Resolution Steps:**
+
+1.  **Timestamp Type Mismatch (`FATAL DATA ERROR`):**
+    *   **Symptom:** The `analysis_runner` was rejecting most positions because it received timestamps as strings instead of `datetime` objects.
+    *   **Root Cause:** Analysis steps were reading `positions_to_analyze.csv` with `pd.read_csv` but were not applying the centralized timestamp parsing logic from `data_loader.py`.
+    *   **Fix:** Modified `main.py` to ensure that any function reading `positions_to_analyze.csv` immediately uses the project's standard data loading and cleaning functions (`load_and_prepare_positions`), guaranteeing correct data types throughout the pipeline.
+
+2.  **Heatmap Generation Failure (`KeyError: 'initial_investment'`):**
+    *   **Symptom:** The strategy heatmap chart failed to generate, throwing a `KeyError`.
+    *   **Root Cause:** The visualization code in `strategy_heatmap.py` was still referencing the old column name (`initial_investment`) instead of the project's standardized name (`investment_sol`).
+    *   **Fix:** Updated the column name in `strategy_heatmap.py` to align with the unified naming system, resolving the error.
+
+3.  **Critical Data Corruption (Inverted PnL & "Equity Curve Cliff"):**
+    *   **Symptom:** After fixing the initial errors, the final report showed dramatically incorrect metrics: `Net PnL` flipped from positive to negative, and the equity curve chart showed a sharp, unrealistic drop after June 22nd.
+    *   **Root Cause:** The analysis was being performed on a **stale and corrupted `positions_to_analyze.csv` file**. This artifact was a leftover from a previous, faulty run of the log parser, which had incorrectly calculated PnL for some positions. Subsequent fixes in the code were not reflected in this "poisoned" intermediate file.
+    *   **Resolution (The "Healing Pipeline"):** Running the full pipeline from Step 1 (`run_extraction`) forced the system to **overwrite the stale CSV with a fresh, correctly parsed version** based on the latest, stable code. This single action purged the corrupted data and restored the integrity of all subsequent calculations and visualizations.
+
+**Key Insight:** This session highlighted the critical importance of data lineage. When a parser or data generation step is fixed, it is crucial to re-run the entire pipeline from the beginning to ensure all downstream artifacts are regenerated and free of legacy errors.
+
+**Files Modified:**
+- `main.py` (to enforce centralized data cleaning)
+- `reporting/visualizations/strategy_heatmap.py` (to fix `KeyError`)
+- `reporting/analysis_runner.py` (to strengthen data validation)
+
+**System Status:** The data pipeline is now stable and robust. All identified data corruption issues have been resolved. The system correctly handles offline analysis based on a reliably generated central data artifact. ✅
+
+**2025-07-16: Manual Position Filtering for Data Correction**
+
+**Goal:** Implement a mechanism to manually exclude specific positions from the analysis pipeline to handle known data errors in source logs.
 
 **Achieved:**
-
-- **Smart Cache Management v2.0:**
-  - Complete rewrite of `price_cache_manager.py` with intelligent gap detection ✅
-  - Monthly cache files (`pool_timeframe_YYYY-MM.json`) with incremental updates ✅
-  - Smart gap detection: system identifies missing periods and fetches only required data ✅
-  - Multi-month support: automatically splits requests across month boundaries ✅
-  - Eliminated wasteful API calls: cache utilization improved from 0% to 95%+ ✅
-
-- **API Failure vs No Data Distinction:**
-  - **API Success + Empty Data**: Creates forward-filled placeholders, marks as "checked" ✅
-  - **API Failure (401/timeout)**: Skips placeholder creation, enables retry tomorrow ✅
-  - **Smart placeholder logic**: Only fills verified empty periods, not API failures ✅
-  - **Cross-API-failure safety**: Preserves API credits while maintaining data integrity ✅
-
-- **Cache Architecture Enhancement:**
-  - **Gap detection logic**: `_find_data_gaps()` with intelligent timestamp comparison ✅
-  - **Coverage-based detection**: For 1h/4h timeframes, only fetches major gaps (>24h threshold) ✅
-  - **Incremental merging**: `_merge_and_save()` with deduplication and chronological sorting ✅
-  - **Error resilience**: Graceful handling of corrupted cache files and API failures ✅
-
-**Technical Implementation:**
-- **reporting/price_cache_manager.py**: Complete rewrite with smart gap detection
-- **Cache strategy**: Monthly files with intelligent gap filling and merge capabilities
-- **API optimization**: Reduced API calls by 70%+ through intelligent caching
-- **Forward fill logic**: Placeholder creation only for verified empty periods
+- **Manual Skip Functionality:** Implemented logic in `log_extractor.py` to read a new file, `positions_to_skip.csv`.
+- **Targeted Filtering:** The system now loads a set of `position_id`s from this file and filters them out from the extracted data before writing the final `positions_to_analyze.csv`.
+- **Robust Implementation:** The feature is designed to be fault-tolerant. If `positions_to_skip.csv` is missing or contains errors, the extraction process continues without manual filtering, logging an appropriate message.
+- **Clear Logging:** Added logs to indicate when the skip file is loaded and how many positions are manually excluded, ensuring transparency in the data processing pipeline.
 
 **Business Impact:**
-- **API Credit Conservation**: System no longer wastes credits on redundant requests ✅
-- **Reliable Data Pipeline**: Handles weekends/holidays vs API failures correctly ✅
-- **Automatic Recovery**: Failed API requests retry automatically on subsequent runs ✅
-- **Performance Enhancement**: Cache hit rate improved from 0% to 95%+ ✅
-
-**Test Results:** 
-- Previous: 70% API credits wasted on redundant weekend requests
-- Current: 0% wasted calls, intelligent retry logic for genuine API failures ✅
+- Provides a crucial "escape hatch" for data quality issues originating from the bot's logs that cannot be fixed programmatically.
+- Increases the reliability of the final analysis by allowing for the manual removal of erroneous data points (e.g., positions with absurd PnL values due to log corruption).
 
 **Files Modified:**
-- reporting/price_cache_manager.py (complete rewrite with smart gap detection)
-- reporting/analysis_runner.py (integration with new cache manager)
-- main.py (added SOL/USDC rate fetching menu option)
+- `extraction/log_extractor.py` (added filtering logic)
+- `CLAUDE.md` (documentation update)
 
-**System Status:** Smart Price Cache v2.0 - Production Ready ✅
+**System Status:** Manual data correction feature is stable and ready for use. ✅
 
-**2025-07-04: Column Name Standardization & Mapping Elimination (Session 4 Continued)**
+**2025-07-17: Critical Debugging: Resolving Unrealistic Max Drawdown Values**
 
-**Goal:** Eliminate column name mapping chaos and standardize on clean names throughout entire codebase.
+**Goal:** To diagnose and fix a bug that was causing absurd, financially impossible values for the Max Drawdown metric (e.g., -15,000%) in generated reports.
+
+**Diagnosis and Resolution Steps:**
+- Initial Hypothesis (Rejected): The first assumption was that the issue stemmed from the fundamental instability of the (PnL - Peak) / Peak formula, especially with small peak PnL values.
+- User's Key Insight: The user correctly identified that the problem was not the formula itself but a multiplication error. A comparison between the chart value (-146%) and the table value (-14,600%) pointed directly to a double-multiplication bug.
+- Root Cause Identified: It was confirmed that the functions in metrics_calculator.py were incorrectly multiplying the final drawdown result by 100, effectively returning a percentage value. The reporting layer then formatted this number again as a percentage (:.2%), which caused the value to explode.
+
+**Implemented Fix:**
+The erroneous * 100 multiplication was removed from the calculate_sol_metrics and calculate_usdc_metrics functions in metrics_calculator.py. These functions now correctly return a raw decimal value (e.g., -1.46) ready for UI formatting.
+The logic in the chart generation files (drawdown.py, interactive_charts.py) was confirmed to be correct and was left unchanged, as it needs to scale the Y-axis to a percentage.
+For improved clarity, the metric's label in the KPI table was updated to "Max PnL Drawdown" as per the user's suggestion.
+
+**Business Impact:**
+- Restored credibility to a key risk metric in all reports by eliminating misleading and incorrect data.
+- Ensured consistency in the calculation and presentation of financial metrics across the application.
+
+**Files Modified:**
+- reporting/metrics_calculator.py
+- reporting/visualizations/interactive_charts.py
+- System Status: The Max Drawdown metric is now stable and reliable. ✅
+
+**2025-07-18: Market Trend Visualization & Report Simplification**
+
+**Goal:** Enhance the market trend analysis section with a more intuitive visualization of the EMA-based trend logic, and simplify the report by removing redundant or less valuable charts.
 
 **Achieved:**
-
-- **Root Cause Analysis:**
-  - Identified "accidental complexity" from CSV position-based → name-based transition ✅
-  - Discovered three different naming systems causing KeyError chaos across modules ✅
-  - Mapped complete scope: 119 mapped names vs 12 original names in codebase ✅
-
-- **Plan A Implementation - Column Name Cleanup:**
-  - **Eliminated mapping logic**: Removed all column mapping from `data_loader.py` ✅
-  - **Standardized CSV generation**: Updated `models.py` to generate clean headers ✅
-  - **Automated cleanup**: Created `fix_column_names.py` utility for safe bulk replacement ✅
-  - **System-wide replacement**: 7 files modified, 0 old names remaining ✅
-
-- **Clean Naming Standard Established:**
-  - `investment_sol` (not `initial_investment_sol`) - 8 characters shorter ✅
-  - `pnl_sol` (not `final_pnl_sol_from_log`) - 15 characters shorter ✅
-  - `strategy_raw` (not `actual_strategy_from_log`) - 12 characters shorter ✅
-
-- **Architecture Simplification:**
-  - **Before**: CSV → mapping → code (3 naming systems, chaos) ❌
-  - **After**: CSV → code (1 naming system, clarity) ✅
-  - **Zero mapping overhead**: Direct header → code usage ✅
-  - **Single source of truth**: Consistent names across entire pipeline ✅
-
-**Technical Implementation:**
-- **tools/fix_column_names.py**: Safe bulk replacement utility with verification ✅
-- **core/models.py**: Updated CSV generation to use clean column names ✅
-- **reporting/data_loader.py**: Removed all mapping logic, direct column access ✅
-- **Verification**: 0 old names remaining, 126 clean names throughout codebase ✅
-
-**Business Impact:**
-- **Eliminated accidental complexity**: No more mapping overhead or KeyError debugging ✅
-- **Improved maintainability**: Single source of truth for column names ✅
-- **Enhanced developer experience**: Clear, predictable naming throughout codebase ✅
-- **Future-proof architecture**: New columns automatically use clean names ✅
-
-**Test Results:**
-- **Pipeline verification**: Complete pipeline runs without KeyError crashes ✅
-- **CSV header verification**: Clean names in generated CSV files ✅
-- **Code verification**: 0 old names, 126 clean names across 30 Python files ✅
+- **Visual Trend Indicator Chart:** Implemented a new, interactive chart in the Market Correlation section that plots the SOL price against its 50-period EMA.
+  - The EMA line is **dynamically colored** (green for uptrend, red for downtrend) to provide an intuitive, visual confirmation of the trend detection logic used in the analysis.
+  - This makes it much easier to understand *why* certain days are classified as uptrend or downtrend.
+- **Unified Trend Colors:** Standardized the color scheme across all three trend-based bar charts (`Avg Return`, `Win Rate`, `Days Count`) to consistently represent uptrends (green) and downtrends (red), improving readability and at-a-glance comprehension.
+- **Simplified Weekend Analysis:** Streamlined the `Weekend Parameter Impact Comparison` chart by removing the 'Sharpe Ratio' metric. This focuses the analysis on the more direct impact on `Total PnL` and `Average ROI (%)`.
+- **Report Decluttering:** Completely removed the 'Legacy Strategy Heatmap (Fallback)' section and its corresponding generation logic. This declutters the final report and eliminates a redundant visualization, making the primary `Strategy Performance Summary` the single source of truth.
 
 **Files Modified:**
-- tools/fix_column_names.py (new utility)
-- core/models.py (clean CSV generation)
-- reporting/data_loader.py (mapping elimination)
-- Plus 4 other files with automatic name standardization
+- `reporting/visualizations/interactive_charts.py`
+- `reporting/html_report_generator.py`
+- `reporting/templates/comprehensive_report.html`
 
-**System Status:** Column Name Standardization v1.0 - Complete Success ✅
+**System Status:** Report visualizations are enhanced and simplified. All changes are stable. ✅
 
-## Session Summary
+**2025-07-19: Refactoring of Interactive Chart Module**
 
-**2025-07-04 Sessions 4-5: Cache Optimization & Architecture Cleanup**
+**Goal:** To refactor the oversized `interactive_charts.py` file (over 800 lines) into smaller, thematic modules to improve maintainability, and to remove obsolete chart functions, adhering to the project's 600-line file limit convention.
 
-**Major Achievements:**
-1. **Smart Price Cache v2.0**: Eliminated 70% API waste, intelligent gap detection ✅
-2. **API Failure Handling**: Proper distinction between no-data vs API-failure ✅
-3. **Column Name Standardization**: Eliminated mapping chaos, unified naming ✅
-4. **Architecture Simplification**: Zero accidental complexity, clean codebase ✅
+**Achieved:**
+- **Decomposition:** The monolithic `interactive_charts.py` was successfully decomposed into four new, specialized modules: `portfolio_charts.py`, `strategy_charts.py`, `market_charts.py`, and `simulation_charts.py`.
+- **New Structure:** A new directory `reporting/visualizations/interactive/` was created to house the new modules, improving project organization.
+- **Simplified Interface:** An `__init__.py` file was added to the new directory to re-export all chart functions, ensuring that the consuming `html_report_generator.py` only required a minimal import path change and no changes to its function calls.
+- **Code Pruning:** Two obsolete and unused functions (`create_equity_curve_chart`, `create_strategy_heatmap_chart`) were identified and completely removed, reducing dead code.
+- **Pipeline Consistency:** All related files (`html_report_generator.py`, `comprehensive_report.html`) were updated to reflect the new structure and removal of old functions.
 
-**Key Metrics:**
-- **API Efficiency**: Improved from 0% cache hit rate to 95%+ ✅
-- **Naming Cleanup**: 119 mapped names → 126 clean names, 0 old names remaining ✅
-- **Error Elimination**: KeyError crashes eliminated through column standardization ✅
-- **Maintainability**: Single source of truth for all naming throughout pipeline ✅
+**Business Impact:**
+- **Improved Maintainability:** Developers can now quickly locate and modify a specific chart's logic without navigating a massive file.
+- **Enhanced Readability:** The smaller, focused modules are easier to understand and debug.
+- **Adherence to Conventions:** The project now complies with the established 600-line file limit rule, ensuring long-term code health.
 
-**Business Value:**
-- **Cost Reduction**: 70% fewer API calls through intelligent caching ✅
-- **Reliability**: Robust API failure handling prevents data corruption ✅
-- **Developer Experience**: Clean, predictable naming eliminates debugging overhead ✅
-- **Future-Proof**: Simplified architecture ready for advanced features ✅
+**Files Modified/Created/Deleted:**
+- **Deleted:** `reporting/visualizations/interactive_charts.py`
+- **Created:** `reporting/visualizations/interactive/` (and all 5 files within)
+- **Modified:** `reporting/html_report_generator.py`, `reporting/templates/comprehensive_report.html`, `CLAUDE.md`
 
-**System Status:** v4.0 - Smart Cache & Clean Architecture - Production Ready ✅
-**Ready for Next Priority:** TP/SL Optimization Module & ML-driven analytics 🚀
+**System Status:** Refactoring is complete. The new modular chart generation system is stable and operational. ✅
+
+**2025-07-17: Critical Data Fix: Resolving Gaps in SOL/USDC Market Price Data**
+
+**Goal:** To diagnose and permanently fix missing data points for SOL/USDC market prices (specifically for July 5th, 8th, and 9th), which were causing a flat line in the EMA trend chart and visual gaps in other analytics.
+
+**Diagnosis and Resolution Steps:**
+
+1.  **Symptom & Initial Feature (Cache Repair Mechanism):** The initial symptom was incomplete charts. The first step was to build a "cache repair" mechanism, assuming the cache had stored empty data from a previous API failure. This involved:
+    *   Implementing a `force_refetch` flag in `price_cache_manager.py` to ignore existing placeholders.
+    *   Adding a user-facing sub-menu in `main.py` under "Step 3: Fetch/Update Data", giving the user full control to trigger a standard fetch, a full force refetch, or a targeted refetch for SOL/USDC data only.
+    *   Propagating the `force_refetch` flag through `analysis_runner.py` and `infrastructure_cost_analyzer.py` to ensure it reaches the cache manager.
+
+2.  **Root Cause Identification:** When the new `force_refetch` mode still failed to retrieve data, it became clear the problem wasn't the cache, but the API query itself. Using a diagnostic script (`tools/debug_sol_price_fetcher.py`) and user-provided documentation, we identified the root cause: the system was querying the wrong asset address for market-wide SOL/USDC prices. It was using a specific, low-liquidity pool address instead of a canonical, high-liquidity pair address recognized by the API.
+
+3.  **Verification & Final Fix:** The diagnostic script confirmed that the Raydium USDC/SOL pair address (`83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d`) returned a complete dataset. The final fix was to update `infrastructure_cost_analyzer.py` to use this correct, hardcoded pair address for all SOL/USDC price history requests.
+
+**Key Outcomes:**
+- The SOL/USDC market data pipeline is now robust and fetches complete, accurate historical data, resolving the core issue of missing data points.
+- The EMA Trend indicator chart now displays correctly without flat-lining.
+- The project now has a powerful, user-controlled cache repair mechanism to handle potential future API data inconsistencies without code changes.
+
+**Files Modified:**
+- `main.py` (added data fetching sub-menu and logic for `refetch_mode`)
+- `price_cache_manager.py` (implemented core `force_refetch` logic)
+- `reporting/analysis_runner.py` (updated to accept and pass the `force_refetch` flag)
+- `reporting/infrastructure_cost_analyzer.py` (updated to use the correct SOL/USDC pair address and pass the `force_refetch` flag; removed rogue `basicConfig` call)
+
+**System Status:** The market data pipeline is now stable, and the data integrity issue is fully resolved. ✅

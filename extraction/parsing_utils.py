@@ -1,14 +1,65 @@
 import re
 import logging
 from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+import pandas as pd
 
 # Get logger
 logger = logging.getLogger('ParsingUtils')
 
 
+def _parse_custom_timestamp(ts_str: str) -> Optional[datetime]:
+    """
+    Parse non-standard timestamps like "MM/DD-HH:MM:SS" into datetime objects.
+    Handles the "24:XX" hour format by rolling over to the next day.
+    """
+    if not isinstance(ts_str, str) or not ts_str:
+        return None
+
+    try:
+        # Format: "05/12-20:57:08" -> "2025-05-12 20:57:08"
+        date_part, time_part = ts_str.split('-')
+        month, day = date_part.split('/')
+
+        hour, minute, second = time_part.split(':')
+        hour = int(hour)
+
+        # Assume current year
+        current_year = datetime.now().year
+        base_date = datetime(current_year, int(month), int(day))
+
+        # Handle hour 24 as next day hour 0
+        if hour >= 24:
+            hour = hour - 24
+            base_date = base_date + timedelta(days=1)
+
+        final_datetime = base_date.replace(hour=hour, minute=int(minute), second=int(second))
+        return final_datetime
+
+    except (ValueError, IndexError) as e:
+        logger.warning(f"Failed to parse custom timestamp '{ts_str}': {e}")
+        return None
+
+
 def clean_ansi(text: str) -> str:
-    """Remove ANSI escape sequences from text."""
-    return re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    """Remove ANSI escape sequences, emoji, and other problematic Unicode characters."""
+    if not text:
+        return text
+    
+    # Remove ANSI escape sequences
+    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    
+    # Remove emoji and other problematic Unicode characters
+    text = re.sub(r'[\U0001F600-\U0001F64F]', '', text)  # Emoticons
+    text = re.sub(r'[\U0001F300-\U0001F5FF]', '', text)  # Symbols & pictographs
+    text = re.sub(r'[\U0001F680-\U0001F6FF]', '', text)  # Transport & map symbols
+    text = re.sub(r'[\U0001F1E0-\U0001F1FF]', '', text)  # Flags (iOS)
+    text = re.sub(r'[\U00002600-\U000027BF]', '', text)  # Miscellaneous symbols
+    text = re.sub(r'[\U0001f900-\U0001f9ff]', '', text)  # Supplemental Symbols and Pictographs
+    text = re.sub(r'[\U00002700-\U000027bf]', '', text)  # Dingbats
+    text = re.sub(r'[\u200b-\u200d\ufeff]', '', text)  # Zero-width spaces and BOM
+    
+    return text.strip()
 
 
 def find_context_value(patterns: List[str], lines: List[str], start_index: int, lookback: int) -> Optional[str]:
@@ -48,19 +99,19 @@ def normalize_token_pair(text: Optional[str]) -> Optional[str]:
     return match.group(1).strip() if match else None
 
 
-def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabled: bool = False) -> str:
+def extract_close_timestamp(lines: List[str], close_line_index: int, open_line_index: int, debug_enabled: bool = False) -> str:
     """
-    Extract timestamp from close event context.
+    Extract timestamp from close event context, respecting the open_line_index boundary.
     
     Args:
         lines: All log lines
         close_line_index: Line index where close was detected
+        open_line_index: Line index where the position was opened. This is a hard boundary.
         debug_enabled: Whether debug logging is enabled
         
     Returns:
         Timestamp string or "UNKNOWN" if not found
     """
-    # Try to extract timestamp from close line itself
     close_line = clean_ansi(lines[close_line_index])
     timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', close_line)
     if timestamp_match:
@@ -68,11 +119,14 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
             logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from close line {close_line_index + 1}")
         return timestamp_match.group(1)
     
-    # Look for timestamp in nearby lines (prefer lines before close)
-    search_range = 10  # Look 10 lines before and after
+    search_range = 25
     
-    # First search backwards (more likely to have relevant timestamp)
-    for i in range(close_line_index - 1, max(-1, close_line_index - search_range), -1):
+    # Search backwards, but not past the line where the position was opened.
+    # This hard boundary is the definitive fix for the "Time Machine" problem.
+    start_search = close_line_index - 1
+    end_search = max(open_line_index, close_line_index - search_range)
+
+    for i in range(start_search, end_search, -1):
         line = clean_ansi(lines[i])
         timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line)
         if timestamp_match:
@@ -80,7 +134,7 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
                 logger.debug(f"Found close timestamp '{timestamp_match.group(1)}' from context line {i + 1} (backward search)")
             return timestamp_match.group(1)
     
-    # Then search forward if nothing found backward
+    # Forward search remains a useful fallback.
     for i in range(close_line_index + 1, min(len(lines), close_line_index + search_range)):
         line = clean_ansi(lines[i])
         timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line)
@@ -90,169 +144,73 @@ def extract_close_timestamp(lines: List[str], close_line_index: int, debug_enabl
             return timestamp_match.group(1)
     
     if debug_enabled:
-        logger.debug(f"No timestamp found in {search_range} lines around close at line {close_line_index + 1}")
+        logger.warning(f"No timestamp found in context for close event at line {close_line_index + 1}. Boundary was line {open_line_index + 1}.")
     return "UNKNOWN"
 
 
-def parse_strategy_from_context(lines: List[str], start_index: int, lookback: int, debug_enabled: bool = False) -> str:
+def parse_position_from_open_line(line: str, line_index: int, all_lines: List[str], debug_enabled: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Parse strategy from log context with step size detection.
-    
+    Parses all position details from a single "OPENED" log line and its immediate context.
+
     Args:
-        lines: All log lines
-        start_index: Starting line index
-        lookback: Number of lines to look back
-        debug_enabled: Whether debug logging is enabled
-        
+        line (str): The single log line containing the "...OPENED..." event.
+        line_index (int): The index of the line in all_lines.
+        all_lines (List[str]): All log lines for context searching (e.g., pool_address).
+        debug_enabled (bool): Whether to enable debug logging.
+
     Returns:
-        Strategy string with step size: "Spot (1-Sided) WIDE", "Bid-Ask (1-Sided) SIXTYNINE", etc. or "UNKNOWN"
+        A dictionary containing all parsed position details, or None if parsing fails.
     """
-    lookahead = 30  # Fixed lookahead value
+    cleaned_line = clean_ansi(line)
+
+    open_pattern = re.compile(
+        r'v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2}).*'
+        r'(?P<strategy_type>bidask|spot|spot-onesided):\s*\d+\s*\|\s*OPENED\s*'
+        r'(?P<token_pair>[\w\s().-]+-SOL)'
+    )
     
+    match = open_pattern.search(cleaned_line)
+    if not match:
+        if debug_enabled:
+            logger.debug(f"Line {line_index + 1} did not match the main 'OPENED' pattern.")
+        return None
+
+    details = match.groupdict()
+
+    step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', cleaned_line, re.IGNORECASE)
+    step_size = step_size_match.group(1).upper() if step_size_match else "UNKNOWN"
+    
+    base_strategy = "Spot (1-Sided)" if "spot" in details['strategy_type'].lower() else "Bid-Ask (1-Sided)"
+    details['actual_strategy'] = f"{base_strategy} {step_size}"
+
+    tp_match = re.search(r'TAKEPROFIT:\s*([\d\.]+)%', cleaned_line, re.IGNORECASE)
+    details['take_profit'] = float(tp_match.group(1)) if tp_match else 0.0
+    
+    sl_match = re.search(r'STOPLOSS:\s*([\d\.]+)%', cleaned_line, re.IGNORECASE)
+    details['stop_loss'] = float(sl_match.group(1)) if sl_match else 0.0
+
+    investment_match = re.search(r'Deposit \(Fixed Amount\)\s*:\s*([\d.]+)\s*SOL', cleaned_line, re.IGNORECASE)
+    details['initial_investment'] = float(investment_match.group(1)) if investment_match else None
+    
+    wallet_match = re.search(r'Wallet:\s*([a-zA-Z0-9]+)', cleaned_line)
+    details['wallet_address'] = wallet_match.group(1) if wallet_match else None
+
+    pool_address = None
+    for i in range(line_index, max(-1, line_index - 60), -1):
+        context_line = clean_ansi(all_lines[i])
+        pool_match = re.search(r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', context_line)
+        if pool_match:
+            pool_address = pool_match.group(1)
+            if debug_enabled:
+                logger.debug(f"Found pool address '{pool_address}' at line {i + 1} for open event at line {line_index + 1}.")
+            break
+    
+    details['pool_address'] = pool_address
+
     if debug_enabled:
-        logger.debug(f"Parsing strategy from line {start_index + 1}, looking back {lookback} lines and ahead {lookahead} lines")
-    
-    # Search both backward and forward
-    search_start = max(0, start_index - lookback)
-    search_end = min(len(lines), start_index + lookahead)
-    
-    # FIRST PASS: Look for bracket format with step size (highest priority)
-    for i in range(search_start, search_end):
-        line = clean_ansi(lines[i])
-        
-        # Pattern 1: [Spot (1-Sided)/... or [Bid-Ask (1-Sided)/... with step size detection
-        strategy_match = re.search(r'\[(Spot|Bid-Ask) \(1-Sided\)', line)
-        if strategy_match:
-            strategy_type = strategy_match.group(1)  # "Spot" or "Bid-Ask"
-            base_strategy = f"{strategy_type} (1-Sided)"
-            
-            if debug_enabled:
-                logger.debug(f"Found base strategy '{base_strategy}' at line {i + 1}")
-                logger.debug(f"Full line content: {line}")
-            
-            # Extract step size - try multiple patterns
-            step_size_patterns = [
-                r'Step Size:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)',  # with optional whitespace
-                r'/Step Size:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)/',  # with slashes
-                r'Step Size:\s*([A-Z]+)',  # any uppercase word after Step Size
-            ]
-            
-            step_size = None
-            for pattern in step_size_patterns:
-                step_size_match = re.search(pattern, line, re.IGNORECASE)
-                if step_size_match:
-                    step_size = step_size_match.group(1).upper()
-                    if debug_enabled:
-                        logger.debug(f"Found step size '{step_size}' using pattern: {pattern}")
-                    break
-            
-            if step_size and step_size in ['WIDE', 'SIXTYNINE', 'MEDIUM', 'NARROW']:
-                result = f"{base_strategy} {step_size}"
-                if debug_enabled:
-                    logger.debug(f"Returning strategy with step size: '{result}'")
-                return result
-            else:
-                # Found bracket format but no valid step size - still return it
-                if debug_enabled:
-                    logger.debug(f"Found bracket format but no valid step size, returning: '{base_strategy}'")
-                return base_strategy
-    
-    # SECOND PASS: Look for text format (fallback)
-    for i in range(search_start, search_end):
-        line = clean_ansi(lines[i])
-        
-        # Pattern 2: "using the spot-onesided strategy" or "using the bidask strategy"
-        text_strategy_match = re.search(r'using the (spot-onesided|bidask|spot|bid-ask) strategy', line)
-        if text_strategy_match:
-            strategy_text = text_strategy_match.group(1)
-            if strategy_text == "spot-onesided" or strategy_text == "spot":
-                result = "Spot (1-Sided)"
-            elif strategy_text == "bidask" or strategy_text == "bid-ask":
-                result = "Bid-Ask (1-Sided)"
-            else:
-                result = "UNKNOWN"
-            
-            if debug_enabled:
-                logger.debug(f"Found strategy '{result}' at line {i + 1} (text format: '{strategy_text}') - fallback")
-            return result
-        
-        # Pattern 3: "spot-onesided:" or "bidask:" at start of summary line
-        summary_match = re.search(r'^.*?(spot-onesided|bidask|spot|bid-ask):', line)
-        if summary_match:
-            strategy_text = summary_match.group(1)
-            if strategy_text == "spot-onesided" or strategy_text == "spot":
-                result = "Spot (1-Sided)"
-            elif strategy_text == "bidask" or strategy_text == "bid-ask":
-                result = "Bid-Ask (1-Sided)"
-            else:
-                result = "UNKNOWN"
-            
-            if debug_enabled:
-                logger.debug(f"Found strategy '{result}' at line {i + 1} (summary format: '{strategy_text}') - fallback")
-            return result
-    
-    if debug_enabled:
-        logger.debug(f"No strategy pattern found in {lookback} lines lookback + {lookahead} lines lookahead from line {start_index + 1}")
-    return "UNKNOWN"
+        logger.debug(f"Parsed details from line {line_index + 1}: {details}")
 
-
-def parse_initial_investment(lines: List[str], start_index: int, lookahead: int, debug_enabled: bool = False) -> Optional[float]:
-    """
-    Parse initial investment amount from log context.
-    
-    Args:
-        lines: All log lines
-        start_index: Starting line index
-        lookahead: Lines to look ahead
-        debug_enabled: Whether debug logging is enabled
-        
-    Returns:
-        Initial investment amount in SOL or None
-    """
-    search_start = start_index
-    search_end = min(len(lines), start_index + lookahead)
-
-    for i in range(search_start, search_end):
-        line = clean_ansi(lines[i])
-
-        # Pattern 1: Most reliable - PnL line with "Start:"
-        # Example: PnL: 0.05403 SOL (Return: +0.49%) | Start: 11.10968 SOL → Current: 11.16371 SOL
-        if "PnL:" in line and "Start:" in line:
-            match = re.search(r'Start:\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'PnL+Start' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-
-        # Pattern 2: PnL line with "Initial"
-        # Example: Pnl Calculation: ... - Initial 11.10968 SOL
-        if "Pnl Calculation:" in line and "Initial" in line:
-            match = re.search(r'Initial\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'Pnl Calculation+Initial' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-        
-        # Pattern 3: Position opening line - more specific
-        if ("Creating a position and adding liquidity" in line or 
-            "Creating a position with" in line) and "Error" not in line:
-            match = re.search(r'with\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'Creating+with' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-            
-        # Pattern 4: Direct liquidity addition line
-        if "adding liquidity of" in line and "SOL" in line and "Error" not in line:
-            match = re.search(r'and\s*([\d\.]+)\s*SOL', line)
-            if match:
-                if debug_enabled:
-                    logger.debug(f"Found investment amount '{match.group(1)}' from 'adding liquidity' pattern at line {i+1}")
-                return round(float(match.group(1)), 4)
-
-    logger.warning(f"Could not find investment amount for position opened at line {start_index + 1}")
-    return None
-        
+    return details
 
 def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback: int, debug_enabled: bool = False) -> Dict[str, Any]:
     """

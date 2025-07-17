@@ -68,8 +68,6 @@ class PortfolioAnalysisOrchestrator:
 
     def run_comprehensive_analysis(self, positions_file: str) -> Dict[str, Any]:
         """Run comprehensive analysis including portfolio, correlation, weekend, and HTML report."""
-        if not self.api_key and not self.config.get('api_settings', {}).get('cache_only', False):
-            return {'status': 'ERROR', 'error': 'API key is missing and not in cache-only mode.'}
 
         logger.info("=" * 60)
         logger.info("STARTING COMPREHENSIVE ANALYSIS")
@@ -101,8 +99,11 @@ class PortfolioAnalysisOrchestrator:
             strategy_simulation_results = strategy_simulator.analyze_all_positions(positions_df)
 
             logger.info("Step 2: Running market correlation analysis...")
+            # AIDEV-NOTE-GEMINI: ARCHITECTURAL FIX - Pass the pre-fetched SOL rates from portfolio_result
+            # to the correlation analyzer to prevent a redundant, incorrect API call.
+            sol_rates_for_correlation = portfolio_result.get('raw_data', {}).get('sol_rates', {})
             correlation_analyzer = MarketCorrelationAnalyzer(self.config_path, api_key=self.api_key)
-            correlation_result = correlation_analyzer.analyze_market_correlation(positions_df)
+            correlation_result = correlation_analyzer.analyze_market_correlation(positions_df, sol_rates=sol_rates_for_correlation)
             
             logger.info("Step 3: Running weekend parameter simulation...")
             skip_weekend, skip_reason = self._should_skip_weekend_analysis()
@@ -118,7 +119,7 @@ class PortfolioAnalysisOrchestrator:
                     report_files['weekend_simulation'] = weekend_report_path
 
             logger.info("Step 4: Generating comprehensive HTML report...")
-            html_generator = HTMLReportGenerator()
+            html_generator = HTMLReportGenerator(config=self.config)
             html_file = html_generator.generate_comprehensive_report(
                 portfolio_analysis=portfolio_result,
                 # AIDEV-CLAUDE-ADDITION: Pass new results to HTML generator

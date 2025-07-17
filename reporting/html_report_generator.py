@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, List
 import plotly.offline as pyo
 from jinja2 import Environment, FileSystemLoader
 
-from .visualizations import interactive_charts
+from .visualizations import interactive as interactive_charts
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,11 +28,12 @@ class HTMLReportGenerator:
     Generates comprehensive HTML reports with interactive charts.
     """
     
-    def __init__(self, output_dir: str = "reporting/output"):
+    def __init__(self, output_dir: str = "reporting/output", config: Dict[str, Any] = None):
         """
         Initialize HTML report generator.
         """
         self.output_dir = output_dir
+        self.config = config or {}
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.templates_dir = os.path.join(base_dir, "templates")
         self.timestamp_format = "%Y%m%d_%H%M"
@@ -89,12 +90,22 @@ class HTMLReportGenerator:
         """
         charts = {}
         
-        charts['equity_curve'] = interactive_charts.create_equity_curve_chart(portfolio_analysis)
+        # Original charts
         charts['metrics_summary'] = interactive_charts.create_metrics_summary_chart(portfolio_analysis)
+        
+        # Professional charts from chart_generator.py
+        charts['professional_equity_curve'] = interactive_charts.create_professional_equity_curve(portfolio_analysis)
+        charts['professional_drawdown'] = interactive_charts.create_professional_drawdown_analysis(portfolio_analysis)
+        charts['professional_strategy_heatmap'] = interactive_charts.create_professional_strategy_heatmap(portfolio_analysis, self.config if hasattr(self, 'config') else {})
+        charts['professional_cost_impact'] = interactive_charts.create_professional_cost_impact(portfolio_analysis)
+        
+        # Strategy AVG PnL summary (replaces old heatmap)
+        charts['strategy_avg_pnl_summary'] = interactive_charts.create_strategy_avg_pnl_summary(self.config if hasattr(self, 'config') else {})
         
         if correlation_analysis and 'error' not in correlation_analysis:
             charts['correlation_analysis'] = interactive_charts.create_correlation_chart(correlation_analysis)
             charts['trend_performance'] = interactive_charts.create_trend_performance_chart(correlation_analysis)
+            charts['ema_trend_chart'] = interactive_charts.create_ema_trend_chart(correlation_analysis)
             
         if weekend_analysis and not weekend_analysis.get('analysis_skipped'):
              if 'error' not in weekend_analysis:
@@ -104,8 +115,7 @@ class HTMLReportGenerator:
         # AIDEV-NOTE-CLAUDE: Generate the new charts for strategy simulations.
         if strategy_simulations:
             charts['strategy_simulation_comparison'] = interactive_charts.create_strategy_simulation_chart(strategy_simulations, portfolio_analysis)
-        charts['strategy_heatmap'] = interactive_charts.create_strategy_heatmap_chart()
-
+              
         return charts
             
     def _prepare_template_data(self, 
@@ -127,6 +137,7 @@ class HTMLReportGenerator:
             'strategy_simulations': strategy_simulations,
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
+            'config': self.config,  # Add config for template
             'plotly_js': pyo.get_plotlyjs()
         }
         

@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import yaml
 import pandas as pd
@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 class PortfolioAnalytics:
     def __init__(self, config_path: str, api_key: Optional[str] = None):
         self.config = self._load_config(config_path)
-        # AIDEV-NOTE-CLAUDE: API key is now passed to the cost analyzer.
         self.cost_analyzer = InfrastructureCostAnalyzer(config_path, api_key=api_key)
         self.min_threshold = self.config.get('portfolio_analysis', {}).get('min_position_threshold', 0.01)
         self.output_dir = "reporting/output"
@@ -37,18 +36,25 @@ class PortfolioAnalytics:
         if positions_df.empty:
             return {'error': 'No positions data available'}
 
-        try:
-            positions_df = self.cost_analyzer.allocate_costs_to_positions(positions_df)
-        except ValueError as e:
-            # Handle case where cost analyzer fails due to missing API key
-            return {'error': str(e)}
-
         min_date, max_date = positions_df['open_timestamp'].min(), positions_df['close_timestamp'].max()
         period_days = (max_date - min_date).days
+
+        # AIDEV-NOTE-GEMINI: ARCHITECTURAL FIX - Fetch SOL rates ONCE, at the very beginning, with buffer.
+        # This dictionary will be the single source of truth for all downstream calculations.
+        buffer_days = self.config.get('market_analysis', {}).get('ema_period', 50)
+        fetch_start_dt = min_date - timedelta(days=buffer_days)
         
-        sol_rates = self.cost_analyzer.get_sol_usdc_rates(min_date.strftime("%Y-%m-%d"), max_date.strftime("%Y-%m-%d"))
+        logger.info(f"Fetching SOL/USDC rates for main analysis from {fetch_start_dt.date()} to {max_date.date()} (includes buffer).")
+        sol_rates = self.cost_analyzer.get_sol_usdc_rates(fetch_start_dt.strftime("%Y-%m-%d"), max_date.strftime("%Y-%m-%d"))
+
         if not sol_rates:
-            logger.warning("No SOL/USDC rates found. USDC metrics will be incomplete.")
+            logger.warning("No SOL/USDC rates found. USDC and cost metrics will be incomplete.")
+        
+        try:
+            # Pass the pre-fetched sol_rates to avoid a redundant, incorrect API call.
+            positions_df = self.cost_analyzer.allocate_costs_to_positions(positions_df, sol_rates=sol_rates)
+        except ValueError as e:
+            return {'error': str(e)}
 
         daily_df = calculate_daily_returns(positions_df)
 

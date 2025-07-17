@@ -19,7 +19,10 @@ def plot_drawdown_analysis(ax1, ax2, analysis_result: Dict[str, Any]):
     # Calculate drawdown
     cumulative = daily_df['cumulative_pnl_sol']
     running_max = cumulative.expanding().max()
-    drawdown = (cumulative - running_max) / running_max.abs().replace(0, 1) * 100
+    # AIDEV-NOTE-CLAUDE: Using .replace(0, 1) on the absolute value of the peak prevents division by zero
+    # and handles the initial phase where peak PnL can be zero or negative, stabilizing the chart.
+    safe_running_max = running_max.abs().replace(0, 1)
+    drawdown = (cumulative - running_max) / safe_running_max * 100
 
     # Equity curve with peaks highlighted
     ax1.plot(daily_df['date'], cumulative, linewidth=2, color='#004E89', label='Cumulative PnL')
