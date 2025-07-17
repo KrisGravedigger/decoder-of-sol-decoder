@@ -78,6 +78,12 @@ def plot_heatmap_from_instances(fig, axes, analysis_result: Dict[str, Any], conf
     for i, (metric, label) in enumerate(zip(metrics, metric_labels)):
         if metric not in strategy_instances_df.columns: continue
         heatmap_data = strategy_instances_df.set_index('strategy_name')[[metric]]
+
+        # AIDEV-TODO-CLAUDE: Revisit Win Rate display. Brute-force normalization applied as formatting attempts failed.
+        # The value is divided by 100 to be displayed as a decimal (e.g., 0.85).
+        if metric == 'win_rate':
+            heatmap_data[metric] = heatmap_data[metric] / 100.0
+
         sns.heatmap(heatmap_data, annot=True, fmt='.2f', cmap='RdYlGn', center=0 if 'pnl' in metric else None, ax=axes[i], cbar_kws={'shrink': 0.8})
         axes[i].set_title(label, fontsize=12, fontweight='bold')
         axes[i].set_xlabel('')
@@ -99,7 +105,7 @@ def plot_heatmap_from_positions(fig, axes, positions_df: pd.DataFrame, config: D
         position_count=('pnl_sol', 'count'),
         total_investment=('investment_sol', 'sum')
     ).round(3)
-    strategy_groups['win_rate'] = positions_df.groupby(['strategy_parsed', 'step_size_parsed']).apply(lambda x: (x['pnl_sol'] > 0).mean() * 100)
+    strategy_groups['win_rate'] = positions_df.groupby(['strategy_parsed', 'step_size_parsed']).apply(lambda x: (x['pnl_sol'] > 0).mean())
     strategy_groups['roi_percent'] = (strategy_groups['total_pnl'] / strategy_groups['total_investment'].replace(0, 1) * 100)
     
     min_occurrences = config.get('visualization', {}).get('filters', {}).get('min_strategy_occurrences', 3)
@@ -115,8 +121,11 @@ def plot_heatmap_from_positions(fig, axes, positions_df: pd.DataFrame, config: D
     metrics = ['avg_pnl', 'win_rate', 'roi_percent']
     metric_labels = ['Avg PnL (SOL)', 'Win Rate (%)', 'ROI %']
     for i, (metric, label) in enumerate(zip(metrics, metric_labels)):
+        # AIDEV-NOTE-CLAUDE: Use conditional formatting to ensure consistency with the primary heatmap.
+        formatter = '.0f' if metric == 'win_rate' else '.2f'
+
         pivot_data = strategy_groups.reset_index().pivot(index='strategy_parsed', columns='step_size_parsed', values=metric).fillna(0)
-        sns.heatmap(pivot_data, annot=True, fmt='.2f', cmap='RdYlGn', center=0 if 'pnl' in metric else None, ax=axes[i], cbar_kws={'shrink': 0.8})
+        sns.heatmap(pivot_data, annot=True, fmt=formatter, cmap='RdYlGn', center=0 if 'pnl' in metric else None, ax=axes[i], cbar_kws={'shrink': 0.8})
         axes[i].set_title(label, fontsize=12, fontweight='bold')
         axes[i].set_xlabel('Step Size', fontsize=10)
         axes[i].set_ylabel('Strategy' if i == 0 else '')

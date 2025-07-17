@@ -88,29 +88,30 @@ class MarketCorrelationAnalyzer:
             if sol_daily.empty:
                 return {'error': "SOL daily data is empty after processing. Cannot perform analysis."}
 
-            # Step 2: Prepare portfolio daily returns
+            # Step 2: Prepare portfolio daily data
             portfolio_daily_df = calculate_daily_returns(positions_df)
             if portfolio_daily_df.empty:
                 return {'error': 'No daily portfolio data available for correlation analysis'}
                 
-            # Convert DataFrame to a Series indexed by date, as expected by subsequent functions
-            portfolio_daily = portfolio_daily_df.set_index('date')['daily_return']
+            # Create two separate series: one for percentage returns (for correlation), one for absolute PnL (for trend analysis)
+            portfolio_daily_returns = portfolio_daily_df.set_index('date')['daily_return']
+            portfolio_daily_pnl = portfolio_daily_df.set_index('date')['daily_pnl_sol']
                 
-            # Step 3: Align data and calculate correlations
-            correlation_results = self._calculate_correlations(portfolio_daily, sol_daily)
+            # Step 3: Align data and calculate correlations (using percentage returns)
+            correlation_results = self._calculate_correlations(portfolio_daily_returns, sol_daily)
             
-            # Step 4: Trend-based analysis
-            trend_analysis = self._analyze_trend_performance(portfolio_daily, sol_daily)
+            # Step 4: Trend-based analysis (using absolute PnL in SOL)
+            trend_analysis = self._analyze_trend_performance(portfolio_daily_pnl, sol_daily)
             
-            # Step 5: Statistical significance testing
-            significance_tests = self._calculate_statistical_significance(portfolio_daily, sol_daily)
+            # Step 5: Statistical significance testing (using percentage returns)
+            significance_tests = self._calculate_statistical_significance(portfolio_daily_returns, sol_daily)
             
             # Compile complete analysis
             analysis_result = {
                 'analysis_metadata': {
                     'generated_timestamp': datetime.now().isoformat(),
                     'analysis_period': f"{portfolio_start_dt.strftime('%Y-%m-%d')} to {portfolio_end_dt.strftime('%Y-%m-%d')}",
-                    'portfolio_days': len(portfolio_daily),
+                    'portfolio_days': len(portfolio_daily_returns),
                     'sol_price_days': len(sol_daily),
                     'ema_period': self.ema_period,
                     'slope_period': self.slope_period,
@@ -120,7 +121,7 @@ class MarketCorrelationAnalyzer:
                 'trend_analysis': trend_analysis,
                 'statistical_significance': significance_tests,
                 'raw_data': {
-                    'portfolio_daily_returns': portfolio_daily,
+                    'portfolio_daily_returns': portfolio_daily_returns,
                     'sol_daily_data': sol_daily,
                     # We no longer own the full sol_rates, so we reference it
                     'sol_rates_source': 'Provided by orchestrator'
