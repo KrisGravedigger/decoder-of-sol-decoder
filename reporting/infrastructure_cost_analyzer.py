@@ -11,7 +11,8 @@ import yaml
 # AIDEV-NOTE-CLAUDE: Import PriceCacheManager to replace old cache logic
 from .price_cache_manager import PriceCacheManager
 
-logging.basicConfig(level=logging.INFO)
+# AIDEV-NOTE-GEMINI: CRITICAL FIX - Removed redundant basicConfig. 
+# It should only be called once in the main entry point (main.py).
 logger = logging.getLogger(__name__)
 
 class InfrastructureCostAnalyzer:
@@ -33,25 +34,46 @@ class InfrastructureCostAnalyzer:
             logger.error(f"Error loading config {config_path}: {e}")
             raise
 
-    def get_sol_usdc_rates(self, start_date: str, end_date: str) -> Dict[str, Optional[float]]:
+    def get_sol_usdc_rates(self, start_date: str, end_date: str, force_refetch: bool = False) -> Dict[str, Optional[float]]:
         """
-        Get daily SOL/USDC prices using the centralized PriceCacheManager.
-        AIDEV-NOTE-GEMINI: This function now specifically requests 1-day candles.
+        Get daily SOL/USDC prices using the centralized PriceCacheManager and a proven high-liquidity pair address.
+        Includes enhanced logging for cache utilization.
         """
-        logger.info(f"Fetching SOL/USDC rates from {start_date} to {end_date} via PriceCacheManager.")
+        logger.info(f"Fetching SOL/USDC rates from {start_date} to {end_date}. Force refetch: {force_refetch}")
         cache_manager = PriceCacheManager()
-        sol_usdc_pool = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+        
+        sol_usdc_pair_address = "83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d"
         
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        
-        # AIDEV-NOTE-GEMINI: Switched to '1d' timeframe for SOL/USDC portfolio-level analysis, as requested.
-        price_data = cache_manager.get_price_data(
-            pool_address=sol_usdc_pool,
+
+        # --- Pre-check cache status ---
+        logger.info("Pre-checking cache for existing rates...")
+        cached_price_data = cache_manager.get_price_data(
+            pool_address=sol_usdc_pair_address,
             start_dt=start_dt,
             end_dt=end_dt,
             timeframe='1d',
-            api_key=self.api_key
+            api_key=None, 
+            force_refetch=False 
+        )
+        cached_rates_count = 0
+        if cached_price_data:
+            df_cache = pd.DataFrame([p for p in cached_price_data if not p.get('is_placeholder') and p.get('close', 0) > 0])
+            if not df_cache.empty:
+                df_cache['timestamp'] = pd.to_numeric(df_cache['timestamp'], errors='coerce').fillna(df_cache['timestamp'].apply(lambda x: datetime.fromisoformat(x.replace('Z', '+00:00')).timestamp() if isinstance(x, str) else x))
+                df_cache['date'] = pd.to_datetime(df_cache['timestamp'], unit='s').dt.date
+                cached_rates_count = df_cache['date'].nunique()
+        logger.info(f"Found {cached_rates_count} valid daily rates in cache before main fetch.")
+        
+        # --- Main fetch operation ---
+        price_data = cache_manager.get_price_data(
+            pool_address=sol_usdc_pair_address,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            timeframe='1d',
+            api_key=self.api_key,
+            force_refetch=force_refetch
         )
         
         if not price_data:
@@ -59,18 +81,28 @@ class InfrastructureCostAnalyzer:
             return {d.strftime("%Y-%m-%d"): None for d in pd.date_range(start_date, end_date)}
             
         df = pd.DataFrame(price_data)
+        df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').fillna(df['timestamp'].apply(lambda x: datetime.fromisoformat(x.replace('Z', '+00:00')).timestamp() if isinstance(x, str) else x))
         df['date'] = pd.to_datetime(df['timestamp'], unit='s').dt.date
         
         daily_prices_df = df.sort_values('timestamp').groupby('date')['close'].last()
         
         all_dates = pd.date_range(start=start_date, end=end_date)
+        total_days_required = len(all_dates)
         rates_series = daily_prices_df.reindex(all_dates.date, method=None)
         
         rates_series_filled = rates_series.ffill().bfill()
-
         final_rates = {date.strftime('%Y-%m-%d'): price for date, price in rates_series_filled.items()}
+        
+        total_rates_available = len(final_rates)
+        newly_fetched_count = total_rates_available - cached_rates_count if total_rates_available > cached_rates_count else 0 # Defensive check
+        
+        self.sol_usdc_rates = final_rates
+        logger.info(
+            f"Successfully prepared {total_rates_available}/{total_days_required} SOL/USDC daily rates. "
+            f"(Found {cached_rates_count} in cache, added/updated {newly_fetched_count})"
+        )
             
-        return final_rates
+        return self.sol_usdc_rates
 
     def calculate_daily_costs(self, sol_rates: Dict[str, Optional[float]]) -> Dict[str, Dict[str, float]]:
         """Calculates daily costs using pre-fetched SOL rates."""
@@ -90,7 +122,6 @@ class InfrastructureCostAnalyzer:
     def allocate_costs_to_positions(self, positions_df: pd.DataFrame, sol_rates: Dict[str, Optional[float]]) -> pd.DataFrame:
         """
         Allocates daily infrastructure costs to active positions.
-        AIDEV-NOTE-GEMINI: This method now accepts pre-fetched sol_rates to avoid redundant API calls.
         """
         if positions_df.empty: return positions_df
         
@@ -104,7 +135,6 @@ class InfrastructureCostAnalyzer:
             df['infrastructure_cost_usd'] = 0
             return df
         
-        # We no longer need to fetch rates here, we just use what was passed in.
         daily_costs = self.calculate_daily_costs(sol_rates)
         
         if not daily_costs:
@@ -152,7 +182,6 @@ class InfrastructureCostAnalyzer:
         return {
             'total_cost_sol': total_cost_sol,
             'total_cost_usd': total_cost_usd,
-            # AIDEV-NOTE-CLAUDE: Pass daily_cost_usd down the pipeline to fix KeyError.
             'daily_cost_usd': self.daily_cost_usd, 
             'gross_pnl_sol': gross_pnl_sol,
             'net_pnl_sol': gross_pnl_sol - total_cost_sol,

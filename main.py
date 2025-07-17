@@ -3,7 +3,7 @@ import os
 import sys
 from dotenv import load_dotenv
 import yaml
-from typing import Optional
+from typing import Optional, Literal
 import pandas as pd
 
 # --- Setup Project Path & Environment ---
@@ -15,11 +15,9 @@ if project_root not in sys.path:
 # --- Import Core Modules ---
 from extraction.log_extractor import run_extraction
 from reporting.strategy_instance_detector import run_instance_detection
-# AIDEV-NOTE-GEMINI: Import the CLASS, not the deleted function.
 from reporting.analysis_runner import AnalysisRunner
 from reporting.orchestrator import PortfolioAnalysisOrchestrator
-# AIDEV-NOTE-GEMINI: Import the centralized timestamp parser
-from reporting.data_loader import _parse_custom_timestamp, load_and_prepare_positions
+from reporting.data_loader import load_and_prepare_positions
 
 
 # --- Configure Logging ---
@@ -57,100 +55,83 @@ def print_header(title: str):
     print(f"--- {title.upper()} ---")
     print("="*70)
 
-def run_all_data_fetching(api_key: Optional[str]):
+# AIDEV-NOTE-GEMINI: Refactored to handle different refetch modes as requested.
+def run_all_data_fetching(api_key: Optional[str], refetch_mode: Literal['none', 'all', 'sol_only'] = 'none'):
     """
-    Central data fetching function. This is the ONLY function that should use the API key.
-    It populates the cache for both per-position simulations and daily SOL/USDC rates.
+    Central data fetching function with different cache-handling modes.
+    This is the ONLY function that should use the API key.
     """
     if not api_key:
         print("\n[ERROR] No API key available. Cannot run data fetching.")
         logger.warning("run_all_data_fetching called without API key. Aborting.")
         return
 
-    print_header("Step 3: Central Data Fetching (Online Step)")
-    logger.info("--- Starting Central Data Fetching ---")
+    mode_description = {
+        'none': "Standard Fetch (new data only)",
+        'all': "FORCE REFETCH ALL (positions & SOL/USDC)",
+        'sol_only': "FORCE REFETCH SOL/USDC only"
+    }
+    print_header(f"Step 3: Central Data Fetching ({mode_description[refetch_mode]})")
+    logger.info(f"--- Starting Central Data Fetching (mode: {refetch_mode}) ---")
 
     try:
-        positions_df = pd.read_csv("positions_to_analyze.csv")
+        positions_df = load_and_prepare_positions("positions_to_analyze.csv", min_threshold=0.0)
         total_positions = len(positions_df)
-        print(f"Found {total_positions} positions to process for cache population.")
+        print(f"Found {total_positions} valid, closed positions to process.")
     except FileNotFoundError:
         print("\n[ERROR] positions_to_analyze.csv not found. Please run Step 1/2 first.")
         logger.error("Data fetching failed: positions_to_analyze.csv not found.")
         return
 
     # --- Safety Valve ---
-    user_input = input(f"\n[SAFETY VALVE] This step will connect to the API to fill cache for {total_positions} positions. This may use API credits. Continue? (Y/n): ")
+    user_input = input(f"\n[SAFETY VALVE] This step will connect to the API. Mode: '{mode_description[refetch_mode]}'. This may use API credits. Continue? (Y/n): ")
     if user_input.lower().strip() not in ('y', ''):
         print("Data fetching cancelled by user.")
-        logger.warning("User stopped data fetching at safety valve.")
+        logger.warning(f"User stopped data fetching at safety valve (mode: {refetch_mode}).")
         return
-
-    # AIDEV-NOTE-GEMINI: Data Integrity Fix.
-    # We must parse timestamps immediately after reading the CSV to ensure all
-    # downstream functions receive correct datetime objects, not strings.
-    for col in ['open_timestamp', 'close_timestamp']:
-        # Try standard datetime conversion first, which is fast.
-        positions_df[col] = pd.to_datetime(positions_df[col], errors='coerce')
         
-        # For rows that failed standard parsing, try the custom parser.
-        failed_mask = positions_df[col].isnull()
-        if failed_mask.any():
-            # Apply custom parser only to strings in the original column for failed rows.
-            # This handles cases where the original column name might be different.
-            original_col_name = col
-            if col == 'open_timestamp':
-                # Heuristic to find the original raw string column if it exists
-                if 'open' in positions_df.columns: original_col_name = 'open'
-            elif col == 'close_timestamp':
-                if 'close' in positions_df.columns: original_col_name = 'close'
-
-            # Ensure we are applying to string representations
-            positions_df.loc[failed_mask, col] = positions_df.loc[failed_mask, original_col_name].astype(str).apply(
-                lambda x: _parse_custom_timestamp(x) if pd.notna(x) and x.lower() != 'nat' else pd.NaT
-            )
-
-    # Drop rows where timestamps are still invalid, which is expected for active positions
-    positions_df.dropna(subset=['open_timestamp', 'close_timestamp'], inplace=True)
-    total_positions_after_cleaning = len(positions_df) # Update total after dropping rows
-    print(f"Found {total_positions_after_cleaning} valid, closed positions to process for cache population.")
-
-
     # --- Part 1: Fetch per-position price history for simulations ---
-    print("\n[Part 1/2] Populating cache for position simulations...")
-    online_runner = AnalysisRunner(api_key=api_key)
-    # Use iterrows() for DataFrames with guaranteed correct dtypes
-    for idx, row in positions_df.iterrows():
-        # Recalculate index for progress display after cleaning
-        progress_idx = positions_df.index.get_loc(idx) + 1
-        position_id = row.get('position_id', f"index_{idx}")
-        print(f"  Processing cache for position {progress_idx}/{total_positions_after_cleaning}...", end='\r')
+    if refetch_mode in ['none', 'all']:
+        print(f"\n[Part 1/2] Populating cache for position simulations...")
+        force_position_refetch = (refetch_mode == 'all')
+        
+        online_runner = AnalysisRunner(api_key=api_key, force_refetch=force_position_refetch)
+        
+        for idx, row in positions_df.iterrows():
+            progress_idx = positions_df.index.get_loc(idx) + 1
+            position_id = row.get('position_id', f"index_{idx}")
+            print(f"  Processing cache for position {progress_idx}/{total_positions}...", end='\r')
 
-        try:
-            # Now that the DataFrame has correct dtypes, to_dict() works as expected.
-            online_runner.analyze_single_position(row.to_dict())
-        except Exception as e:
-            logger.error(f"Error populating cache for position {position_id}: {e}")
-    print("\n  Position cache processing complete.                            ")
+            try:
+                online_runner.analyze_single_position(row.to_dict())
+            except Exception as e:
+                logger.error(f"Error populating cache for position {position_id}: {e}")
+        print("\n  Position cache processing complete.                            ")
+    else:
+        print("\n[Part 1/2] Skipping position simulation cache (mode is 'sol_only').")
 
     # --- Part 2: Fetch SOL/USDC daily rates for reporting ---
     print("\n[Part 2/2] Populating cache for SOL/USDC daily rates...")
     try:
         from reporting.infrastructure_cost_analyzer import InfrastructureCostAnalyzer
 
-        # AIDEV-NOTE-GEMINI: FIX - We now use the already parsed, correct timestamp columns.
         min_date = positions_df['open_timestamp'].min()
         max_date = positions_df['close_timestamp'].max()
 
         if pd.notna(min_date) and pd.notna(max_date):
-            # Add buffer for EMA calculations
             config = load_main_config()
             buffer_days = config.get('market_analysis', {}).get('ema_period', 50)
             fetch_start_dt = min_date - pd.Timedelta(days=buffer_days)
             
+            force_sol_refetch = (refetch_mode in ['all', 'sol_only'])
+
             print(f"  Fetching SOL/USDC rates for period: {fetch_start_dt.date()} to {max_date.date()}")
             cost_analyzer = InfrastructureCostAnalyzer(api_key=api_key)
-            cost_analyzer.get_sol_usdc_rates(fetch_start_dt.strftime('%Y-%m-%d'), max_date.strftime('%Y-%m-%d'))
+            cost_analyzer.get_sol_usdc_rates(
+                fetch_start_dt.strftime('%Y-%m-%d'), 
+                max_date.strftime('%Y-%m-%d'),
+                force_refetch=force_sol_refetch
+            )
             print("  SOL/USDC rates cache updated.")
         else:
             print("[WARNING] Could not determine date range from positions. Skipping SOL/USDC rate fetching.")
@@ -162,14 +143,11 @@ def run_all_data_fetching(api_key: Optional[str]):
     print("\nCentral Data Fetching complete. Cache is populated.")
     logger.info("--- Central Data Fetching Finished ---")
 
+
 def run_spot_vs_bidask_analysis_offline():
     """Wrapper function to run the simulation analysis in explicit offline mode."""
     print_header("Step 4: Spot vs. Bid-Ask Simulation (Offline)")
     try:
-        # AIDEV-NOTE-GEMINI: Data Integrity Fix.
-        # Use the centralized loader to ensure timestamps are correctly parsed
-        # and data is clean before passing to the analysis runner.
-        # We use a threshold of 0 to avoid filtering anything out at this stage.
         positions_df = load_and_prepare_positions("positions_to_analyze.csv", min_threshold=0.0)
 
         if positions_df.empty:
@@ -177,7 +155,6 @@ def run_spot_vs_bidask_analysis_offline():
             logger.warning("run_spot_vs_bidask_analysis_offline: positions_df is empty after loading.")
             return
 
-        # Initialize runner with NO API KEY to force cache-only operation
         offline_runner = AnalysisRunner(api_key=None)
         offline_runner.analyze_all_positions(positions_df)
         print("Spot vs. Bid-Ask simulation (offline) completed successfully.")
@@ -192,7 +169,6 @@ def run_comprehensive_report_offline():
     """Wrapper function to generate the final HTML report in explicit offline mode."""
     print_header("Step 5: Generate Comprehensive Report (Offline)")
     try:
-        # Initialize orchestrator with NO API KEY
         orchestrator = PortfolioAnalysisOrchestrator(api_key=None)
         result = orchestrator.run_comprehensive_analysis('positions_to_analyze.csv')
         if result.get('status') == 'SUCCESS':
@@ -217,8 +193,8 @@ def run_full_pipeline(api_key: Optional[str]):
     if not run_extraction(): return
     run_instance_detection()
 
-    # Step 3 (Online)
-    run_all_data_fetching(api_key)
+    # Step 3 (Online) - Run in standard 'none' mode for a full pipeline run.
+    run_all_data_fetching(api_key, refetch_mode='none')
     
     # Step 4 (Offline)
     run_spot_vs_bidask_analysis_offline()
@@ -227,6 +203,36 @@ def run_full_pipeline(api_key: Optional[str]):
     run_comprehensive_report_offline()
         
     print_header("Full Pipeline Completed")
+
+# AIDEV-NOTE-GEMINI: New function for the data fetching sub-menu, as requested.
+def data_fetching_menu(api_key: Optional[str]):
+    """Displays the sub-menu for data fetching options."""
+    while True:
+        print("\n" + "-"*70)
+        print("--- Data Fetching Options (Step 3) ---")
+        print("This step connects to the API to populate the local price cache.")
+        print("-"*70)
+        print("1. Fetch new data only (Standard)")
+        print("2. Force refetch ALL placeholders (Fixes all gaps, uses more API credits)")
+        print("3. Force refetch SOL-USDC placeholders only (Fixes market chart gaps)")
+        print("4. Back to Main Menu")
+
+        choice = input("Select an option (1-4): ")
+
+        if choice == '1':
+            run_all_data_fetching(api_key, refetch_mode='none')
+            break
+        elif choice == '2':
+            run_all_data_fetching(api_key, refetch_mode='all')
+            break
+        elif choice == '3':
+            run_all_data_fetching(api_key, refetch_mode='sol_only')
+            break
+        elif choice == '4':
+            break
+        else:
+            print("Invalid choice, please try again.")
+
 
 def main_menu():
     """Displays the main interactive menu."""
@@ -264,13 +270,11 @@ def main_menu():
             print_header("Step 2: Strategy Instance Detection")
             run_instance_detection()
         elif choice == '3':
-            # This is the ONLY step that should get the api_key
-            run_all_data_fetching(api_key)
+            # AIDEV-NOTE-GEMINI: Call the new sub-menu function.
+            data_fetching_menu(api_key)
         elif choice == '4':
-            # This step runs offline
             run_spot_vs_bidask_analysis_offline()
         elif choice == '5':
-            # This step also runs offline
             run_comprehensive_report_offline()
         elif choice == '6':
             run_full_pipeline(api_key)

@@ -792,3 +792,31 @@ For improved clarity, the metric's label in the KPI table was updated to "Max Pn
 - **Modified:** `reporting/html_report_generator.py`, `reporting/templates/comprehensive_report.html`, `CLAUDE.md`
 
 **System Status:** Refactoring is complete. The new modular chart generation system is stable and operational. ✅
+
+**2025-07-17: Critical Data Fix: Resolving Gaps in SOL/USDC Market Price Data**
+
+**Goal:** To diagnose and permanently fix missing data points for SOL/USDC market prices (specifically for July 5th, 8th, and 9th), which were causing a flat line in the EMA trend chart and visual gaps in other analytics.
+
+**Diagnosis and Resolution Steps:**
+
+1.  **Symptom & Initial Feature (Cache Repair Mechanism):** The initial symptom was incomplete charts. The first step was to build a "cache repair" mechanism, assuming the cache had stored empty data from a previous API failure. This involved:
+    *   Implementing a `force_refetch` flag in `price_cache_manager.py` to ignore existing placeholders.
+    *   Adding a user-facing sub-menu in `main.py` under "Step 3: Fetch/Update Data", giving the user full control to trigger a standard fetch, a full force refetch, or a targeted refetch for SOL/USDC data only.
+    *   Propagating the `force_refetch` flag through `analysis_runner.py` and `infrastructure_cost_analyzer.py` to ensure it reaches the cache manager.
+
+2.  **Root Cause Identification:** When the new `force_refetch` mode still failed to retrieve data, it became clear the problem wasn't the cache, but the API query itself. Using a diagnostic script (`tools/debug_sol_price_fetcher.py`) and user-provided documentation, we identified the root cause: the system was querying the wrong asset address for market-wide SOL/USDC prices. It was using a specific, low-liquidity pool address instead of a canonical, high-liquidity pair address recognized by the API.
+
+3.  **Verification & Final Fix:** The diagnostic script confirmed that the Raydium USDC/SOL pair address (`83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d`) returned a complete dataset. The final fix was to update `infrastructure_cost_analyzer.py` to use this correct, hardcoded pair address for all SOL/USDC price history requests.
+
+**Key Outcomes:**
+- The SOL/USDC market data pipeline is now robust and fetches complete, accurate historical data, resolving the core issue of missing data points.
+- The EMA Trend indicator chart now displays correctly without flat-lining.
+- The project now has a powerful, user-controlled cache repair mechanism to handle potential future API data inconsistencies without code changes.
+
+**Files Modified:**
+- `main.py` (added data fetching sub-menu and logic for `refetch_mode`)
+- `price_cache_manager.py` (implemented core `force_refetch` logic)
+- `reporting/analysis_runner.py` (updated to accept and pass the `force_refetch` flag)
+- `reporting/infrastructure_cost_analyzer.py` (updated to use the correct SOL/USDC pair address and pass the `force_refetch` flag; removed rogue `basicConfig` call)
+
+**System Status:** The market data pipeline is now stable, and the data integrity issue is fully resolved. ✅
