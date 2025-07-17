@@ -86,8 +86,8 @@ class ChartGenerator:
             logger.warning("No daily data for equity curve")
             return self._create_empty_chart('Portfolio Equity Curve - No Data', 'equity_curve', timestamp)
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1]})
-        plot_equity_curve(ax1, ax2, analysis_result)
+        fig, ax1 = plt.subplots(1, 1, figsize=(14, 8)) # Create a single plot
+        plot_equity_curve(ax1, analysis_result) # Pass only one axis
         plt.tight_layout()
         return self._save_chart(fig, 'equity_curve', timestamp)
 

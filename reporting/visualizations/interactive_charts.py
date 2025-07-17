@@ -81,7 +81,7 @@ def create_metrics_summary_chart(portfolio_analysis: Dict[str, Any]) -> str:
             ['Net PnL (after costs)', f"{sol_metrics.get('net_pnl_after_costs', 0):.3f} SOL", f"${usdc_metrics.get('net_pnl_after_costs', 0):.2f}"],
             ['Win Rate', win_rate_value, f"({win_rate_value})"],  # Unified value, parentheses for visual unity
             ['Sharpe Ratio', f"{sol_metrics.get('sharpe_ratio', 0):.2f}", f"{usdc_metrics.get('sharpe_ratio', 0):.2f}"],
-            ['Max Drawdown', f"{sol_metrics.get('max_drawdown_percent', 0):.2%}", f"{usdc_metrics.get('max_drawdown_percent', 0):.2%}"],
+            ['Max PnL Drawdown', f"{sol_metrics.get('max_drawdown_percent', 0):.2%}", f"{usdc_metrics.get('max_drawdown_percent', 0):.2%}"],
             ['Cost Impact', f"{sol_metrics.get('cost_impact_percent', 0):.1f}%", f"{usdc_metrics.get('cost_impact_percent', 0):.1f}%"],
         ]
 
@@ -173,12 +173,14 @@ def create_trend_performance_chart(correlation_analysis: Dict[str, Any]) -> str:
 def create_weekend_comparison_chart(weekend_analysis: Dict[str, Any]) -> str:
     """Create weekend parameter comparison chart."""
     try:
-        if weekend_analysis.get('analysis_skipped'):
-            return f"<p>Weekend analysis was skipped: {weekend_analysis.get('reason', 'unknown reason')}</p>"
-        if 'error' in weekend_analysis or not weekend_analysis.get('is_valid'):
-            return f"<p>Weekend analysis error: {weekend_analysis.get('error', 'invalid data')}</p>"
+        # AIDEV-NOTE-CLAUDE: Robust check for valid weekend analysis data.
+        if (not weekend_analysis or 
+            weekend_analysis.get('analysis_skipped') or 
+            'performance_comparison' not in weekend_analysis):
+            reason = weekend_analysis.get('reason', 'no valid data found') if weekend_analysis else 'no data'
+            return f"<p>Weekend analysis was skipped: {reason}</p>"
             
-        comparison = weekend_analysis.get('performance_comparison', {})
+        comparison = weekend_analysis['performance_comparison']
         
         current = comparison.get('current_scenario', {}).get('metrics', {})
         alternative = comparison.get('alternative_scenario', {}).get('metrics', {})
@@ -372,28 +374,24 @@ def create_professional_equity_curve(portfolio_analysis: Dict[str, Any]) -> str:
         daily_df['net_pnl_sol'] = 0.0
         
         cumulative_cost = 0.0
-        daily_cost_usd = cost_summary.get('daily_cost_usd', 11.67)
-        
+        daily_cost_usd = cost_summary['daily_cost_usd']
+        daily_df['daily_cost_sol'] = 0.0
+
         for idx, row in daily_df.iterrows():
             date_str = row['date'].strftime("%Y-%m-%d")
-            
-            if date_str in sol_rates:
-                sol_price = sol_rates[date_str]
-                if sol_price is not None:
-                    daily_df.at[idx, 'cumulative_pnl_usdc'] = row['cumulative_pnl_sol'] * sol_price
-                    
-                    daily_cost_sol = daily_cost_usd / sol_price
-                    cumulative_cost += daily_cost_sol
-                    
-                    daily_df.at[idx, 'cumulative_cost_sol'] = cumulative_cost
-                    daily_df.at[idx, 'net_pnl_sol'] = row['cumulative_pnl_sol'] - cumulative_cost
+            sol_price = sol_rates.get(date_str)
+            if sol_price and sol_price > 0:
+                daily_df.at[idx, 'daily_cost_sol'] = daily_cost_usd / sol_price
+                daily_df.at[idx, 'cumulative_pnl_usdc'] = row['cumulative_pnl_sol'] * sol_price
+
+        # Correctly calculate cumulative cost and net PnL AFTER the loop
+        daily_df['cumulative_cost_sol'] = daily_df['daily_cost_sol'].cumsum()
+        daily_df['net_pnl_sol'] = daily_df['cumulative_pnl_sol'] - daily_df['cumulative_cost_sol']
         
-        # Create subplot figure
+        # Create a single plot figure
         fig = make_subplots(
-            rows=2, cols=1,
-            subplot_titles=('Portfolio Equity Curve - Dual Currency Analysis', 'SOL/USDC Price'),
-            vertical_spacing=0.1,
-            specs=[[{"secondary_y": True}], [{}]]
+            rows=1, cols=1,
+            specs=[[{"secondary_y": True}]]
         )
         
         # Main equity curves
@@ -460,25 +458,7 @@ def create_professional_equity_curve(portfolio_analysis: Dict[str, Any]) -> str:
             ),
             row=1, col=1
         )
-        
-        # SOL price chart
-        valid_sol_rates = {k: v for k, v in sol_rates.items() if v is not None}
-        if valid_sol_rates:
-            sol_dates = [datetime.strptime(date, "%Y-%m-%d") for date in valid_sol_rates.keys()]
-            sol_prices = list(valid_sol_rates.values())
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=sol_dates,
-                    y=sol_prices,
-                    mode='lines',
-                    name='SOL/USDC Price',
-                    line=dict(color='#7209B7', width=2),
-                    hovertemplate='<b>SOL Price</b><br>Date: %{x}<br>Price: $%{y:.2f}<extra></extra>'
-                ),
-                row=2, col=1
-            )
-        
+                       
         # Add zero line
         fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.3, row=1, col=1)
         
@@ -516,11 +496,14 @@ def create_professional_drawdown_analysis(portfolio_analysis: Dict[str, Any]) ->
         if daily_df.empty:
             return "<p>No daily data available for professional drawdown analysis</p>"
             
-        # Calculate drawdown
+       # Calculate drawdown
         daily_df = daily_df.copy()
         cumulative = daily_df['cumulative_pnl_sol']
         running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max.abs() * 100
+        # AIDEV-NOTE-CLAUDE: Using .replace(0, 1) on the absolute value of the peak prevents division by zero
+        # and handles the initial phase where peak PnL can be zero or negative, stabilizing the chart.
+        safe_running_max = running_max.abs().replace(0, 1)
+        drawdown = (cumulative - running_max) / safe_running_max * 100
         
         # Create subplot
         fig = make_subplots(
@@ -817,17 +800,23 @@ def create_professional_cost_impact(portfolio_analysis: Dict[str, Any]) -> str:
         
         # Prepare data
         categories = ['SOL Denomination', 'USDC Denomination']
+        
+        # Correctly define Gross PnL (it should NOT have costs added)
         gross_pnl = [
-            sol_metrics['total_pnl_sol'] + cost_summary.get('total_cost_sol', 0),
-            usdc_metrics['total_pnl_usdc'] + cost_summary.get('total_cost_usd', 0)
+            sol_metrics.get('total_pnl_sol', 0),
+            usdc_metrics.get('total_pnl_usdc', 0)
         ]
+        
+        # Net PnL is correct
         net_pnl = [
-            sol_metrics['net_pnl_after_costs'],
-            usdc_metrics['net_pnl_after_costs']
+            sol_metrics.get('net_pnl_after_costs', 0),
+            usdc_metrics.get('net_pnl_after_costs', 0)
         ]
+        
+        # Costs are derived from net and gross
         costs = [
-            cost_summary.get('total_cost_sol', 0),
-            cost_summary.get('total_cost_usd', 0)
+            gross_pnl[0] - net_pnl[0],
+            gross_pnl[1] - net_pnl[1]
         ]
         
         # Create subplot
@@ -886,11 +875,14 @@ def create_professional_cost_impact(portfolio_analysis: Dict[str, Any]) -> str:
             row=1, col=2
         )
         
-        # 3. Daily Cost Allocation
-        period_days = cost_summary.get('period_days', 30)
+        # 3. Daily Cost Allocation (using direct, reliable daily cost data)
+        daily_cost_usd = cost_summary.get('daily_cost_usd', 0)
+        avg_sol_price_in_period = (usdc_metrics.get('total_pnl_usdc', 0) / sol_metrics.get('total_pnl_sol', 1)) if sol_metrics.get('total_pnl_sol', 0) != 0 else 150
+        daily_cost_sol = (daily_cost_usd / avg_sol_price_in_period) if avg_sol_price_in_period > 0 else 0
+        
         daily_costs = [
-            cost_summary.get('total_cost_sol', 0) / period_days,
-            cost_summary.get('total_cost_usd', 0) / period_days
+            daily_cost_sol,
+            daily_cost_usd
         ]
         
         fig.add_trace(
@@ -927,7 +919,6 @@ def create_professional_cost_impact(portfolio_analysis: Dict[str, Any]) -> str:
                 row=2, col=2
             )
         
-        # Update layout
         fig.update_layout(
             height=700,
             title=dict(

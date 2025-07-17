@@ -133,14 +133,30 @@ class InfrastructureCostAnalyzer:
         return df
 
     def generate_cost_summary(self, positions_df: pd.DataFrame, period_days: int) -> Dict:
+        """Generates a summary of infrastructure costs and their impact."""
         if 'infrastructure_cost_sol' not in positions_df.columns:
             return {'error': 'Cost allocation was not performed.'}
             
         total_cost_sol = positions_df['infrastructure_cost_sol'].sum()
+        total_cost_usd = positions_df['infrastructure_cost_usd'].sum() if 'infrastructure_cost_usd' in positions_df.columns else self.daily_cost_usd * period_days
         gross_pnl_sol = positions_df['pnl_sol'].sum()
+
+        avg_daily_positions = positions_df.shape[0] / period_days if period_days > 0 else 0
+        break_even_days = 0
+        if gross_pnl_sol > 0 and self.daily_cost_usd > 0:
+            daily_avg_pnl_sol = gross_pnl_sol / period_days
+            daily_avg_cost_sol = total_cost_sol / period_days
+            if daily_avg_pnl_sol > daily_avg_cost_sol:
+                 break_even_days = total_cost_sol / (daily_avg_pnl_sol)
+        
         return {
             'total_cost_sol': total_cost_sol,
+            'total_cost_usd': total_cost_usd,
+            # AIDEV-NOTE-CLAUDE: Pass daily_cost_usd down the pipeline to fix KeyError.
+            'daily_cost_usd': self.daily_cost_usd, 
             'gross_pnl_sol': gross_pnl_sol,
             'net_pnl_sol': gross_pnl_sol - total_cost_sol,
             'cost_impact_percent': (total_cost_sol / abs(gross_pnl_sol) * 100) if gross_pnl_sol != 0 else 0,
+            'period_days': period_days,
+            'break_even_days': break_even_days,
         }

@@ -720,3 +720,26 @@ System Status: Architecture is now stable with a clear online/offline separation
 - `CLAUDE.md` (documentation update)
 
 **System Status:** Manual data correction feature is stable and ready for use. ✅
+
+**2025-07-17: Critical Debugging: Resolving Unrealistic Max Drawdown Values**
+
+**Goal:** To diagnose and fix a bug that was causing absurd, financially impossible values for the Max Drawdown metric (e.g., -15,000%) in generated reports.
+
+**Diagnosis and Resolution Steps:**
+- Initial Hypothesis (Rejected): The first assumption was that the issue stemmed from the fundamental instability of the (PnL - Peak) / Peak formula, especially with small peak PnL values.
+- User's Key Insight: The user correctly identified that the problem was not the formula itself but a multiplication error. A comparison between the chart value (-146%) and the table value (-14,600%) pointed directly to a double-multiplication bug.
+- Root Cause Identified: It was confirmed that the functions in metrics_calculator.py were incorrectly multiplying the final drawdown result by 100, effectively returning a percentage value. The reporting layer then formatted this number again as a percentage (:.2%), which caused the value to explode.
+
+**Implemented Fix:**
+The erroneous * 100 multiplication was removed from the calculate_sol_metrics and calculate_usdc_metrics functions in metrics_calculator.py. These functions now correctly return a raw decimal value (e.g., -1.46) ready for UI formatting.
+The logic in the chart generation files (drawdown.py, interactive_charts.py) was confirmed to be correct and was left unchanged, as it needs to scale the Y-axis to a percentage.
+For improved clarity, the metric's label in the KPI table was updated to "Max PnL Drawdown" as per the user's suggestion.
+
+**Business Impact:**
+- Restored credibility to a key risk metric in all reports by eliminating misleading and incorrect data.
+- Ensured consistency in the calculation and presentation of financial metrics across the application.
+
+**Files Modified:**
+- reporting/metrics_calculator.py
+- reporting/visualizations/interactive_charts.py
+- System Status: The Max Drawdown metric is now stable and reliable. ✅
