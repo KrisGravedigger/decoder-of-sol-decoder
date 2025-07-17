@@ -743,3 +743,22 @@ For improved clarity, the metric's label in the KPI table was updated to "Max Pn
 - reporting/metrics_calculator.py
 - reporting/visualizations/interactive_charts.py
 - System Status: The Max Drawdown metric is now stable and reliable. ✅
+
+**2025-07-18: Market Trend Visualization & Report Simplification**
+
+**Goal:** Enhance the market trend analysis section with a more intuitive visualization of the EMA-based trend logic, and simplify the report by removing redundant or less valuable charts.
+
+**Achieved:**
+- **Visual Trend Indicator Chart:** Implemented a new, interactive chart in the Market Correlation section that plots the SOL price against its 50-period EMA.
+  - The EMA line is **dynamically colored** (green for uptrend, red for downtrend) to provide an intuitive, visual confirmation of the trend detection logic used in the analysis.
+  - This makes it much easier to understand *why* certain days are classified as uptrend or downtrend.
+- **Unified Trend Colors:** Standardized the color scheme across all three trend-based bar charts (`Avg Return`, `Win Rate`, `Days Count`) to consistently represent uptrends (green) and downtrends (red), improving readability and at-a-glance comprehension.
+- **Simplified Weekend Analysis:** Streamlined the `Weekend Parameter Impact Comparison` chart by removing the 'Sharpe Ratio' metric. This focuses the analysis on the more direct impact on `Total PnL` and `Average ROI (%)`.
+- **Report Decluttering:** Completely removed the 'Legacy Strategy Heatmap (Fallback)' section and its corresponding generation logic. This declutters the final report and eliminates a redundant visualization, making the primary `Strategy Performance Summary` the single source of truth.
+
+**Files Modified:**
+- `reporting/visualizations/interactive_charts.py`
+- `reporting/html_report_generator.py`
+- `reporting/templates/comprehensive_report.html`
+
+**System Status:** Report visualizations are enhanced and simplified. All changes are stable. ✅

@@ -106,6 +106,7 @@ class HTMLReportGenerator:
         if correlation_analysis and 'error' not in correlation_analysis:
             charts['correlation_analysis'] = interactive_charts.create_correlation_chart(correlation_analysis)
             charts['trend_performance'] = interactive_charts.create_trend_performance_chart(correlation_analysis)
+            charts['ema_trend_chart'] = interactive_charts.create_ema_trend_chart(correlation_analysis)
             
         if weekend_analysis and not weekend_analysis.get('analysis_skipped'):
              if 'error' not in weekend_analysis:
@@ -115,10 +116,7 @@ class HTMLReportGenerator:
         # AIDEV-NOTE-CLAUDE: Generate the new charts for strategy simulations.
         if strategy_simulations:
             charts['strategy_simulation_comparison'] = interactive_charts.create_strategy_simulation_chart(strategy_simulations, portfolio_analysis)
-        
-        # Keep old heatmap as fallback
-        charts['strategy_heatmap'] = interactive_charts.create_strategy_heatmap_chart()
-
+              
         return charts
             
     def _prepare_template_data(self, 

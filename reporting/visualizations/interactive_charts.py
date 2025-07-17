@@ -146,22 +146,26 @@ def create_correlation_chart(correlation_analysis: Dict[str, Any]) -> str:
         return f"<p>Error creating correlation chart: {str(e)}</p>"
 
 def create_trend_performance_chart(correlation_analysis: Dict[str, Any]) -> str:
-    """Create trend-based performance chart."""
+    """Create trend-based performance chart with unified colors."""
     try:
         trend_analysis = correlation_analysis.get('trend_analysis', {})
         if (not correlation_analysis or correlation_analysis.get('error') or 
             trend_analysis.get('error') or 'uptrend' not in trend_analysis):
-            return ""
+            return "<div class='skipped'>Insufficient data for trend performance chart.</div>"
 
         trends = ['Uptrend', 'Downtrend']
+        colors = ['#4CAF50', '#F44336']  # Green for uptrend, Red for downtrend
+
         returns = [trend_analysis.get('uptrend', {}).get('mean_return', 0), trend_analysis.get('downtrend', {}).get('mean_return', 0)]
         win_rates = [trend_analysis.get('uptrend', {}).get('win_rate', 0) * 100, trend_analysis.get('downtrend', {}).get('win_rate', 0) * 100]
         days = [trend_analysis.get('uptrend', {}).get('days', 0), trend_analysis.get('downtrend', {}).get('days', 0)]
         
-        fig = make_subplots(rows=1, cols=3, subplot_titles=('Average Daily Return', 'Win Rate (%)', 'Days Count'), specs=[[{"type": "bar"}, {"type": "bar"}, {"type": "bar"}]])
-        fig.add_trace(go.Bar(x=trends, y=returns, name='Avg Return', marker_color=['#4CAF50', '#F44336']), row=1, col=1)
-        fig.add_trace(go.Bar(x=trends, y=win_rates, name='Win Rate', marker_color=['#2196F3', '#FF9800']), row=1, col=2)
-        fig.add_trace(go.Bar(x=trends, y=days, name='Days', marker_color=['#9C27B0', '#607D8B']), row=1, col=3)
+        fig = make_subplots(rows=1, cols=3, subplot_titles=('Average Daily Return (SOL)', 'Win Rate (%)', 'Days Count'), specs=[[{"type": "bar"}, {"type": "bar"}, {"type": "bar"}]])
+        
+        fig.add_trace(go.Bar(x=trends, y=returns, name='Avg Return', marker_color=colors, hovertemplate='<b>%{x}</b><br>Avg Daily Return: %{y:.4f} SOL<extra></extra>'), row=1, col=1)
+        fig.add_trace(go.Bar(x=trends, y=win_rates, name='Win Rate', marker_color=colors, hovertemplate='<b>%{x}</b><br>Win Rate: %{y:.1f}%<extra></extra>'), row=1, col=2)
+        fig.add_trace(go.Bar(x=trends, y=days, name='Days', marker_color=colors, hovertemplate='<b>%{x}</b><br>Days: %{y}<extra></extra>'), row=1, col=3)
+        
         fig.update_layout(title="Performance by SOL Market Trend", template='plotly_white', showlegend=False, height=400)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
@@ -185,16 +189,14 @@ def create_weekend_comparison_chart(weekend_analysis: Dict[str, Any]) -> str:
         current = comparison.get('current_scenario', {}).get('metrics', {})
         alternative = comparison.get('alternative_scenario', {}).get('metrics', {})
         
-        metrics = ['Total PnL', 'Average ROI (%)', 'Sharpe Ratio']
+        metrics = ['Total PnL', 'Average ROI (%)']
         current_values = [
             current.get('total_pnl', 0), 
-            current.get('average_roi', 0) * 100, 
-            current.get('sharpe_ratio', 0)
+            current.get('average_roi', 0) * 100
         ]
         alternative_values = [
             alternative.get('total_pnl', 0), 
-            alternative.get('average_roi', 0) * 100, 
-            alternative.get('sharpe_ratio', 0)
+            alternative.get('average_roi', 0) * 100
         ]
         
         current_name = comparison.get('current_scenario', {}).get('name', 'Current')
@@ -799,142 +801,147 @@ def create_professional_cost_impact(portfolio_analysis: Dict[str, Any]) -> str:
         cost_summary = portfolio_analysis['infrastructure_cost_impact']
         
         # Prepare data
-        categories = ['SOL Denomination', 'USDC Denomination']
+        gross_pnl_sol = sol_metrics.get('total_pnl_sol', 0)
+        net_pnl_sol = sol_metrics.get('net_pnl_after_costs', 0)
         
-        # Correctly define Gross PnL (it should NOT have costs added)
-        gross_pnl = [
-            sol_metrics.get('total_pnl_sol', 0),
-            usdc_metrics.get('total_pnl_usdc', 0)
-        ]
+        gross_pnl_usdc = usdc_metrics.get('total_pnl_usdc', 0)
+        net_pnl_usdc = usdc_metrics.get('net_pnl_after_costs', 0)
         
-        # Net PnL is correct
-        net_pnl = [
-            sol_metrics.get('net_pnl_after_costs', 0),
-            usdc_metrics.get('net_pnl_after_costs', 0)
-        ]
+        daily_cost_usd = cost_summary.get('daily_cost_usd', 0)
+        # Use average price from the period for a representative daily SOL cost
+        avg_sol_price = (usdc_metrics.get('total_pnl_usdc', 0) / sol_metrics.get('total_pnl_sol', 1)) if sol_metrics.get('total_pnl_sol', 0) != 0 else 150
+        daily_cost_sol = (daily_cost_usd / avg_sol_price) if avg_sol_price > 0 else 0
         
-        # Costs are derived from net and gross
-        costs = [
-            gross_pnl[0] - net_pnl[0],
-            gross_pnl[1] - net_pnl[1]
-        ]
-        
-        # Create subplot
+        # Create subplot with a 3x2 grid to accommodate split charts
         fig = make_subplots(
-            rows=2, cols=2,
+            rows=3, cols=2,
             subplot_titles=(
-                'Gross vs Net PnL Comparison',
+                'Gross vs Net PnL (SOL)',
+                'Gross vs Net PnL (USDC)',
+                'Daily Infrastructure Cost (SOL)',
+                'Daily Infrastructure Cost (USDC)',
                 'Infrastructure Cost Impact (%)',
-                'Daily Infrastructure Cost',
                 'Break-even Analysis'
             ),
             specs=[[{"type": "bar"}, {"type": "bar"}],
-                   [{"type": "bar"}, {"type": "pie"}]]
+                   [{"type": "bar"}, {"type": "bar"}],
+                   [{"type": "bar"}, {"type": "pie"}]],
+            vertical_spacing=0.15
         )
         
-        # 1. Gross vs Net PnL
+        # 1a. Gross vs Net PnL (SOL)
         fig.add_trace(
             go.Bar(
-                x=categories,
-                y=gross_pnl,
-                name='Gross PnL',
-                marker_color='#004E89',
-                opacity=0.8,
-                hovertemplate='<b>Gross PnL</b><br>Currency: %{x}<br>Amount: %{y:.2f}<extra></extra>'
+                x=['Gross PnL', 'Net PnL'],
+                y=[gross_pnl_sol, net_pnl_sol],
+                name='PnL (SOL)',
+                marker_color=['#004E89', '#FF6B35'],
+                hovertemplate='<b>%{x}</b><br>Amount: %{y:.3f} SOL<extra></extra>',
+                showlegend=False
             ),
             row=1, col=1
         )
         
+        # 1b. Gross vs Net PnL (USDC)
         fig.add_trace(
             go.Bar(
-                x=categories,
-                y=net_pnl,
-                name='Net PnL',
-                marker_color='#FF6B35',
-                opacity=0.8,
-                hovertemplate='<b>Net PnL</b><br>Currency: %{x}<br>Amount: %{y:.2f}<extra></extra>'
-            ),
-            row=1, col=1
-        )
-        
-        # 2. Cost Impact Percentage
-        cost_impact_sol = (costs[0] / gross_pnl[0] * 100) if gross_pnl[0] > 0 else 0
-        cost_impact_usdc = (costs[1] / gross_pnl[1] * 100) if gross_pnl[1] > 0 else 0
-        impact_percentages = [cost_impact_sol, cost_impact_usdc]
-        
-        fig.add_trace(
-            go.Bar(
-                x=categories,
-                y=impact_percentages,
-                name='Cost Impact %',
-                marker_color=['#7209B7', '#A663CC'],
-                opacity=0.8,
-                hovertemplate='<b>Cost Impact</b><br>Currency: %{x}<br>Impact: %{y:.1f}%<extra></extra>',
+                x=['Gross PnL', 'Net PnL'],
+                y=[gross_pnl_usdc, net_pnl_usdc],
+                name='PnL (USDC)',
+                marker_color=['#004E89', '#FF6B35'],
+                hovertemplate='<b>%{x}</b><br>Amount: $%{y:.2f}<extra></extra>',
                 showlegend=False
             ),
             row=1, col=2
         )
         
-        # 3. Daily Cost Allocation (using direct, reliable daily cost data)
-        daily_cost_usd = cost_summary.get('daily_cost_usd', 0)
-        avg_sol_price_in_period = (usdc_metrics.get('total_pnl_usdc', 0) / sol_metrics.get('total_pnl_sol', 1)) if sol_metrics.get('total_pnl_sol', 0) != 0 else 150
-        daily_cost_sol = (daily_cost_usd / avg_sol_price_in_period) if avg_sol_price_in_period > 0 else 0
-        
-        daily_costs = [
-            daily_cost_sol,
-            daily_cost_usd
-        ]
-        
+        # 2a. Daily Infrastructure Cost (SOL)
         fig.add_trace(
             go.Bar(
-                x=categories,
-                y=daily_costs,
-                name='Daily Cost',
-                marker_color=['#FF6B35', '#004E89'],
-                opacity=0.6,
-                hovertemplate='<b>Daily Cost</b><br>Currency: %{x}<br>Cost: %{y:.3f}<extra></extra>',
+                x=['Daily Cost'],
+                y=[daily_cost_sol],
+                name='Daily Cost (SOL)',
+                marker_color='#D2001C',
+                hovertemplate='<b>Daily Cost</b><br>Amount: %{y:.4f} SOL<extra></extra>',
                 showlegend=False
             ),
             row=2, col=1
         )
         
-        # 4. Break-even Analysis (Pie Chart)
+        # 2b. Daily Infrastructure Cost (USDC)
+        fig.add_trace(
+            go.Bar(
+                x=['Daily Cost'],
+                y=[daily_cost_usd],
+                name='Daily Cost (USDC)',
+                marker_color='#D2001C',
+                hovertemplate='<b>Daily Cost</b><br>Amount: $%{y:.2f}<extra></extra>',
+                showlegend=False
+            ),
+            row=2, col=2
+        )
+
+        # 3. Cost Impact Percentage (This chart was already working correctly)
+        cost_impact_sol = (abs(gross_pnl_sol - net_pnl_sol) / abs(gross_pnl_sol) * 100) if gross_pnl_sol != 0 else 0
+        cost_impact_usdc = (abs(gross_pnl_usdc - net_pnl_usdc) / abs(gross_pnl_usdc) * 100) if gross_pnl_usdc != 0 else 0
+        impact_percentages = [cost_impact_sol, cost_impact_usdc]
+        
+        fig.add_trace(
+            go.Bar(
+                x=['SOL', 'USDC'],
+                y=impact_percentages,
+                name='Cost Impact %',
+                marker_color=['#7209B7', '#A663CC'],
+                hovertemplate='<b>Cost Impact</b><br>Currency: %{x}<br>Impact: %{y:.1f}%<extra></extra>',
+                showlegend=False
+            ),
+            row=3, col=1
+        )
+        
+        # 4. Break-even Analysis (Pie Chart - this was also working correctly)
         break_even_days = cost_summary.get('break_even_days', 0)
         analysis_days = cost_summary.get('period_days', 30)
         
-        if break_even_days > 0 and break_even_days < analysis_days:
-            sizes = [break_even_days, analysis_days - break_even_days]
-            labels = [f'Break-even<br>({break_even_days:.0f} days)', 
-                     f'Profitable<br>({analysis_days - break_even_days:.0f} days)']
-            colors = ['#FF6B35', '#004E89']
+        if break_even_days > 0 and analysis_days > 0:
+            if break_even_days >= analysis_days:
+                sizes = [analysis_days]
+                labels = [f'Break-even not reached<br>within {analysis_days} days']
+                colors = ['#FF6B35']
+            else:
+                sizes = [break_even_days, analysis_days - break_even_days]
+                labels = [f'Break-even<br>({break_even_days:.0f} days)', 
+                         f'Profitable<br>({analysis_days - break_even_days:.0f} days)']
+                colors = ['#FF6B35', '#004E89']
             
             fig.add_trace(
                 go.Pie(
                     labels=labels,
                     values=sizes,
                     marker_colors=colors,
+                    hole=0.3,
                     hovertemplate='<b>%{label}</b><br>Days: %{value}<br>Percentage: %{percent}<extra></extra>',
                     showlegend=False
                 ),
-                row=2, col=2
+                row=3, col=2
             )
         
         fig.update_layout(
-            height=700,
+            height=900,  # Increased height for the new row
             title=dict(
                 text="Professional Infrastructure Cost Impact Analysis",
                 font=dict(size=20, color='#2E3440'),
                 x=0.5
             ),
             template='plotly_white',
-            showlegend=True,
-            barmode='group'  # AIDEV-NOTE-CLAUDE: Added to display bars side-by-side instead of stacking
+            showlegend=True
         )
         
-        # Update axes
-        fig.update_yaxes(title_text="PnL Amount", row=1, col=1)
-        fig.update_yaxes(title_text="Cost Impact (%)", row=1, col=2)
-        fig.update_yaxes(title_text="Daily Cost", row=2, col=1)
+        # Update axes with specific labels
+        fig.update_yaxes(title_text="PnL Amount (SOL)", row=1, col=1)
+        fig.update_yaxes(title_text="PnL Amount (USDC)", row=1, col=2)
+        fig.update_yaxes(title_text="Daily Cost (SOL)", row=2, col=1)
+        fig.update_yaxes(title_text="Daily Cost (USDC)", row=2, col=2)
+        fig.update_yaxes(title_text="Cost Impact (%)", row=3, col=1)
         
         return pyo.plot(fig, output_type='div', include_plotlyjs=False)
         
@@ -1024,3 +1031,70 @@ def create_strategy_avg_pnl_summary(config: Dict[str, Any], strategy_instances_p
     except Exception as e:
         logger.error(f"Failed to create strategy AVG PnL summary: {e}", exc_info=True)
         return f"<p>Error creating strategy AVG PnL summary: {str(e)}</p>"
+
+def create_ema_trend_chart(correlation_analysis: Dict[str, Any]) -> str:
+    """Create a chart showing SOL price vs. a conditionally colored 50-day EMA."""
+    try:
+        raw_data = correlation_analysis.get('raw_data', {})
+        if 'sol_daily_data' not in raw_data or raw_data['sol_daily_data'].empty:
+            return "<div class='skipped'>No daily SOL data available for EMA trend chart.</div>"
+
+        df = raw_data['sol_daily_data'].copy()
+
+        if not all(col in df.columns for col in ['close', 'ema_50', 'trend']):
+            return "<div class='skipped'>Data for EMA trend chart is incomplete (missing close, ema_50, or trend).</div>"
+
+        fig = go.Figure()
+
+        # Add SOL price as a neutral background line
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['close'],
+            mode='lines',
+            name='SOL Price',
+            line=dict(color='lightgrey', width=1.5),
+            hovertemplate='Date: %{x}<br>SOL Price: $%{y:.2f}<extra></extra>'
+        ))
+
+        # Add dummy traces for a clean legend
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='EMA 50 - Uptrend', line=dict(color='#4CAF50', width=3)))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', name='EMA 50 - Downtrend', line=dict(color='#F44336', width=3)))
+
+        # Create segments for continuous trends for conditional coloring
+        df['trend_change'] = df['trend'].ne(df['trend'].shift()).cumsum()
+        
+        for _, segment in df.groupby('trend_change'):
+            trend_type = segment['trend'].iloc[0]
+            color = '#4CAF50' if trend_type == 'uptrend' else '#F44336'
+            
+            # To connect gaps, we add the last point of the previous segment
+            first_index = segment.index[0]
+            prev_loc = df.index.get_loc(first_index) - 1
+            if prev_loc >= 0:
+                plot_segment = pd.concat([df.iloc[[prev_loc]], segment])
+            else:
+                plot_segment = segment
+            
+            fig.add_trace(go.Scatter(
+                x=plot_segment.index,
+                y=plot_segment['ema_50'],
+                mode='lines',
+                line=dict(color=color, width=3),
+                hovertemplate=f'Date: %{{x}}<br>EMA 50: $%{{y:.2f}}<br>Trend: {trend_type}<extra></extra>',
+                showlegend=False
+            ))
+
+        fig.update_layout(
+            title="SOL Price vs. EMA 50 Trend Indicator",
+            xaxis_title="Date",
+            yaxis_title="Price (USDC)",
+            template='plotly_white',
+            height=500,
+            hovermode='x unified',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        return pyo.plot(fig, output_type='div', include_plotlyjs=False)
+
+    except Exception as e:
+        logger.error(f"Failed to create EMA trend chart: {e}", exc_info=True)
+        return f"<p>Error creating EMA trend chart: {str(e)}</p>"

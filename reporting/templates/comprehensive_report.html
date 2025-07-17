@@ -123,6 +123,12 @@
             {% if correlation_analysis and not correlation_analysis.get('error') and charts.get('correlation_analysis') %}
                 <div id="correlation_analysis" class="plotly-chart">{{ charts.correlation_analysis | safe }}</div>
                 <div id="trend_performance" class="plotly-chart">{{ charts.trend_performance | safe }}</div>
+                
+                <!-- NEW CHART ADDED HERE -->
+                {% if charts.ema_trend_chart %}
+                <div id="ema_trend_chart" class="plotly-chart">{{ charts.ema_trend_chart | safe }}</div>
+                {% endif %}
+                
             {% else %}
                 <div class="skipped">Market Correlation analysis was not performed or failed. Reason: {{ (correlation_analysis.get('error') or correlation_analysis.get('correlation_metrics', {}).get('error')) | default('Cache data unavailable') }}</div>
             {% endif %}
@@ -158,14 +164,7 @@
             {% else %}
                 <div class="skipped">Strategy performance summary could not be generated. Check if 'strategy_instances.csv' exists and has sufficient data.</div>
             {% endif %}
-            
-            <!-- Legacy Heatmap as Fallback -->
-            <h3>Legacy Strategy Heatmap (Fallback)</h3>
-            {% if charts.get('strategy_heatmap') %}
-                <div id="strategy_heatmap_legacy" class="plotly-chart" style="min-height: 400px;">{{ charts.strategy_heatmap | safe }}</div>
-            {% else %}
-                <div class="skipped">Legacy strategy heatmap could not be generated.</div>
-            {% endif %}
+                        
         </div>
         
     </div>
