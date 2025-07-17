@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, List
 import plotly.offline as pyo
 from jinja2 import Environment, FileSystemLoader
 
-from .visualizations import interactive_charts
+from .visualizations import interactive as interactive_charts
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -91,7 +91,6 @@ class HTMLReportGenerator:
         charts = {}
         
         # Original charts
-        charts['equity_curve'] = interactive_charts.create_equity_curve_chart(portfolio_analysis)
         charts['metrics_summary'] = interactive_charts.create_metrics_summary_chart(portfolio_analysis)
         
         # Professional charts from chart_generator.py

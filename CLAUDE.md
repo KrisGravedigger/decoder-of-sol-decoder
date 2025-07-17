@@ -340,7 +340,12 @@ project/
 │   │   ├── cost_impact.py
 │   │   ├── drawdown.py
 │   │   ├── equity_curve.py
-│   │   ├── interactive_charts.py # Plotly charts for HTML report
+│   │   ├── interactive/          # NEW: Interactive chart modules
+│   │   │   ├── __init__.py       # NEW: Re-exports all chart functions
+│   │   │   ├── market_charts.py  # NEW: Correlation, EMA Trend charts
+│   │   │   ├── portfolio_charts.py # NEW: KPI, Equity Curve, Drawdown, Cost charts
+│   │   │   ├── simulation_charts.py# NEW: Weekend, Strategy Sim charts
+│   │   │   └── strategy_charts.py  # NEW: Heatmap, AVG PnL charts
 │   │   └── strategy_heatmap.py
 │   ├── orchestrator.py         # Core logic engine for the reporting workflow
 │   ├── analysis_runner.py      # Runs Spot vs. Bid-Ask simulation for all positions
@@ -369,8 +374,8 @@ Cache: automatic Moralis API response caching (JSON files) with smart gap detect
 Reports: individual text reports + collective CSV with clean column names
 
 🏃‍♂️ Project Status
-Last Update: 2025-07-11
-Current Version: v4.2 - Strategy parsing & pipeline stabilization
+Last Update: 2025-07-17
+Current Version: v4.4 - Strategy parsing & pipeline stabilization
 Working Features:
 
 Position extraction from SOL Decoder logs ✅ (improved to >99.5% accuracy)
@@ -423,6 +428,8 @@ Chronological file processing with intelligent duplicate handling ✅
 - **Robust API Key Handling**: Dependency injection ensures the API key is passed securely and used only when needed ✅
 - **Cache-Only Mode**: Full application support for running in an offline/cached mode for testing and cost savings ✅
 - **Error Resiliency (Graceful Degradation)**: The HTML report generation no longer crashes on missing data (e.g., from market analysis in cache-only mode), instead displaying informative messages ✅
+
+- **Modular Chart Generation**: Decoupled the monolithic interactive chart module into four smaller, specialized modules (`portfolio`, `strategy`, `market`, `simulation`) for improved maintainability and adherence to the 600-line file limit. ✅
 
 **Smart Price Cache Management v2.0:**
 - **Intelligent Gap Detection**: Only fetches missing time periods, prevents redundant API calls ✅
@@ -762,3 +769,26 @@ For improved clarity, the metric's label in the KPI table was updated to "Max Pn
 - `reporting/templates/comprehensive_report.html`
 
 **System Status:** Report visualizations are enhanced and simplified. All changes are stable. ✅
+
+**2025-07-19: Refactoring of Interactive Chart Module**
+
+**Goal:** To refactor the oversized `interactive_charts.py` file (over 800 lines) into smaller, thematic modules to improve maintainability, and to remove obsolete chart functions, adhering to the project's 600-line file limit convention.
+
+**Achieved:**
+- **Decomposition:** The monolithic `interactive_charts.py` was successfully decomposed into four new, specialized modules: `portfolio_charts.py`, `strategy_charts.py`, `market_charts.py`, and `simulation_charts.py`.
+- **New Structure:** A new directory `reporting/visualizations/interactive/` was created to house the new modules, improving project organization.
+- **Simplified Interface:** An `__init__.py` file was added to the new directory to re-export all chart functions, ensuring that the consuming `html_report_generator.py` only required a minimal import path change and no changes to its function calls.
+- **Code Pruning:** Two obsolete and unused functions (`create_equity_curve_chart`, `create_strategy_heatmap_chart`) were identified and completely removed, reducing dead code.
+- **Pipeline Consistency:** All related files (`html_report_generator.py`, `comprehensive_report.html`) were updated to reflect the new structure and removal of old functions.
+
+**Business Impact:**
+- **Improved Maintainability:** Developers can now quickly locate and modify a specific chart's logic without navigating a massive file.
+- **Enhanced Readability:** The smaller, focused modules are easier to understand and debug.
+- **Adherence to Conventions:** The project now complies with the established 600-line file limit rule, ensuring long-term code health.
+
+**Files Modified/Created/Deleted:**
+- **Deleted:** `reporting/visualizations/interactive_charts.py`
+- **Created:** `reporting/visualizations/interactive/` (and all 5 files within)
+- **Modified:** `reporting/html_report_generator.py`, `reporting/templates/comprehensive_report.html`, `CLAUDE.md`
+
+**System Status:** Refactoring is complete. The new modular chart generation system is stable and operational. ✅
