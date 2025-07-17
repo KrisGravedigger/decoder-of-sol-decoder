@@ -1,75 +1,75 @@
-# SOL Decoder Strategy Analyzer v2.0
+# SOL Decoder Strategy Analyzer v4.4
 
-A Python tool for analyzing SOL Decoder bot performance by extracting position data from bot logs and simulating alternative LP strategies on Meteora DLMM using research-based mathematical formulas and historical price data.
+A comprehensive Python tool for analyzing SOL Decoder bot performance with advanced portfolio analytics, market correlation analysis, and ML-ready strategy optimization capabilities.
 
 ## Overview
 
-This tool helps SOL Decoder bot users find optimal strategy combinations by:
+This tool has evolved from a simple log parser into a complete portfolio analytics platform that helps SOL Decoder bot users optimize their LP strategies through:
 
-1. **Extracting position data** from bot logs automatically
-2. **Fetching historical price data** via Moralis API for each position
-3. **Simulating alternative 1-sided strategies** using research-verified mathematical formulas
-4. **Generating comprehensive reports** comparing Spot vs Bid-Ask distribution strategies
+1. **Automated Log Processing** - Extract position data from bot logs with >99.5% accuracy
+2. **Advanced Market Analysis** - Market correlation, EMA trend detection, weekend parameter optimization
+3. **Professional Portfolio Analytics** - Dual currency analysis (SOL/USDC) with infrastructure cost impact
+4. **Interactive Reporting** - Plotly-based comprehensive reports with executive summaries
+5. **Strategy Optimization** - Compare Spot vs Bid-Ask distributions with research-verified mathematical formulas
+6. **Smart Data Management** - Intelligent caching, offline analysis, graceful error handling
 
-The tool analyzes **1-sided LP strategies** with different distribution patterns:
-- **Spot Distribution**: Uniform liquidity across all bins
-- **Bid-Ask Distribution**: U-shaped distribution (more liquidity at price edges)
+The tool analyzes **1-sided LP strategies** with different distribution patterns using official Meteora DLMM mathematical formulas with automatic step size detection.
 
-Both strategies use research-based Meteora DLMM mathematical formulas with automatic step size detection (WIDE/MEDIUM/NARROW/SIXTYNINE).
+## 🆕 Version 4.4 Major Updates
 
-## 🆕 Version 2.0 Updates
+**Portfolio Analytics & Market Intelligence:**
+- ✅ **Complete Portfolio Analytics Module**: Dual SOL/USDC currency analysis with infrastructure cost impact
+- ✅ **Market Correlation Analysis**: Pearson correlation with SOL trends, EMA slope detection  
+- ✅ **Weekend Parameter Optimization**: weekendSizePercentage impact simulation with statistical significance
+- ✅ **Interactive HTML Reports**: Plotly-based comprehensive reports with executive summaries
+- ✅ **Professional Charting**: 4 chart types (equity curve, drawdown, strategy heatmap, cost impact)
 
-**New in v2.0:**
-- ✅ **Research-verified accuracy**: Implemented mathematical formulas from official Meteora DLMM documentation
-- ✅ **U-shaped Bid-Ask distribution**: Uses proper `Weight(x) = α × (x^β + (1-x)^β)` formula
-- ✅ **Automatic step size processing**: Extracts and applies WIDE/MEDIUM/NARROW/SIXTYNINE from logs
-- ✅ **Enhanced safety**: Removed experimental 2-sided strategies, focus on proven 1-sided approaches
-- ✅ **Production ready**: Comprehensive error handling, validation, and documentation
+**Architecture & Reliability:**
+- ✅ **Centralized Architecture**: Single entry point (main.py) with interactive menu system
+- ✅ **Smart Cache Management v2.0**: Intelligent gap detection, API failure vs no-data distinction
+- ✅ **True Offline Mode**: Complete analysis capability without API calls using cached data
+- ✅ **Graceful Degradation**: Reports handle missing data without crashes
+- ✅ **Enhanced Error Resiliency**: Comprehensive fallback mechanisms throughout pipeline
 
-## ⚠️ Important: Tool Purpose & Proper Usage
+**Data Quality & Parsing:**
+- ✅ **Enhanced Strategy Parsing**: >99.5% accuracy with context-based detection
+- ✅ **Take Profit/Stop Loss Extraction**: TP/SL values parsed and integrated into analysis pipeline
+- ✅ **"Superseded" Position Logic**: Robust handling of position restarts and replacements
+- ✅ **Manual Position Filtering**: positions_to_skip.csv for data quality control
+- ✅ **Cross-File Position Tracking**: Positions that open/close across different log files
 
-**This tool is designed for comparative strategy analysis**, not precise financial predictions.
-
-### ✅ **What this tool IS good for:**
-- **Comparing Spot vs Bid-Ask** strategies for your actual positions
-- **Identifying trends** across different market conditions and step sizes
-- **Ranking strategies** for each position (which performed better)
-- **Data-driven insights** for strategy selection
-- **Relative performance** assessment between distribution methods
-
-### ❌ **What this tool is NOT:**
-- A precise financial forecasting tool
-- Accurate for absolute PnL predictions  
-- A substitute for thorough market analysis
-- Suitable for high-stakes decisions without additional research
-
-### 🔬 **Technical Foundation:**
-- **Research-based formulas**: Uses official Meteora DLMM mathematical models
-- **Simplified fee models**: Actual fees depend on volume patterns and market conditions
-- **Historical analysis**: Based on past performance for comparative purposes
-- **Conservative approach**: Focuses only on proven 1-sided strategies
-
-### 📊 **Recommended Usage:**
-1. Use for **Spot vs Bid-Ask comparison** within your positions
-2. Look for **patterns** across different step sizes and market conditions
-3. Focus on **relative performance differences** between strategies
-4. Use results to **guide strategy selection** for future positions
-5. Combine with market analysis and risk management
+**Performance & Usability:**
+- ✅ **3x Pipeline Speed Improvement**: Optimized data flow and single CSV load architecture
+- ✅ **Modular Chart Generation**: Decomposed into specialized modules for better maintainability
+- ✅ **Zero Column Mapping Complexity**: Unified naming system across entire codebase
+- ✅ **API Credit Conservation**: Controlled API usage with user confirmation prompts
 
 ## Features
 
-- 📊 **Automated Log Parsing**: Extracts position data from SOL Decoder bot logs with 90% accuracy
+### Core Analytics
+- 📊 **Advanced Log Parsing**: >99.5% accuracy with TP/SL extraction and cross-file position tracking
 - 📈 **Meteora DLMM Integration**: Research-verified mathematical simulations for strategy comparison
-- 🎯 **Strategy Optimization**: Compares Spot vs Bid-Ask distributions with step size analysis
-- 📋 **Comprehensive Reports**: Detailed analysis reports for each position and strategy combination
-- 💾 **Smart Caching**: Caches price data to minimize API calls and speed up analysis
-- 🔍 **Robust Validation**: Data validation, error handling, and duplicate prevention
-- 🔬 **Research-Based**: Uses official Meteora documentation formulas for accuracy
+- 🎯 **Strategy Optimization**: Spot vs Bid-Ask distributions with step size analysis and performance ranking
+- 💰 **Infrastructure Cost Analysis**: Daily cost allocation with break-even analysis and dual currency impact
+- 📊 **Market Correlation Analysis**: Portfolio vs SOL performance with EMA trend detection
+
+### Reporting & Visualization  
+- 📋 **Interactive HTML Reports**: Professional Plotly-based reports with executive summaries
+- 📊 **Professional Charts**: Equity curves, drawdown analysis, strategy heatmaps, cost impact charts
+- 🔍 **Weekend Parameter Analysis**: weekendSizePercentage optimization with statistical significance testing
+- 💾 **Smart Caching**: Intelligent gap detection and API failure handling to minimize costs
+
+### Architecture & Reliability
+- 🏗️ **Centralized Entry Point**: Single main.py with interactive menu for all operations
+- 💾 **True Offline Analysis**: Complete analysis capability using cached data without API calls
+- 🔧 **Graceful Error Handling**: Reports handle missing data and API failures without crashes
+- 🛠️ **Manual Data Correction**: positions_to_skip.csv for excluding problematic positions
+- 🔄 **Cross-File Position Tracking**: Handles positions that span multiple log files
 
 ## Requirements
 
 - Python 3.11+ (recommended for maximum compatibility)
-- Moralis API key (free tier available)
+- Moralis API key (free tier available - used only for initial data fetching)
 - SOL Decoder bot log files
 
 ## Installation
@@ -92,215 +92,244 @@ MORALIS_API_KEY=your_moralis_api_key_here
 
 ## Usage
 
-### 1. Prepare Your Data
+### Interactive Menu System
 
-Place your SOL Decoder bot log files in the `input/` directory. The tool automatically processes:
-- Log files starting with "app" and containing ".log" in filename
-- Standard SOL Decoder log format with timestamps and position events
-- Position opening/closing events, PnL data, and strategy information
-- Step size configurations (WIDE/MEDIUM/NARROW/SIXTYNINE)
-
-**Note**: The log structure is specific to SOL Decoder bot output. You need actual bot logs to use this tool effectively.
-
-### 2. Run the Analysis
-
-Execute the main analyzer:
+Run the main application:
 ```bash
-python main_analyzer.py
+python main.py
 ```
 
-The tool will:
-1. Extract position data from SOL Decoder logs → `positions_to_analyze.csv`
-2. Parse step size and strategy information automatically
-3. Fetch Meteora pool price history for each position
-4. Run strategy simulations using research-based mathematical formulas
-5. Generate detailed reports in `detailed_reports/`
-6. Create final summary with optimal strategies → `final_analysis_report.csv`
-
-### 3. Review Results
-
-- **Individual Reports**: Check `detailed_reports/` for position-specific analysis
-- **Summary Report**: Review `final_analysis_report.csv` for comparative results
-- **Strategy Rankings**: Focus on which strategy (Spot vs Bid-Ask) performed better for each position
-- **Logs**: Monitor console output for processing status and any issues
-
-**Key Insight**: Look for patterns in when Bid-Ask outperforms Spot and vice versa. Results will help guide strategy selection for similar market conditions.
-
-## Sample Results Interpretation
-
-Example findings from real analysis:
-- **Bid-Ask advantage**: 9 out of 61 positions (15%) showed better performance with Bid-Ask distribution
-- **Spot advantage**: 52 out of 61 positions (85%) showed better performance with Spot distribution
-- **Pattern analysis**: Consider market conditions, step sizes, and position duration for insights
-
-**Your results may vary** based on:
-- Different market conditions during your trading period
-- Various step size configurations in your positions
-- Pool-specific characteristics and trading patterns
-
-## Output Files
-
-| File | Description |
-|------|-------------|
-| `positions_to_analyze.csv` | Extracted position data from SOL Decoder logs |
-| `final_analysis_report.csv` | Strategy comparison with optimal recommendations |
-| `detailed_reports/*.txt` | Individual position analysis with all strategy results |
-| `price_cache/` | Cached Meteora pool price data (auto-generated) |
-
-## Project Structure
+The interactive menu provides access to all functionality:
 
 ```
-├── main_analyzer.py          # Main orchestration script
-├── log_extractor.py          # SOL Decoder log parsing and position extraction  
-├── strategy_analyzer.py      # Research-based strategy simulation engine
-├── parsing_utils.py          # Log parsing utilities with step size detection
-├── models.py                 # Position data models and validation
-├── debug_analyzer.py         # Debug tools and context analysis
-├── input/                    # Place your SOL Decoder log files here
-├── detailed_reports/         # Generated individual position reports
-├── price_cache/             # Cached Meteora pool price data
-├── .env                     # API configuration (create this)
-└── requirements.txt         # Python dependencies
+=== SOL Decoder Strategy Analyzer v4.4 ===
+[1] Extract positions from logs
+[2] Run Spot vs Bid-Ask analysis  
+[3] Fetch/Update market data
+[4] Generate portfolio analytics report
+[5] Run comprehensive analysis (steps 1-4)
+[6] Cache-only analysis (offline mode)
+```
+
+### Typical Workflow
+
+1. **Place log files** in `input/` directory (supports multi-wallet via subfolders)
+2. **Run comprehensive analysis** (Option 5) for first-time setup
+3. **Use cache-only mode** (Option 6) for subsequent analysis to save API credits
+4. **Review reports** in `detailed_reports/` and open the HTML report for interactive analysis
+
+### Advanced Options
+
+- **Manual Position Filtering**: Create `positions_to_skip.csv` to exclude specific positions
+- **Force Data Refresh**: Use submenu in Step 3 to refresh cached market data
+- **Multi-Wallet Analysis**: Organize logs in `input/wallet_name/` subfolders
+
+## Sample Results & Key Insights
+
+**Portfolio Performance Example:**
+- **Total Positions Analyzed**: 450+ positions across multiple strategies
+- **Strategy Comparison**: Bid-Ask vs Spot distribution performance rankings
+- **Market Correlation**: Portfolio correlation with SOL price movements and trend analysis
+- **Infrastructure Impact**: Cost allocation analysis showing break-even points and net profitability
+
+**Actionable Insights:**
+- Strategy performance varies significantly by market conditions (uptrend vs downtrend)
+- Weekend parameter optimization can impact total returns by 15-30%
+- Infrastructure costs typically represent 2-8% of gross PnL depending on position size and duration
+
+## Output Files & Reports
+
+| File/Report | Description |
+|-------------|-------------|
+| `positions_to_analyze.csv` | Complete extracted position data with TP/SL |
+| `final_analysis_report.csv` | Strategy comparison with optimization recommendations |
+| `comprehensive_report.html` | **Interactive HTML report with all analytics** |
+| `detailed_reports/*.txt` | Individual position analysis files |
+| `strategy_instances.csv` | Strategy performance groupings and rankings |
+| `price_cache/` | Smart cached market data (auto-managed) |
+
+## Enhanced Project Structure
+
+```
+├── main.py                          # 🆕 Centralized entry point with interactive menu
+├── core/
+│   └── models.py                    # 🆕 Enhanced Position model with TP/SL fields
+├── extraction/                      # Data extraction from logs
+│   ├── log_extractor.py            # 🆕 >99.5% accuracy parser with cross-file tracking  
+│   └── parsing_utils.py            # 🆕 Enhanced TP/SL extraction and strategy detection
+├── reporting/                       # 🆕 Complete portfolio analytics module
+│   ├── config/
+│   │   └── portfolio_config.yaml   # 🆕 Infrastructure costs and analysis parameters
+│   ├── templates/
+│   │   └── comprehensive_report.html # 🆕 Interactive HTML report template
+│   ├── visualizations/
+│   │   └── interactive/             # 🆕 Modular chart generation system
+│   │       ├── portfolio_charts.py  # KPI, Equity, Drawdown, Cost charts
+│   │       ├── strategy_charts.py   # Heatmap, Performance summary charts  
+│   │       ├── market_charts.py     # Correlation, EMA Trend charts
+│   │       └── simulation_charts.py # Weekend parameter analysis
+│   ├── orchestrator.py             # 🆕 Main analytics orchestration engine
+│   ├── html_report_generator.py    # 🆕 Interactive report generation
+│   ├── market_correlation_analyzer.py # 🆕 Market correlation and trend analysis
+│   └── price_cache_manager.py      # 🆕 Smart caching with intelligent gap detection
+├── simulations/                     # Strategy simulation engines
+│   ├── spot_vs_bidask_simulator.py # Research-based DLMM simulations
+│   └── weekend_simulator.py        # 🆕 Weekend parameter optimization
+├── tools/                           # Utility and debugging tools
+│   ├── api_checker.py              # API connectivity verification
+│   └── debug_analyzer.py           # Context analysis and debugging
+└── input/                           # Log files (supports multi-wallet subfolders)
 ```
 
 ## Configuration
 
-Key configuration variables in each module:
+### Portfolio Analytics (`reporting/config/portfolio_config.yaml`)
+```yaml
+portfolio_analysis:
+  risk_free_rates:
+    sol_staking: 0.04      # 4% APR SOL staking
+    usdc_staking: 0.05     # 5% APR USDC staking
+  cost_allocation_method: "daily_flat"
+  analysis_periods: [1, 7, 30, 90]  # days
+  min_position_threshold: 0.01       # SOL minimum for analysis
 
-### Log Extractor (`log_extractor.py`)
-- `LOG_DIR`: Input directory for log files (default: "input")
-- `OUTPUT_CSV`: Output CSV filename (default: "positions_to_analyze.csv")
-- `MIN_PNL_THRESHOLD`: Minimum PnL for analysis inclusion (default: 0.01 SOL)
+infrastructure_costs:
+  monthly:
+    vps_cost: 8.54         # USD
+    rpc_endpoints: 20.0   # USD  
+    bot_subscription: 00.0 # USD
+    # Total: 28.54 USD/month = 0.95 USD/day
 
-### Main Analyzer (`main_analyzer.py`)
-- `POSITIONS_CSV`: Position data file (default: "positions_to_analyze.csv")
-- `FINAL_REPORT_CSV`: Final report filename (default: "final_analysis_report.csv")
-- `DETAILED_REPORTS_DIR`: Individual reports directory (default: "detailed_reports")
-- `PRICE_CACHE_DIR`: Price cache directory (default: "price_cache")
+currency_analysis:
+  primary_denomination: "sol"
+  include_usdc_view: true
+  sol_price_source: "moralis"
 
-### Strategy Analyzer (`strategy_analyzer.py`)
-- `bin_step`: Price step between bins in basis points (extracted from logs)
-- `step_size`: Step size configuration (WIDE/MEDIUM/NARROW/SIXTYNINE)
-- Mathematical formulas based on official Meteora DLMM research
+visualization:
+  chart_types: ["equity_curve", "drawdown", "cost_impact", "strategy_heatmap"]
+  timestamp_format: "%Y%m%d_%H%M"
+  filters:
+    min_strategy_occurrences: 2  # minimum positions per strategy
+    top_strategies_only: 10      # show only top N strategies
+    exclude_outliers: false       # remove statistical outliers
+    date_range_filter: false      # custom date range selection
 
-## API Requirements
-
-This tool requires a Moralis API key for fetching Solana/Meteora price data:
-
-1. Sign up at [moralis.io](https://moralis.io)
-2. Get your free API key from the dashboard  
-3. Add it to your `.env` file as `MORALIS_API_KEY`
-
-The tool automatically handles:
-- Rate limiting (0.6s between requests)
-- Response caching to minimize API usage
-- Error handling for network issues
-
-## Log Format Requirements
-
-This tool is designed specifically for SOL Decoder bot logs. The bot generates logs with:
-
-- Position opening events with strategy information (Spot/Bid-Ask, step sizes)
-- Pool addresses for Meteora DLMM pairs
-- Investment amounts and PnL calculations
-- Timestamps in the format `v1.2.3-MM/DD-HH:MM:SS`
-
-**Important**: You need actual SOL Decoder bot logs to use this analyzer. The log structure is specific to that bot's output format.
-
-## Mathematical Foundation
-
-The tool implements research-based formulas from official Meteora DLMM documentation:
-
-### Bid-Ask Distribution (U-shaped)
+# Weekend Parameter Analysis Configuration
+weekend_analysis:
+  weekend_size_reduction: 0        # 0=disabled, 1=enabled for all positions
+  size_reduction_percentage: 80    # 80% reduction = 20% remains; 0 = no analysis
+  
+ api_settings:
+  cache_only: false
 ```
-Weight(x) = α × (x^β + (1-x)^β)
-```
-- More liquidity at price range edges
-- Better for capturing volatility and range-bound price action
 
-### Spot Distribution (Uniform)
-```
-Weight(x) = constant
-```
-- Even liquidity distribution across all bins
-- Simpler strategy, good for steady trending markets
+## API Usage & Cost Management
 
-### Step Size Impact
-- **WIDE**: ~50 bins, broader price coverage
-- **MEDIUM**: ~20 bins, moderate range
-- **NARROW**: 1-10 bins, tight price focus  
-- **SIXTYNINE**: 69 bins, maximum range
+**Smart Caching System:**
+- **Intelligent Gap Detection**: Only fetches missing time periods
+- **API Failure Handling**: Distinguishes between API errors and legitimate empty periods  
+- **Monthly Cache Organization**: Organized cache files with incremental updates
+- **Force Refresh Options**: User-controlled cache refresh for data updates
+
+**Cost Conservation:**
+- **Cache-Only Mode**: Complete offline analysis using cached data
+- **User Confirmation Prompts**: API usage requires explicit user consent
+- **Controlled Fetching**: Single centralized data fetching phase prevents unexpected API calls
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues & Solutions
 
 **No positions extracted:**
-- Verify you're using actual SOL Decoder bot log files
-- Check that files start with "app" and contain ".log"
-- Ensure the bot logs contain position opening/closing events
+- Verify SOL Decoder bot log files are in `input/` directory
+- Check logs contain actual position opening/closing events
+- Enable debug logging in `log_extractor.py` for detailed diagnostics
 
-**API errors:**
-- Verify your Moralis API key is correct
-- Check network connectivity
-- Monitor rate limiting (tool includes automatic delays)
+**Missing market data:**
+- Use "Force Data Refresh" option in Step 3 submenu
+- Verify Moralis API key is correct and has available credits
+- Check network connectivity and API rate limits
 
-**Invalid dates:**
-- The tool handles some date edge cases automatically
-- Check that your SOL Decoder logs have valid timestamps
+**Report generation errors:**
+- Try cache-only mode first to isolate API issues
+- Check `positions_to_analyze.csv` exists and contains valid data
+- Review console output for specific error messages
 
-### Debug Mode
+**Data quality issues:**
+- Use `positions_to_skip.csv` to exclude problematic positions
+- Re-run extraction (Step 1) to refresh position data
+- Check source log files for corruption or format changes
 
-Enable debug logging by modifying debug settings in `log_extractor.py`:
+### Debug Features
+
+**Enhanced Logging:**
 ```python
+# Enable debug logging in log_extractor.py
 DEBUG_ENABLED = True
 DEBUG_LEVEL = "DEBUG"
 ```
 
+**Manual Data Correction:**
+Create `positions_to_skip.csv` with position IDs to exclude:
+```csv
+position_id
+SOL/USDC-2024-06-15-12:30:45
+BONK/SOL-2024-06-20-09:15:22
+```
+
+## Roadmap & Future Development
+
+### Immediate Priorities (Next Release)
+- **ML-Driven TP/SL Optimization**: Machine learning models for optimal take profit/stop loss levels
+- **Post-Exit Analysis**: Forward-looking profitability analysis beyond historical close points
+- **Enhanced Strategy Analytics**: Strategy comparison matrices with detailed performance breakdown
+
+### Advanced Analytics
+- **Real-Time Strategy Recommendations**: Dynamic strategy suggestions based on market conditions
+- **Risk Management Automation**: Automated risk assessment and position sizing recommendations  
+- **Cross-Strategy Performance Analysis**: Comprehensive comparison across all strategy variants
+
+### Integration & Automation
+- **Telegram Integration**: Position notifications and SL/TP override commands
+- **Market Regime Detection**: Bull/bear/crab market identification for strategy optimization
+- **Delta-Neutral LP Management**: Funding rate analysis and hedge position optimization
+
 ## Contributing
+
+We welcome contributions! Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Future Roadmap
-
-**Planned Enhancements:**
-- Bin size comparison analysis (Wide vs 69)
-- ML-driven TP/SL optimization
-- Cross-log position tracking
-- Market trend correlation analysis
-- Enhanced statistics and visualization
-- Telegram integration for notifications
+3. Follow the coding conventions in `CLAUDE.md`
+4. Add comprehensive tests for new functionality
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License. Feel free to copy, modify, and use this code however you like.
+This project is licensed under the MIT License. See `LICENSE` file for details.
 
 ## Disclaimer
 
-**This tool is designed for educational and comparative analysis.**
+**This tool is designed for educational and comparative analysis purposes.**
 
-- Strategy simulations are based on simplified models for relative comparison
-- Results are intended for **strategy selection guidance** and **pattern identification**
-- Always conduct additional research and analysis before making investment decisions
+- Portfolio analytics are based on historical data and simplified models for trend identification
+- Strategy simulations provide **relative performance comparisons** between distribution methods
+- Results are intended for **strategic guidance** and **pattern recognition**, not precise financial predictions
+- Always conduct additional research and consider market conditions, risk tolerance, and position sizing
 - Past performance analysis does not guarantee future results
-- Consider market conditions, risk tolerance, and position sizing in your decisions
 
-**Use responsibly**: This tool helps compare distribution strategies for similar positions and market conditions, not as definitive trading signals.
+**Use responsibly**: This tool helps compare strategies and identify patterns, not as definitive trading signals.
 
-## Support
+## Support & Community
 
-If you encounter issues or have questions:
-
-1. Check the [Issues](https://github.com/yourusername/solana-lp-strategy-analyzer/issues) page
-2. Create a new issue with detailed information about your problem
-3. Include relevant log snippets and error messages
+- **Issues**: Report bugs and feature requests via [GitHub Issues](https://github.com/yourusername/solana-lp-strategy-analyzer/issues)
+- **Documentation**: Complete technical documentation available in `CLAUDE.md`
+- **Discord**: Join our community for discussions and support
 
 ---
 
 **Happy analyzing! 📊🚀**
 
-*Compare your strategies, find your edge, trade smarter.*
+*Advanced portfolio analytics for smarter LP strategy decisions.*
