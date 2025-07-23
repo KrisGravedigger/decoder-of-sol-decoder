@@ -324,7 +324,12 @@ project/
 ├── main.py                     # Main application entry point with interactive menu
 ├── main_analyzer.py            # (Legacy) Alternative analysis entry point
 ├── core/
-│   └── models.py               # Position class with TP/SL fields and other data models
+│   └── models.py               # Position class and other data models
+├── data_fetching/              # NEW: All data fetching and orchestration logic
+│   ├── __init__.py
+│   ├── cache_orchestrator.py   # NEW: Manages OCHLV cache (menus, validation)
+│   ├── enhanced_price_cache_manager.py # NEW: Core OCHLV+Volume cache logic
+│   └── main_data_orchestrator.py # NEW: Manages main report data fetching
 ├── extraction/                 # Data extraction from logs
 │   ├── __init__.py
 │   ├── log_extractor.py        # Main parser with enhanced strategy parsing and cross-file tracking
@@ -360,10 +365,15 @@ project/
 ├── simulations/                # "What-if" simulation engines
 │   ├── spot_vs_bidask_simulator.py # Simulates Spot vs Bid-Ask strategies
 │   └── weekend_simulator.py    # Simulates weekend parameter impact
-└── tools/                      # Developer and utility tools
-    ├── api_checker.py          # Checks Moralis API connectivity
-    ├── debug_analyzer.py       # Context analysis and export system
-    └── fix_column_names.py     # Column name standardization utility
+├── tools/                      # Developer and utility tools
+│   ├── __init__.py
+│   ├── cache_debugger.py       # NEW: Debugging tools for the enhanced cache                # Developer and utility tools
+│   ├── api_checker.py          # Checks Moralis API connectivity
+│   ├── debug_analyzer.py       # Context analysis and export system
+│   └── fix_column_names.py     # Column name standardization utility
+└── utils/                      # NEW: Shared helper functions
+    ├── __init__.py
+    └── common.py               # NEW: Houses print_header, load_main_config, etc.
 
 File Handling Rules
 
@@ -413,6 +423,7 @@ Enhanced position deduplication with universal identification ✅
 Cross-file position tracking and completion ✅
 Chronological file processing with intelligent duplicate handling ✅
 
+
 **Portfolio Analytics Module:**
 - **Complete analysis pipeline**: dual SOL/USDC currency analysis with infrastructure cost impact ✅
 - **Chart generation system**: 4 professional charts with timestamps (equity curve, drawdown analysis, strategy heatmap, cost impact) ✅
@@ -451,6 +462,12 @@ Chronological file processing with intelligent duplicate handling ✅
 - **Silent Failure Detection**: SUCCESS_CONFIRMATION_PATTERNS prevent false positive position detection ✅
 - **Robust Pipeline**: NaN handling and error resilience throughout data processing pipeline ✅
 - **Enhanced Logging**: Clean, focused logs with DEBUG-level detail control ✅
+
+**Architecture Refactoring & Pragmatic Cache Management:**
+- **Centralized Logic**: Refactored `main.py` by moving complex logic into dedicated modules (`data_fetching`, `tools`, `utils`), making it a clean entry point ✅
+- **Circular Import Resolution**: Eliminated all circular import errors by creating a shared `utils.common` module for helper functions, stabilizing the architecture ✅
+- **Pragmatic Cache Rule ("2-Day Rule")**: Implemented an automatic, time-based rule to stop fetching data for old, incomplete positions, preventing wasted API calls on unfixable data gaps ✅
+- **Smart OCHLV Fetching**: OCHLV cache population now supports "Fill Gaps" and "Force Refetch" modes, giving the user full control while defaulting to the most efficient strategy ✅
 
 Completed in v2.0:
 
@@ -820,3 +837,53 @@ For improved clarity, the metric's label in the KPI table was updated to "Max Pn
 - `reporting/infrastructure_cost_analyzer.py` (updated to use the correct SOL/USDC pair address and pass the `force_refetch` flag; removed rogue `basicConfig` call)
 
 **System Status:** The market data pipeline is now stable, and the data integrity issue is fully resolved. ✅
+
+
+**2025-07-22: TP/SL Optimizer Phase 1 Implementation (80% Complete)**
+
+**Goal:** Implement Phase 1 of TP/SL Optimizer Module - Data Infrastructure with OCHLV+Volume support and offline-first approach.
+
+**Achieved:**
+- **EnhancedPriceCacheManager Implementation:** Created new cache manager extending existing PriceCacheManager with volume data support, raw OCHLV cache structure (`price_cache/raw/YYYY-MM/`), and interactive API fallback with user control.
+- **Main Menu Integration:** Added comprehensive cache validation menu (option 6) with 5 specialized functions for cache management, validation, volume analysis, and debugging.
+- **Cross-Month Data Handling:** Successfully implemented cross-month position support for positions spanning multiple months (June→July 2025), resolving initial single-month limitation.
+- **Cache Architecture:** Established parallel cache system with raw OCHLV+Volume data alongside existing processed cache, maintaining full backward compatibility.
+- **Volume Data Collection:** Successfully tested with 18 positions, collecting OCHLV+Volume data from Moralis API with proper rate limiting and monthly organization.
+- **Time Coverage Tolerance:** Implemented candle alignment tolerance (1-hour) to handle real-world timing discrepancies between position start/end and API candle boundaries.
+
+**Critical Issues Identified & Partially Resolved:**
+- **Cache Detection Inconsistency:** Different functions (validation vs fetch) use different algorithms for cache checking, leading to conflicting results where validation shows "Complete" but cache-only mode fetches from API.
+- **Function Synchronization:** Successfully updated `fetch_ochlv_data()` to use same cache loading logic as validation functions, but synchronization still incomplete across all code paths.
+- **Cross-Month Boundary Handling:** Initially positions spanning months only checked first month cache - resolved by implementing `_load_raw_cache_for_period()` with proper month spanning.
+
+**Current Status:**
+- **Data Collection:** ✅ Working (18/18 positions successfully cached)
+- **Volume Extraction:** ✅ Working (all positions return volume arrays)
+- **Cache Structure:** ✅ Working (proper raw cache organization)
+- **Cache-Only Mode:** 🔄 Partially working (~50% positions still prompt for API despite having cache)
+
+**Technical Achievements:**
+- Maintained API rate limiting (0.6s between requests) and existing PriceCacheManager compatibility
+- Interactive Polish prompts for cache-only mode with user control over API usage
+- Comprehensive debugging system with cache location analysis and validation reporting
+- Enhanced timeframe determination using existing project algorithms
+
+**Files Modified:**
+- **Created:** `reporting/enhanced_price_cache_manager.py` (main new functionality)
+- **Modified:** `main.py` (added cache validation menu and 5 new functions)
+- **Integration:** `reporting/analysis_runner.py` (added use_cache_only parameter)
+
+**Next Session Priority:** Resolve cache detection synchronization to ensure cache-only mode works 100% consistently for all positions. Issue appears to be in `_fetch_missing_data_cross_month()` function implementation or cache checking algorithm differences between validation and fetch operations.
+
+**Business Impact:** Phase 1 data infrastructure is functionally complete and ready for Phase 2 (Post-Position Analysis) once cache synchronization issues are resolved. The offline-first approach and volume data collection successfully established foundation for ML-driven TP/SL optimization.
+
+**2025-07-23: Architecture Refactoring & Pragmatic Cache Management**
+
+**Goal:** To resolve critical architectural issues (circular imports), clean up the main entry point, and implement a pragmatic, cost-effective caching system for the OCHLV+Volume data required by the TP/SL Optimizer.
+
+**Achieved:**
+- **Major Code Refactoring:** Decomposed the oversized `main.py` by moving all orchestration and debugging logic into new, dedicated modules: `data_fetching/cache_orchestrator.py`, `data_fetching/main_data_orchestrator.py`, and `tools/cache_debugger.py`.
+- **Created Shared Utilities Module:** Established a new `utils/common.py` module for shared helper functions (`print_header`, `load_main_config`), completely resolving all circular import errors and solidifying the project's architecture.
+- **Implemented "Pragmatic Cache Rule":** Instead of a complex state management system, a simple and effective "2-Day Rule" was implemented. The system now automatically avoids trying to "fix" incomplete cache data for any position that was closed more than two days ago, preventing wasted API credits on permanent data gaps.
+- **Developed Smart Fetching Modes:** The OCHLV cache orchestrator now provides two modes: "Fill Gaps Only" (the default, which skips complete and old-incomplete positions) and "Force Refetch All", giving the user full control over the data fetching process.
+- **Unified Cache Validation:** The logic for validating cache completeness is now consistent across all analysis and debugging functions, eliminating user confusion.
