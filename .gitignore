@@ -19,6 +19,7 @@ output/
 *.json
 *.xlsx
 *.txt
+*.log
 
 # macOS
 .DS_Store
