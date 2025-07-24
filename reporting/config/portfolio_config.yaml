@@ -43,6 +43,12 @@ weekend_analysis:
   # - Weekday positions remain identical in both scenarios
   # - Weekend classification based on open_timestamp, not duration
 
+# Data Source Configuration for Offline-First Analysis
+data_source:
+  prefer_offline_cache: true      # true = offline first, false = online first
+  interactive_gap_handling: true  # true = ask user, false = auto fallback
+  auto_generate_offline: false    # true = bulk generate, false = on-demand
+
 api_settings:
   # set 'true' to turn off all the API queries and use only /price_cache/ files.
   # set 'false'to turn on API queries.

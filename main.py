@@ -3,6 +3,7 @@ import os
 import sys
 from dotenv import load_dotenv
 from typing import Optional
+from typing import Dict
 
 # --- Setup Project Path & Environment ---
 load_dotenv()
@@ -17,6 +18,7 @@ from reporting.strategy_instance_detector import run_instance_detection
 from reporting.analysis_runner import AnalysisRunner
 from reporting.orchestrator import PortfolioAnalysisOrchestrator
 from reporting.data_loader import load_and_prepare_positions
+from reporting.price_cache_manager import PriceCacheManager
 from data_fetching.main_data_orchestrator import data_fetching_menu
 from data_fetching.cache_orchestrator import (
     enhanced_cache_fetching_menu, 
@@ -45,6 +47,17 @@ logging.getLogger('DEEP_DEBUG').addHandler(deep_debug_handler)
 logging.getLogger('DEEP_DEBUG').setLevel(logging.DEBUG)
 logging.getLogger('DEEP_DEBUG').propagate = False
 
+def get_mode_label(config: Dict, api_key: Optional[str]) -> str:
+    """Determine current mode based on config and API key availability."""
+    is_cache_only = config.get('api_settings', {}).get('cache_only', False)
+    prefer_offline = config.get('data_source', {}).get('prefer_offline_cache', False)
+    
+    if is_cache_only or not api_key:
+        return "(Offline Mode)"
+    elif api_key and prefer_offline:
+        return "(Hybrid Mode - Offline Preferred)"
+    else:
+        return "(Online Mode)"
 
 def run_spot_vs_bidask_analysis_offline():
     """Wrapper function to run the simulation analysis in explicit offline mode."""
@@ -57,7 +70,8 @@ def run_spot_vs_bidask_analysis_offline():
             logger.warning("run_spot_vs_bidask_analysis_offline: positions_df is empty after loading.")
             return
 
-        offline_runner = AnalysisRunner(api_key=None)
+        config = load_main_config()
+        offline_runner = AnalysisRunner(api_key=None, config=config)
         offline_runner.analyze_all_positions(positions_df)
         print("Spot vs. Bid-Ask simulation (offline) completed successfully.")
         print("Note: Results are used in the comprehensive report, no separate file is generated here.")
@@ -118,9 +132,11 @@ def cache_analyzer_menu():
         print("2. Validate Cache Completeness for All Positions")
         print("3. Check Volume Data Availability (Sample)") 
         print("4. Cache Debugging Tools")
-        print("5. Back to Main Menu")
+        print("5. Refresh Offline Processed Cache")
+        print("6. Validate Offline Cache Completeness")
+        print("7. Back to Main Menu")
 
-        choice = input("Select an option (1-5): ")
+        choice = input("Select an option (1-7): ")
 
         if choice == '1':
             enhanced_cache_fetching_menu()
@@ -131,6 +147,16 @@ def cache_analyzer_menu():
         elif choice == '4':
             cache_debugger_menu()
         elif choice == '5':
+            # Refresh offline processed cache
+            config = load_main_config()
+            cache_manager = PriceCacheManager(config=config)
+            cache_manager.refresh_offline_cache()
+        elif choice == '6':
+            # Validate offline cache completeness
+            config = load_main_config()
+            cache_manager = PriceCacheManager(config=config)
+            cache_manager.validate_offline_cache_completeness()
+        elif choice == '7':
             break
         else:
             print("Invalid choice, please try again.")
@@ -158,8 +184,9 @@ def main_menu():
         print("1. Step 1: Process Logs and Extract Positions")
         print("2. Step 2: Detect Strategy Instances")
         print("3. Step 3: Fetch/Update Main Report Data (Online Step)")
-        print("4. Step 4: Run Base Simulations (Offline - requires Step 3)")
-        print("5. Step 5: Generate Comprehensive Report (Offline - requires Steps 3 & 4)")
+        mode_label = get_mode_label(config, api_key)
+        print(f"4. Step 4: Run Base Simulations {mode_label}")
+        print(f"5. Step 5: Generate Comprehensive Report {mode_label}")
         print("6. TP/SL Optimizer: Cache Management (OCHLV+Volume)")
         print("7. Run Full Pipeline (Steps 1 -> 5)")
         print("8. Exit")

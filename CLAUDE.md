@@ -887,3 +887,38 @@ For improved clarity, the metric's label in the KPI table was updated to "Max Pn
 - **Implemented "Pragmatic Cache Rule":** Instead of a complex state management system, a simple and effective "2-Day Rule" was implemented. The system now automatically avoids trying to "fix" incomplete cache data for any position that was closed more than two days ago, preventing wasted API credits on permanent data gaps.
 - **Developed Smart Fetching Modes:** The OCHLV cache orchestrator now provides two modes: "Fill Gaps Only" (the default, which skips complete and old-incomplete positions) and "Force Refetch All", giving the user full control over the data fetching process.
 - **Unified Cache Validation:** The logic for validating cache completeness is now consistent across all analysis and debugging functions, eliminating user confusion.
+
+**2025-07-24: TP/SL Optimizer Phase 2 Implementation - Integration & Offline-First Analysis**
+**Goal:**  Complete the integration of the new OCHLV+Volume cache system with the existing analysis pipeline to enable fully offline analysis after initial data fetching.
+**Achieved:**
+- **3-Tier Cache System Implementation:** Successfully deployed offline_processed/ cache layer that converts raw OCHLV data to simple price format compatible with existing simulations. Cache priority chain: offline_processed/ → raw/ generation → processed/ → API fallback.
+- **Config-Driven Offline-First Behavior:** Added comprehensive data_source section to portfolio_config.yaml controlling prefer_offline_cache, interactive_gap_handling, and auto_generate_offline preferences.
+- **Interactive Gap Resolution:** Implemented sophisticated 6-option user choice system for incomplete data (partial/fallback/skip data + "apply to all" variants) with session memory to handle real-world data gaps gracefully.
+- **Smart Menu Enhancement:** Added dynamic mode indicators showing (Online/Offline/Hybrid) in main menu based on config preferences and API key availability, improving user experience and system transparency.
+- **Enhanced Cache Management:** Extended cache management menu (option 6) with offline cache refresh and validation options, providing users with full control analogous to existing raw cache management.
+- **Pure Offline Validation:** Confirmed that Steps 4-5 (simulations + reports) run completely offline after Step 3 data fetching, eliminating API dependency for analysis iterations.
+- **Zero Breaking Changes:** Maintained complete backward compatibility - all existing functionality preserved while adding new offline-first capabilities.
+
+**Technical Architecture:**
+
+Extended PriceCacheManager with config integration, interactive gap handling methods, and offline cache generation logic
+Updated AnalysisRunner and PortfolioAnalysisOrchestrator constructors to accept and pass config parameters
+Enhanced main.py with smart labeling logic and offline cache management menu options
+Implemented comprehensive error handling and user guidance for offline operational scenarios
+
+Business Impact:****
+
+API Cost Control: Users can now run unlimited analysis iterations after initial data collection without ongoing API credit consumption
+System Reliability: Complete offline capability ensures continuous analysis even during API outages or rate limiting
+Enhanced User Experience: Interactive gap handling provides users with full control over data quality vs analysis coverage trade-offs
+ML Foundation: Robust offline data infrastructure established for future ML-driven TP/SL optimization with guaranteed data availability
+
+**Files Modified:**
+
+reporting/config/portfolio_config.yaml (added data_source section)
+reporting/price_cache_manager.py (major extensions for offline cache logic)
+reporting/analysis_runner.py (config integration)
+reporting/orchestrator.py (config parameter passing)
+main.py (smart menu labels and cache management)
+
+**System Status:** Phase 2 complete. The TP/SL Optimizer now provides robust offline-first analysis capabilities. Foundation established for Phase 3 - Post-Position Analysis. ✅

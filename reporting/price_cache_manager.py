@@ -12,7 +12,7 @@ import json
 import requests
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,15 +33,24 @@ class PriceCacheManager:
     5. Log warnings about the size of filled gaps.
     """
     
-    def __init__(self, cache_dir: str = "price_cache"):
+    def __init__(self, cache_dir: str = "price_cache", config: Optional[Dict] = None):
         self.cache_dir = cache_dir
+        self.config = config or {}
+        self.offline_cache_dir = os.path.join(cache_dir, "offline_processed")
+        
+        # Create cache directories
         os.makedirs(cache_dir, exist_ok=True)
+        os.makedirs(self.offline_cache_dir, exist_ok=True)
+        
+        # User choice memory for interactive gap handling
+        self._user_choice_memory = None
         
     def get_price_data(self, pool_address: str, start_dt: datetime, end_dt: datetime, 
                     timeframe: str, api_key: Optional[str] = None,
-                    force_refetch: bool = False) -> List[Dict]:
+                    force_refetch: bool = False, use_raw_cache: Optional[bool] = None) -> List[Dict]:
         """
         Get price data with smart caching and guaranteed continuous output.
+        Now supports offline-first mode with raw cache conversion.
         
         Args:
             pool_address (str): Pool address
@@ -50,31 +59,117 @@ class PriceCacheManager:
             timeframe (str): Timeframe (10min, 30min, 1h, 4h)
             api_key (Optional[str]): API key for fetching missing data
             force_refetch (bool): If True, re-fetches data even for cached empty gaps.
+            use_raw_cache (Optional[bool]): If True, prefer offline cache. If None, use config.
             
         Returns:
             List[Dict]: Price data with timestamp and close keys, continuous and forward-filled.
         """
+        # Determine cache preference
+        if use_raw_cache is None:
+            use_raw_cache = self.config.get('data_source', {}).get('prefer_offline_cache', False)
+        
+        interactive_gap_handling = self.config.get('data_source', {}).get('interactive_gap_handling', True)
+        
         interval_seconds = self._get_interval_seconds(timeframe)
-
         aligned_start_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds))
         aligned_end_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds))
         
         logger.debug(f"Getting price data for {pool_address} ({timeframe}): {start_dt} to {end_dt}")
-        if force_refetch:
-            logger.info("Force re-fetch mode is ON. Will re-query API for empty gaps.")
+        logger.debug(f"Cache mode: {'offline-first' if use_raw_cache else 'online-first'}")
         
-        monthly_periods = self._split_into_monthly_periods(aligned_start_dt, aligned_end_dt)
+        # Reset user choice memory at start of new batch
+        if hasattr(self, '_batch_start'):
+            if not self._batch_start:
+                self._user_choice_memory = None
+                self._batch_start = True
+        else:
+            self._batch_start = True
         
+        # Try cache hierarchy
         all_data = []
+        data_source = "none"
         
-        for month_start, month_end in monthly_periods:
-            month_data = self._get_monthly_data(
-                pool_address, month_start, month_end, timeframe, api_key, force_refetch
+        if use_raw_cache:
+            # 1. Check offline processed cache first
+            offline_data, status = self._check_offline_cache_completeness(
+                pool_address, aligned_start_dt, aligned_end_dt, timeframe
             )
-            all_data.extend(month_data)
+            
+            if status == 'complete':
+                all_data = offline_data
+                data_source = "offline_processed"
+                logger.info(f"Using complete offline cache for {pool_address}")
+            elif status == 'partial' and interactive_gap_handling:
+                # Handle incomplete data interactively
+                choice, _ = self._handle_incomplete_data(
+                    pool_address, aligned_start_dt, aligned_end_dt, timeframe
+                )
+                
+                if choice == 'use_partial':
+                    all_data = offline_data
+                    data_source = "offline_processed_partial"
+                    logger.info(f"Using partial offline cache for {pool_address}")
+                elif choice == 'try_fallback':
+                    # Try to generate from raw cache
+                    try:
+                        from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+                        enhanced_cache = EnhancedPriceCacheManager(self.cache_dir)
+                        
+                        raw_data = enhanced_cache.fetch_ochlv_data(
+                            pool_address, aligned_start_dt, aligned_end_dt,
+                            use_cache_only=True, force_refetch=False
+                        )
+                        
+                        if raw_data:
+                            converted_data = self._generate_offline_cache(
+                                pool_address, aligned_start_dt, aligned_end_dt, timeframe, raw_data
+                            )
+                            all_data = converted_data
+                            data_source = "generated_from_raw"
+                            logger.info(f"Generated offline cache from raw for {pool_address}")
+                    except Exception as e:
+                        logger.error(f"Failed to generate from raw cache: {e}")
+                elif choice == 'skip':
+                    logger.info(f"Skipping position {pool_address} per user choice")
+                    return []
+            
+            # If still no data, try to generate from raw
+            if not all_data and not interactive_gap_handling:
+                try:
+                    from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+                    enhanced_cache = EnhancedPriceCacheManager(self.cache_dir)
+                    
+                    raw_data = enhanced_cache.fetch_ochlv_data(
+                        pool_address, aligned_start_dt, aligned_end_dt,
+                        use_cache_only=True, force_refetch=False
+                    )
+                    
+                    if raw_data:
+                        converted_data = self._generate_offline_cache(
+                            pool_address, aligned_start_dt, aligned_end_dt, timeframe, raw_data
+                        )
+                        all_data = converted_data
+                        data_source = "generated_from_raw"
+                        logger.info(f"Auto-generated offline cache from raw for {pool_address}")
+                except Exception as e:
+                    logger.error(f"Failed to auto-generate from raw cache: {e}")
+        
+        # Fall back to existing online cache logic if needed
+        if not all_data:
+            logger.debug(f"Falling back to standard cache for {pool_address}")
+            monthly_periods = self._split_into_monthly_periods(aligned_start_dt, aligned_end_dt)
+            
+            for month_start, month_end in monthly_periods:
+                month_data = self._get_monthly_data(
+                    pool_address, month_start, month_end, timeframe, api_key, force_refetch
+                )
+                all_data.extend(month_data)
+            
+            data_source = "online_cache" if all_data else "api"
+        
+        logger.debug(f"Data source for {pool_address}: {data_source}")
         
         timestamp_map = self._map_to_candle_boundaries(all_data, interval_seconds)
-
         final_data = self._conservative_forward_fill(
             timestamp_map, 
             interval_seconds, 
@@ -82,7 +177,7 @@ class PriceCacheManager:
             aligned_end_dt
         )
         
-        # AIDEV-NOTE-GEMINI: Log warnings about filled gaps, as requested.
+        # Log warnings about filled gaps
         self._log_placeholder_warnings(final_data, pool_address, timeframe)
         
         logger.debug(f"Returning {len(final_data)} price points for {pool_address} (aligned and forward-filled)")
@@ -327,3 +422,267 @@ class PriceCacheManager:
             logger.error(f"Failed to save cache {cache_path}: {e}")
         
         return merged_data
+    
+    def _generate_offline_cache(self, pool_address: str, start_dt: datetime, end_dt: datetime, 
+                               timeframe: str, raw_data: List[Dict]) -> List[Dict]:
+        """
+        Convert OCHLV data to simple price format and save to offline cache.
+        
+        Args:
+            pool_address: Pool address
+            start_dt: Start datetime
+            end_dt: End datetime  
+            timeframe: Timeframe
+            raw_data: Raw OCHLV data
+            
+        Returns:
+            List[Dict]: Converted price data with timestamp and close keys
+        """
+        # Convert OCHLV to simple format (extract timestamp and close)
+        converted_data = []
+        for point in raw_data:
+            if isinstance(point, dict) and 'timestamp' in point and 'close' in point:
+                converted_data.append({
+                    'timestamp': point['timestamp'],
+                    'close': point['close']
+                })
+        
+        if not converted_data:
+            return []
+            
+        # Save to offline cache using same monthly structure
+        monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
+        
+        for month_start, month_end in monthly_periods:
+            month_str = month_start.strftime('%Y-%m')
+            cache_filename = f"{pool_address}_{timeframe}_{month_str}.json"
+            cache_path = os.path.join(self.offline_cache_dir, cache_filename)
+            
+            # Load existing offline cache data
+            existing_data = self._load_cache_file(cache_path)
+            
+            # Filter converted data for this month
+            month_data = self._filter_existing_data(converted_data, month_start, month_end)
+            
+            if month_data:
+                # Merge and save
+                merged_data = self._merge_and_save(existing_data, month_data, cache_path)
+                
+        return converted_data
+    
+    def _check_offline_cache_completeness(self, pool_address: str, start_dt: datetime, 
+                                        end_dt: datetime, timeframe: str) -> Tuple[List[Dict], str]:
+        """
+        Check offline cache completeness for a position.
+        
+        Returns:
+            Tuple of (data, status) where status is 'complete', 'partial', or 'missing'
+        """
+        monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
+        all_data = []
+        
+        for month_start, month_end in monthly_periods:
+            month_str = month_start.strftime('%Y-%m')
+            cache_filename = f"{pool_address}_{timeframe}_{month_str}.json"
+            cache_path = os.path.join(self.offline_cache_dir, cache_filename)
+            
+            month_data = self._load_cache_file(cache_path)
+            if month_data:
+                filtered_data = self._filter_existing_data(month_data, month_start, month_end)
+                all_data.extend(filtered_data)
+        
+        if not all_data:
+            return [], 'missing'
+            
+        # Check coverage
+        expected_points = self._calculate_expected_points(start_dt, end_dt, timeframe)
+        actual_points = len(all_data)
+        
+        coverage_ratio = actual_points / expected_points if expected_points > 0 else 0
+        
+        if coverage_ratio >= 0.95:  # 95% coverage threshold
+            return all_data, 'complete'
+        elif coverage_ratio >= 0.5:  # 50% coverage threshold
+            return all_data, 'partial'
+        else:
+            return all_data, 'missing'
+    
+    def _calculate_expected_points(self, start_dt: datetime, end_dt: datetime, timeframe: str) -> int:
+        """Calculate expected number of data points for a time range."""
+        interval_seconds = self._get_interval_seconds(timeframe)
+        duration_seconds = (end_dt - start_dt).total_seconds()
+        return max(1, int(duration_seconds / interval_seconds))
+    
+    def _handle_incomplete_data(self, pool_address: str, start_dt: datetime, 
+                              end_dt: datetime, timeframe: str) -> Tuple[Optional[str], bool]:
+        """
+        Handle incomplete data with interactive user choice.
+        
+        Returns:
+            Tuple of (user_choice, apply_to_all)
+        """
+        # Check if we have a memory choice
+        if self._user_choice_memory:
+            return self._user_choice_memory, True
+            
+        print(f"\n⚠️  Incomplete data detected for {pool_address}")
+        print(f"   Period: {start_dt.strftime('%Y-%m-%d %H:%M')} to {end_dt.strftime('%Y-%m-%d %H:%M')}")
+        print("\nOptions:")
+        print("1. Use partial data and continue")
+        print("2. Try fallback to raw cache generation")
+        print("3. Skip this position")
+        print("4. Use partial data for ALL remaining positions")
+        print("5. Try fallback for ALL remaining positions")
+        print("6. Skip ALL positions with missing data")
+        
+        while True:
+            choice = input("\nSelect option (1-6): ").strip()
+            
+            if choice == '1':
+                return 'use_partial', False
+            elif choice == '2':
+                return 'try_fallback', False
+            elif choice == '3':
+                return 'skip', False
+            elif choice == '4':
+                self._user_choice_memory = ('use_partial', True)
+                return 'use_partial', True
+            elif choice == '5':
+                self._user_choice_memory = ('try_fallback', True)
+                return 'try_fallback', True
+            elif choice == '6':
+                self._user_choice_memory = ('skip', True)
+                return 'skip', True
+            else:
+                print("Invalid choice. Please select 1-6.")
+    
+    def refresh_offline_cache(self):
+        """Refresh offline cache from raw OCHLV data."""
+        print("\nRefreshing offline processed cache from raw OCHLV data...")
+        
+        # Import locally to avoid circular imports
+        from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+        enhanced_cache = EnhancedPriceCacheManager(self.cache_dir)
+        
+        # Get list of all raw cache files
+        raw_dir = os.path.join(self.cache_dir, "raw")
+        if not os.path.exists(raw_dir):
+            print("No raw cache directory found. Please fetch OCHLV data first.")
+            return
+            
+        processed_count = 0
+        for month_dir in os.listdir(raw_dir):
+            month_path = os.path.join(raw_dir, month_dir)
+            if not os.path.isdir(month_path):
+                continue
+                
+            for filename in os.listdir(month_path):
+                if filename.endswith('.json'):
+                    pool_address = filename.replace('.json', '')
+                    raw_file_path = os.path.join(month_path, filename)
+                    
+                    try:
+                        with open(raw_file_path, 'r') as f:
+                            raw_data = json.load(f)
+                            
+                        if raw_data:
+                            # Convert and save to offline cache
+                            # We need to determine the date range from the data
+                            timestamps = [self._parse_timestamp_to_unix(d['timestamp']) for d in raw_data]
+                            start_dt = datetime.fromtimestamp(min(timestamps))
+                            end_dt = datetime.fromtimestamp(max(timestamps))
+                            
+                            # Guess timeframe from data density
+                            timeframe = self._guess_timeframe_from_data(raw_data)
+                            
+                            self._generate_offline_cache(pool_address, start_dt, end_dt, timeframe, raw_data)
+                            processed_count += 1
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to process {filename}: {e}")
+                        
+        print(f"Processed {processed_count} raw cache files into offline cache.")
+    
+    def _guess_timeframe_from_data(self, data: List[Dict]) -> str:
+        """Guess timeframe from data point spacing."""
+        if len(data) < 2:
+            return "1h"  # Default
+            
+        # Calculate average interval
+        timestamps = sorted([self._parse_timestamp_to_unix(d['timestamp']) for d in data[:10]])
+        intervals = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
+        avg_interval = sum(intervals) / len(intervals) if intervals else 3600
+        
+        # Map to closest timeframe
+        if avg_interval < 900:  # < 15 min
+            return "10min"
+        elif avg_interval < 2700:  # < 45 min
+            return "30min"
+        elif avg_interval < 7200:  # < 2 hours
+            return "1h"
+        else:
+            return "4h"
+    
+    def validate_offline_cache_completeness(self):
+        """Validate offline cache completeness for all positions."""
+        print("\nValidating offline cache completeness...")
+        
+        try:
+            # Load positions
+            from reporting.data_loader import load_and_prepare_positions
+            positions_df = load_and_prepare_positions("positions_to_analyze.csv", min_threshold=0.0)
+            
+            if positions_df.empty:
+                print("No positions found in positions_to_analyze.csv")
+                return
+                
+            complete_count = 0
+            partial_count = 0
+            missing_count = 0
+            
+            for idx, row in positions_df.iterrows():
+                pool_address = row.get('pool_address')
+                start_dt = row.get('open_timestamp')
+                end_dt = row.get('close_timestamp')
+                
+                if not all([pool_address, start_dt, end_dt]):
+                    missing_count += 1
+                    continue
+                    
+                # Determine timeframe
+                timeframe = self._get_timeframe_for_duration(start_dt, end_dt)
+                
+                # Check offline cache
+                _, status = self._check_offline_cache_completeness(pool_address, start_dt, end_dt, timeframe)
+                
+                if status == 'complete':
+                    complete_count += 1
+                elif status == 'partial':
+                    partial_count += 1
+                else:
+                    missing_count += 1
+                    
+            total = len(positions_df)
+            print(f"\nOffline Cache Status:")
+            print(f"  Complete: {complete_count}/{total} ({complete_count/total*100:.1f}%)")
+            print(f"  Partial:  {partial_count}/{total} ({partial_count/total*100:.1f}%)")
+            print(f"  Missing:  {missing_count}/{total} ({missing_count/total*100:.1f}%)")
+            
+        except Exception as e:
+            logger.error(f"Offline cache validation failed: {e}")
+            print(f"Error during validation: {e}")
+    
+    def _parse_timestamp_to_unix(self, timestamp: Any) -> int:
+        """Parse various timestamp formats to unix timestamp."""
+        if isinstance(timestamp, (int, float)):
+            return int(timestamp)
+        if isinstance(timestamp, str):
+            try:
+                # Try ISO format first
+                if 'T' in timestamp:
+                    return int(datetime.fromisoformat(timestamp.replace('Z', '+00:00')).timestamp())
+                # Try parsing as number
+                return int(float(timestamp))
+            except (ValueError, TypeError):
+                return 0
+        return 0

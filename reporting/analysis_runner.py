@@ -24,7 +24,7 @@ class AnalysisRunner:
     """
 
     # AIDEV-NOTE-GEMINI: Constructor updated to accept force_refetch.
-    def __init__(self, api_key: Optional[str] = None, force_refetch: bool = False, use_cache_only: bool = False):
+    def __init__(self, api_key: Optional[str] = None, force_refetch: bool = False, use_cache_only: bool = False, config: Optional[Dict] = None):
         """
         Initialize analysis runner.
 
@@ -32,16 +32,19 @@ class AnalysisRunner:
             api_key (Optional[str]): Moralis API key for the PriceCacheManager.
             force_refetch (bool): If True, forces re-fetching of cached data.
             use_cache_only (bool): If True, operates in cache-only mode for TP/SL optimization.
+            config (Optional[Dict]): Configuration dictionary.
         """
         self.api_key = api_key
         self.force_refetch = force_refetch
         self.use_cache_only = use_cache_only
+        self.config = config or {}
+        
         # AIDEV-VOLUME-CLAUDE: Use enhanced cache manager when use_cache_only is True
         if use_cache_only:
             from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
             self.cache_manager = EnhancedPriceCacheManager()
         else:
-            self.cache_manager = PriceCacheManager()
+            self.cache_manager = PriceCacheManager(config=config)
         if not api_key:
             logger.warning("AnalysisRunner initialized in CACHE-ONLY mode.")
         if force_refetch:
