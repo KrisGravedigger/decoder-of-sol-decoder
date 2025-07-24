@@ -80,18 +80,22 @@ Position.post_close_prices: List[float]  # Price data after position close
 - What's the optimal timeframe granularity (1min, 5min, 15min)? -> **Answered: Implemented adaptive granularity (10m/30m/1h/4h) based on position duration.**
 - Should we implement immediate migration of existing cache or parallel system? -> **Answered: Implemented a parallel system (`price_cache/raw/`) to avoid breaking the existing pipeline.**
 
-### **Phase 2: Post-Position Analysis** 🔄 *CURRENT PHASE*
-**Goal:** Extend position data with post-close price/volume history
-- [ ] Implement post-close data extension for closed positions
-- [ ] Create position timeline reconstruction (entry → close → N periods forward)
-- [ ] Add timeframe filtering by user-specified date ranges
-- [ ] Validate historical data completeness and identify gaps
+### **Phase 2: Integration & Offline-First Analysis** ✅ *COMPLETED*
+**Goal:** Complete Phase 1 integration with offline-first analysis pipeline
+- [x] Extend PriceCacheManager with offline processed cache support
+- [x] Implement interactive gap handling for incomplete data
+- [x] Add config-driven data source preferences
+- [x] Create smart menu labels showing online/offline mode
+- [x] Add offline cache management options analogous to raw cache
 
-**Phase Questions:**
-- How many periods post-close should we analyze? (hours, days, weeks?)
-- Should we limit analysis to positions with sufficient post-close data?
+**Implementation Decisions:** 
+- **Architecture:** Extend existing PriceCacheManager (Option B) rather than direct OCHLV consumption
+- **Cache Strategy:** offline_processed/ → raw/ → processed/ → API fallback chain
+- **Gap Handling:** Interactive user choice with "apply to all" memory
+- **Config Control:** prefer_offline_cache parameter in portfolio_config.yaml
+- **Data Generation:** On-demand offline cache generation from raw OCHLV data
 
-### **Phase 3: Fee Simulation Engine** 📋 *PLANNED*
+### **Phase 3: Fee Simulation Engine** 🔄 *CURRENT PHASE*
 **Goal:** Model fee accumulation during position lifetime
 - [ ] Implement proportional volume distribution across position timeline
 - [ ] Create bid-ask vs spot fee calculation logic

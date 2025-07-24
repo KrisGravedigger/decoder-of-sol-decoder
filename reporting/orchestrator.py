@@ -95,7 +95,7 @@ class PortfolioAnalysisOrchestrator:
 
             # AIDEV-CLAUDE-ADDITION: New step for Spot vs. Bid-Ask analysis
             logger.info("Step 1b: Running Spot vs. Bid-Ask strategy simulations...")
-            strategy_simulator = AnalysisRunner(api_key=self.api_key)
+            strategy_simulator = AnalysisRunner(api_key=self.api_key, config=self.config)
             strategy_simulation_results = strategy_simulator.analyze_all_positions(positions_df)
 
             logger.info("Step 2: Running market correlation analysis...")
