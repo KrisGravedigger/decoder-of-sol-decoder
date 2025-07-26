@@ -66,7 +66,7 @@ Position.post_close_prices: List[float]  # Price data after position close
 - SL triggering must account for accumulated fees as buffer (position value = price value + fees)
 - TP optimization seeks balance between frequent small wins vs. rare large wins
 
-## 📋 Master Implementation Plan
+## 📋 Master Implementation Plan:
 
 ### **Phase 1: Data Infrastructure** ✅ *COMPLETED*
 **Goal:** Establish robust OCHLV+Volume data collection
@@ -113,24 +113,19 @@ Position.post_close_prices: List[float]  # Price data after position close
 - **Performance:** Optimized search between open_line_index and close_line_index only
 - **Configuration:** significance_threshold: 0.5% default, fully configurable via YAML
 
-### **Phase 3B: Post-Close Analysis & Simulation** 📋 NEXT IMPLEMENTATION
+### **Phase 3B: Post-Close Analysis & Simulation** ✅ *COMPLETED*
 **Goal:** Extend positions with post-close price data and simulate alternative TP/SL scenarios
 
-- [ ] Extend EnhancedPriceCacheManager for post-close data fetching
-- [ ] Implement volume-proportional fee allocation for simulation periods
-- [ ] Add LP position valuation using mathematical formulas
-- [ ] Create "what-if" simulation engine for alternative exit timing
-- [ ] Generate ML-ready dataset with missed opportunity metrics
-- [ ] Integrate with comprehensive HTML reports
+- [x] Extend EnhancedPriceCacheManager for post-close data fetching
+- [x] Implement volume-proportional fee allocation for simulation periods
+- [x] Add LP position valuation using mathematical formulas
+- [x] Create "what-if" simulation engine for alternative exit timing
+- [x] Generate ML-ready dataset with missed opportunity metrics
+- [x] Integrate with main menu for analysis execution
 
-**Phase Questions** for 3B:
-- Time horizon: 1x position duration (default), 2h minimum, 48h maximum
-- Data strategy: Extend existing cache files vs separate post-close cache
-- Analysis scope: All closed positions with >7 days post-close data available
-- Cache integration: Extend offline_processed/ files with post-close price data
-
-### **Phase 4: TP/SL Range Testing** 📋 *PLANNED*
+### **Phase 4: TP/SL Range Testing** 📋 NEXT IMPLEMENTATION
 **Goal:** Implement parameter range simulation framework
+
 - [ ] Build user-configurable TP/SL range testing interface
 - [ ] Implement position-level "what-if" simulation logic
 - [ ] Create portfolio-level aggregation and impact analysis
@@ -154,22 +149,24 @@ Position.post_close_prices: List[float]  # Price data after position close
 - What's the minimum sample size for statistically significant recommendations?
 
 
-### 🔧 Current Phase Status: Phase 3A Complete
-Completed Objectives
-✅ Peak PnL Data Collection: Successfully extracts maximum profit/loss percentages from bot logs during position lifetime
-✅ Fee Extraction: Calculates total fees collected using documented log patterns
-✅ Selective Analysis: Different extraction logic for TP vs SL vs other close reasons
-✅ Configuration Integration: Fully configurable parameters via portfolio_config.yaml
-✅ CSV Extension: 3 new columns added with backwards compatibility maintained
-✅ Backfill Capability: One-time script to process existing positions
-✅ Performance Optimization: Efficient log scanning within position boundaries
+### 🔧 Current Phase Status: Phase 3B Complete
 
+**Completed Objectives:**
+✅ **Post-Close Analysis Engine:** Successfully implemented a "what-if" simulation engine to analyze positions after their actual close time.
+✅ **LP Valuation:** Integrated mathematical formulas for impermanent loss to accurately value LP positions as prices fluctuate.
+✅ **Fee Simulation:** Implemented a volume-proportional fee simulator that uses a position's historical performance to project future fee income.
+✅ **Missed Opportunity Metrics:** The system now quantifies missed profit potential and optimal exit timing, providing actionable business insights.
+✅ **ML Dataset Generation:** The pipeline can now generate and export a preliminary feature set for the machine learning phase (Phase 4/5).
+✅ **Workflow Integration:** The new functionality is fully integrated into the main menu and operates on a stable, debugged architecture.
 
-### Technical Achievements
-python# New Position model fields
-max_profit_during_position: Optional[float] = None  # Peak % profit during lifetime
-max_loss_during_position: Optional[float] = None    # Peak % loss during lifetime  
-total_fees_collected: Optional[float] = None        # Total fees in SOL
+**Technical Achievements:**
+- Resolved all circular dependency issues, stabilizing the application's architecture.
+- Implemented robust, graceful handling of incomplete data (e.g., missing fees/volume).
+- Created a complete, end-to-end user workflow from analysis execution to report generation.
+
+- **Module Status:** Phase 3B - Complete ✅
+- **Next Priority:** Phase 4 - TP/SL Range Testing
+- **Estimated Complexity:** Medium (requires careful design of simulation logic and reporting)
 
 # Peak PnL extraction with business logic
 if position.close_reason == 'TP':
