@@ -35,6 +35,17 @@ class Position:
         self.final_pnl: Optional[float] = None
         self.take_profit: Optional[float] = None
         self.stop_loss: Optional[float] = None
+        
+        # PHASE 3A: Peak PnL tracking from logs
+        self.max_profit_during_position: Optional[float] = None  # Maximum % profit during lifetime
+        self.max_loss_during_position: Optional[float] = None    # Maximum % loss during lifetime  
+        self.total_fees_collected: Optional[float] = None        # Total fees in SOL
+        
+        # AIDEV-PHASE-C-PLACEHOLDER: Post-close analysis fields (Phase 3B)
+        # self.max_profit_post_close: Optional[float] = None
+        # self.max_loss_post_close: Optional[float] = None
+        # self.optimal_exit_time: Optional[datetime] = None
+        # self.missed_opportunity_pct: Optional[float] = None
 
     @property
     def universal_position_id(self) -> str:
@@ -91,6 +102,12 @@ class Position:
             # AIDEV-NOTE-GEMINI: Added take_profit and stop_loss to the CSV output.
             "takeProfit": self.take_profit,
             "stopLoss": self.stop_loss,
+            
+            # PHASE 3A: Peak PnL backtest fields
+            "max_profit_during_position": self.max_profit_during_position,
+            "max_loss_during_position": self.max_loss_during_position,
+            "total_fees_collected": self.total_fees_collected,
+            
             "investment_sol": self.initial_investment,
             "pnl_sol": self.final_pnl,
             "open_timestamp": self.open_timestamp,

@@ -906,15 +906,13 @@ Updated AnalysisRunner and PortfolioAnalysisOrchestrator constructors to accept 
 Enhanced main.py with smart labeling logic and offline cache management menu options
 Implemented comprehensive error handling and user guidance for offline operational scenarios
 
-Business Impact:****
-
+**Business Impact:**
 API Cost Control: Users can now run unlimited analysis iterations after initial data collection without ongoing API credit consumption
 System Reliability: Complete offline capability ensures continuous analysis even during API outages or rate limiting
 Enhanced User Experience: Interactive gap handling provides users with full control over data quality vs analysis coverage trade-offs
 ML Foundation: Robust offline data infrastructure established for future ML-driven TP/SL optimization with guaranteed data availability
 
 **Files Modified:**
-
 reporting/config/portfolio_config.yaml (added data_source section)
 reporting/price_cache_manager.py (major extensions for offline cache logic)
 reporting/analysis_runner.py (config integration)
@@ -922,3 +920,60 @@ reporting/orchestrator.py (config parameter passing)
 main.py (smart menu labels and cache management)
 
 **System Status:** Phase 2 complete. The TP/SL Optimizer now provides robust offline-first analysis capabilities. Foundation established for Phase 3 - Post-Position Analysis. ✅
+
+**2025-07-26: TP/SL Optimizer Phase 3A Implementation & Debug**
+**Goal:** Implement log-based peak PnL extraction as foundation for TP/SL optimization analysis.
+**Achieved:**
+**Position Model Extension:** Added 3 new fields to Position class:
+- max_profit_during_position - Maximum % profit during position lifetime
+- max_loss_during_position - Maximum % loss during position lifetime
+- total_fees_collected - Total fees collected in SOL
+**Peak PnL Extraction Logic:** Implemented extract_peak_pnl_from_logs() and extract_total_fees_from_logs() functions in parsing_utils.py with regex pattern matching for "SOL (Return: X%)" and fee calculation formulas
+**Selective Analysis Logic:** Smart extraction based on close_reason - TP positions extract max_loss only, SL positions extract max_profit only, others extract both
+Configuration Integration: Added tp_sl_analysis section to portfolio_config.yaml with configurable significance_threshold and scope filters for future Phase 3B
+**Parser Integration:** Modified log_extractor.py to automatically extract peak PnL during position closing with config-driven thresholds
+**Backfill Utility:** Created tools/backfill_peak_pnl.py for one-time processing of existing positions in CSV
+**Debug Resolution:** Fixed LogParser AttributeError by implementing missing _load_config() method using proven pattern from orchestrator.py
+
+**Technical Implementation:**
+CSV structure extended with 3 new columns while maintaining backwards compatibility
+Configuration-driven significance threshold (0.5% default) eliminates hardcoded values
+Fee extraction uses formula: "Claimed: X SOL" + ("Y SOL (Fees Tokens Included)" - "Initial Z SOL")
+Performance optimized: searches only between open_line_index and close_line_index
+Optional fields ensure no breaking changes to existing pipeline
+
+**Business Impact:**
+Establishes solid foundation for ML-driven TP/SL optimization in Phase 3B
+Provides real historical peak PnL data for "what-if" analysis scenarios
+Enables identification of positions that could benefit from different TP/SL levels
+Cost-efficient one-time log parsing avoids repeated scanning for analysis
+
+**Files Modified:**
+core/models.py (Position class extension)
+extraction/parsing_utils.py (peak PnL extraction functions)
+extraction/log_extractor.py (parser integration and config loading)
+reporting/config/portfolio_config.yaml (tp_sl_analysis configuration)
+
+**Files Created:**
+tools/backfill_peak_pnl.py (utility for existing positions)
+
+**System Status:** Phase 3A complete and stable. Peak PnL extraction working correctly with configurable parameters. Foundation established for Phase 3B - Post-Close Analysis. ✅
+2025-07-26: Mathematical Foundation Research
+**Goal:** Establish mathematical framework for LP position valuation in Phase 3B implementation.
+Achieved:
+
+**LP Position Valuation Framework:** Comprehensive research into liquidity provider position mathematics including constant product formulas, impermanent loss calculations, and concentrated liquidity valuation
+Mathematical Formulas: Documented precise formulas for calculating LP position value changes when asset prices fluctuate, including square root payoff profiles and risk calculations
+Concentrated Liquidity Mathematics: Specific formulas for Uniswap V3-style concentrated liquidity and bin-based systems like Meteora DLMM
+SOL-Based Examples: Practical calculation examples for SOL-USDC positions with real-world scenarios
+Fee Allocation Algorithms: Volume-proportional fee distribution formulas for post-close simulation
+Implementation Guidance: Technical considerations for accurate LP position tracking in trading bot systems
+
+**Business Impact:**
+Provides mathematical foundation for accurate post-close "what-if" simulations
+Enables precise calculation of missed opportunities in TP/SL timing
+Supports development of ML features for optimal exit timing prediction
+Establishes framework for risk-adjusted position valuation
+
+**Research Output:** Comprehensive mathematical framework document with derivations, examples, and implementation considerations ready for Phase 3B development.
+**System Status:** Mathematical foundation complete. Ready for Phase 3B implementation of post-close analysis with accurate LP position valuation. ✅

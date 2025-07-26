@@ -28,10 +28,11 @@ def _parse_custom_timestamp(ts_str: str) -> Optional[datetime]:
         current_year = datetime.now().year
         base_date = datetime(current_year, int(month), int(day))
 
-        # Handle hour 24 as next day hour 0
+        # AIDEV-NOTE-CLAUDE: Corrected 24:xx handling. This bot's format uses 24:xx
+        # to mean 00:xx on the SAME day, not the next day.
         if hour >= 24:
-            hour = hour - 24
-            base_date = base_date + timedelta(days=1)
+            hour = hour - 24  # e.g., 24 becomes 0, 25 becomes 1 etc.
+            # Do NOT increment the day.
 
         final_datetime = base_date.replace(hour=hour, minute=int(minute), second=int(second))
         return final_datetime
@@ -212,29 +213,209 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
 
     return details
 
-def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback: int, debug_enabled: bool = False) -> Dict[str, Any]:
+def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback: int, 
+                                   debug_enabled: bool = False,
+                                   debug_file_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Parse final PnL from log context with line number information.
+    Parse final PnL from log context with line number information and debug tracing.
     
     Args:
         lines: All log lines
         start_index: Starting line index
         lookback: Number of lines to look back
         debug_enabled: Whether debug logging is enabled
+        debug_file_path: Path to a debug trace file.
         
     Returns:
         Dictionary with 'pnl' (float or None) and 'line_number' (int or None)
     """
+    # AIDEV-NOTE: Increased lookback from 70 to 150 to catch PnL lines that are logged far before the final close confirmation.
+    lookback = 150
+    
+    def _trace(msg: str):
+        if debug_file_path:
+            with open(debug_file_path, 'a', encoding='utf-8') as f:
+                f.write(msg + '\n')
+
+    _trace("\n--- TRACING PnL PARSING ---")
+    _trace(f"Starting search for PnL from line {start_index + 1}, looking back {lookback} lines.")
+
     for i in range(start_index, max(-1, start_index - lookback), -1):
         line = clean_ansi(lines[i])
+        if debug_file_path:
+            _trace(f"  [Line {i+1}] Checking: {line.strip()}")
         if "PnL:" in line and "Return:" in line:
+            if debug_file_path:
+                _trace(f"    -> Found potential PnL line.")
             match = re.search(r'PnL:\s*(-?\d+\.?\d*)\s*SOL', line)
             if match: 
                 pnl_value = round(float(match.group(1)), 5)
+                if debug_file_path:
+                    _trace(f"    --> SUCCESS: Matched PnL value '{pnl_value}' at line {i + 1}.")
                 if debug_enabled:
                     logger.debug(f"Found PnL value {pnl_value} at line {i + 1}: {line.strip()}")
                 return {'pnl': pnl_value, 'line_number': i + 1}
+            else:
+                if debug_file_path:
+                    _trace(f"    --> FAILED: 'PnL:' and 'Return:' present, but regex did not match.")
     
+    if debug_file_path:
+        _trace("--- PnL PARSING FAILED: No matching line found in lookback range. ---\n")
     if debug_enabled:
         logger.debug(f"No PnL found in lookback range {start_index + 1} to {max(1, start_index - lookback + 2)}")
     return {'pnl': None, 'line_number': None}
+
+def extract_peak_pnl_from_logs(lines: List[str], start_line: int, end_line: int, 
+                              significance_threshold: float = 0.01,
+                              debug_file_path: Optional[str] = None,
+                              position_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Extract maximum profit and loss percentages from logs between two line indices.
+    Includes a targeted debugging feature to write the full context to a file.
+    
+    Args:
+        lines: All log lines
+        start_line: Position open line index  
+        end_line: Position close line index
+        significance_threshold: Minimum absolute % to consider (from config)
+        debug_file_path: Optional. If provided, writes detailed context to this file.
+        position_id: Optional. Required if debug_file_path is used.
+        
+    Returns:
+        A dictionary with peak pnl data and sample count for diagnostics.
+    """
+    max_profit = None
+    max_loss = None
+    samples_found = 0
+    pnl_pattern = re.compile(r'SOL\s*\(Return:\s*([+-]?\d+\.?\d*)\s*%\)', re.IGNORECASE)
+    
+    debug_lines_to_write = []
+    is_debug_run = debug_file_path and position_id
+
+    if is_debug_run:
+        debug_lines_to_write.append(f"\n{'='*40} START OF POSITION: {position_id} {'='*40}\n")
+        debug_lines_to_write.append(f"Analyzing lines from {start_line + 1} to {min(end_line + 1, len(lines))}\n")
+        debug_lines_to_write.append(f"Significance Threshold: {significance_threshold}%\n")
+        debug_lines_to_write.append(f"{'-'*100}\n\n")
+
+    for i in range(start_line, min(end_line + 1, len(lines))):
+        line = lines[i]
+        cleaned_line = clean_ansi(line)
+        matches = pnl_pattern.findall(cleaned_line)
+        
+        if is_debug_run:
+            debug_line_prefix = ""
+            if matches:
+                try:
+                    pct_value = float(matches[0])
+                    if abs(pct_value) >= significance_threshold:
+                        debug_line_prefix = ">>> MATCH FOUND:           "
+                    else:
+                        debug_line_prefix = ">>> MATCH SKIPPED (Threshold): "
+                except (ValueError, TypeError):
+                    pass # Ignore conversion errors for debug display
+            debug_lines_to_write.append(f"{debug_line_prefix}Line {i+1:7}: {line.rstrip()}\n")
+
+        for match in matches:
+            try:
+                pct_value = float(match)
+                samples_found += 1
+                
+                if pct_value > 0 and abs(pct_value) >= significance_threshold:
+                    if max_profit is None or pct_value > max_profit:
+                        max_profit = pct_value
+                
+                if pct_value < 0 and abs(pct_value) >= significance_threshold:
+                    if max_loss is None or pct_value < max_loss:
+                        max_loss = pct_value
+            except (ValueError, TypeError):
+                continue
+    
+    if is_debug_run:
+        debug_lines_to_write.append(f"\n{'-'*100}\n")
+        debug_lines_to_write.append(f"Result: max_profit={max_profit}, max_loss={max_loss}, samples_found={samples_found}\n")
+        debug_lines_to_write.append(f"{'='*40} END OF POSITION: {position_id} {'='*42}\n\n")
+        with open(debug_file_path, 'a', encoding='utf-8') as f:
+            f.writelines(debug_lines_to_write)
+
+    return {
+        'max_profit_pct': max_profit,
+        'max_loss_pct': max_loss,
+        'samples_found': samples_found
+    }
+
+
+def extract_total_fees_from_logs(lines: List[str], start_line: int, end_line: int,
+                                 debug_file_path: Optional[str] = None) -> Optional[float]:
+    """
+    Extract total fees collected, prioritizing the "Pnl Calculation" line for accuracy.
+    This version removes the unreliable fallback method to prevent incorrect data.
+    
+    Args:
+        lines: All log lines
+        start_line: Position open line index
+        end_line: Position close line index
+        debug_file_path: Path to a debug trace file.
+        
+    Returns:
+        Total fees in SOL or None if not found
+    """
+    # AIDEV-NOTE: Increased lookback from 50 to 150 to catch fee lines that are logged far before the final close confirmation.
+    lookback = 150
+    
+    def _trace(msg: str):
+        if debug_file_path:
+            with open(debug_file_path, 'a', encoding='utf-8') as f:
+                f.write(msg + '\n')
+
+    _trace("\n--- TRACING FEE EXTRACTION ---")
+    _trace(f"Scanning from line {end_line + 1} back to {max(start_line - 1, end_line - lookback)}.")
+    _trace("--- [PRIMARY METHOD] Searching for 'Pnl Calculation:' line ---")
+    
+    # Primary Method: Search for the detailed 'Pnl Calculation' line. This is the only reliable source.
+    for i in range(end_line, max(start_line - 1, end_line - lookback), -1):
+        line = clean_ansi(lines[i])
+        if debug_file_path:
+            _trace(f"  [Line {i+1}] Checking: {line.strip()}")
+        
+        if "Pnl Calculation:" in line:
+            if debug_file_path:
+                _trace(f"    -> Found potential 'Pnl Calculation' line.")
+            claimed_match = re.search(r'Claimed:\s*([\d.]+)\s*SOL', line, re.IGNORECASE)
+            fees_included_match = re.search(r'([\d.]+)\s*SOL\s*\(Fees Tokens Included\)', line, re.IGNORECASE)
+            initial_match = re.search(r'Initial\s*([\d.]+)\s*SOL', line, re.IGNORECASE)
+            
+            if debug_file_path:
+                _trace(f"      - Claimed match: {'OK' if claimed_match else 'FAIL'}")
+                _trace(f"      - Fees Included match: {'OK' if fees_included_match else 'FAIL'}")
+                _trace(f"      - Initial match: {'OK' if initial_match else 'FAIL'}")
+
+            if fees_included_match and initial_match:
+                claimed_fees = float(claimed_match.group(1)) if claimed_match else 0.0
+                position_value_with_fees = float(fees_included_match.group(1))
+                initial_investment = float(initial_match.group(1))
+                
+                if debug_file_path:
+                    _trace(f"        -> Extracted values: claimed={claimed_fees}, val_w_fees={position_value_with_fees}, initial={initial_investment}")
+                
+                unclaimed_fees = max(0, position_value_with_fees - initial_investment)
+                total_fees = claimed_fees + unclaimed_fees
+                
+                if debug_file_path:
+                    _trace(f"        -> Calculated: unclaimed_fees={unclaimed_fees}, total_fees={total_fees}")
+                    _trace(f"    --> SUCCESS (Primary): Found total fees: {round(total_fees, 6)}")
+                
+                logger.debug(f"Fees from Pnl Calc line: Claimed={claimed_fees}, Unclaimed={unclaimed_fees}, Total={total_fees}")
+                return round(total_fees, 6)
+            else:
+                if debug_file_path:
+                    _trace("    --> FAILED (Primary): 'Pnl Calculation' line found but malformed. ABORTING fee extraction for this line.")
+                logger.warning(f"Found 'Pnl Calculation' line but it was malformed. Skipping fee extraction. Line {i+1}")
+                # AIDEV-NOTE: Continue searching, maybe a better formatted line exists.
+                continue
+
+    # AIDEV-NOTE: Fallback method has been removed as it was producing wildly inaccurate results.
+    # It is better to have no data (None) than incorrect data.
+    if debug_file_path:
+        _trace("--- FEE EXTRACTION FAILED: No valid 'Pnl Calculation:' line found in lookback range. ---\n")
+    return None

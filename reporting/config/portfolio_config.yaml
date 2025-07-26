@@ -53,3 +53,34 @@ api_settings:
   # set 'true' to turn off all the API queries and use only /price_cache/ files.
   # set 'false'to turn on API queries.
   cache_only: false
+
+# TP/SL Analysis Configuration
+tp_sl_analysis:
+  enable_custom_params: false          # Master switch for custom parameters
+  
+  # Time horizon controls (for Phase 3B)
+  post_close_multiplier: 1.0           # 1x = position duration length
+  min_post_close_hours: 2              # Minimum post-close analysis period
+  max_post_close_hours: 48             # Maximum 2 days
+  
+  # Analysis scope filters
+  scope_filters:
+    enable_date_filter: false
+    analysis_date_from: null           # Optional "YYYY-MM-DD" start date
+    last_n_days: null                  # Alternative: analyze last N days only
+    
+    # Position quality filters
+    min_position_duration_hours: 1     # Skip very short positions
+    min_position_value_sol: 0.1        # Skip tiny positions  
+    exclude_active_positions: true     # Skip active_at_log_end positions
+    
+    # Close reason filters
+    include_close_reasons: ["TP", "SL", "LV", "OOR", "other"]
+    
+  # Peak PnL extraction settings
+  significance_threshold: 0.01          # Minimum absolute % to consider significant
+  min_samples_for_confidence: 5        # Minimum PnL readings for high confidence
+  
+  # AIDEV-PHASE-C-PLACEHOLDER: Future settings for post-close analysis
+  # fee_allocation_method: "volume_proportional"
+  # lp_valuation_method: "simplified_il"  # vs "accurate_concentrated"
