@@ -81,6 +81,24 @@ tp_sl_analysis:
   significance_threshold: 0.01          # Minimum absolute % to consider significant
   min_samples_for_confidence: 5        # Minimum PnL readings for high confidence
   
-  # AIDEV-PHASE-C-PLACEHOLDER: Future settings for post-close analysis
-  # fee_allocation_method: "volume_proportional"
-  # lp_valuation_method: "simplified_il"  # vs "accurate_concentrated"
+# PHASE 3B: Post-close analysis settings
+  post_close_analysis:
+    enable_post_close: true               # Master switch for Phase 3B
+    
+    # Data coverage requirements
+    min_data_coverage_pct: 80             # Minimum % of expected data points
+    max_gap_hours: 6                      # Skip analysis if gaps > 6 hours
+    
+    # LP position valuation method
+    lp_valuation_method: "simplified_il"  # "simplified_il" vs "accurate_concentrated" 
+    fee_allocation_method: "volume_proportional"  # Algorithm for fee simulation
+    
+    # Analysis quality controls
+    min_post_close_samples: 12            # Minimum price points for analysis
+    confidence_threshold: "medium"        # "low"/"medium"/"high" required confidence
+    
+  # Performance and memory settings
+  performance:
+    batch_size: 50                        # Positions per batch
+    max_parallel_fetches: 3               # Concurrent API calls
+    enable_progress_logging: true         # Show progress during bulk analysis

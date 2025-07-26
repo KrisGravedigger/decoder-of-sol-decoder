@@ -12,6 +12,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import logging
+from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.models import Position
 
 # AIDEV-VOLUME-CLAUDE: Import base class to extend
 from reporting.price_cache_manager import PriceCacheManager
@@ -75,7 +79,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         
         return all_data
 
-    def get_volume_for_position(self, position: Any) -> List[float]:
+    def get_volume_for_position(self, position: 'Position') -> List[float]:
         """
         Get volume data for a specific position from the cache.
         """
@@ -103,7 +107,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             logger.error(f"Failed to get volume for position: {e}")
             return []
     
-    def validate_cache_completeness(self, position: Any) -> Dict[str, bool]:
+    def validate_cache_completeness(self, position: 'Position') -> Dict[str, bool]:
         """
         Validate cache completeness for a position using the same logic as the fetcher.
         """
@@ -293,3 +297,72 @@ class EnhancedPriceCacheManager(PriceCacheManager):
                 return int(float(timestamp))
             except (ValueError, TypeError): return 0
         return 0
+    
+    def fetch_post_close_data(self, position: 'Position', extension_hours: Optional[int] = None) -> List[Dict]:
+        """
+        Fetch price data after position close for simulation.
+        
+        Args:
+            position: Position object with close_timestamp
+            extension_hours: Override default (1x position duration, 2h min, 48h max)
+            
+        Returns:
+            List of OCHLV+Volume data for post-close period
+        """
+        # Calculate extension period
+        position_duration = position.close_timestamp - position.open_timestamp
+        default_extension = position_duration * self.config.get('tp_sl_analysis', {}).get('post_close_multiplier', 1.0)
+        
+        # Apply min/max bounds
+        min_hours = self.config.get('tp_sl_analysis', {}).get('min_post_close_hours', 2)
+        max_hours = self.config.get('tp_sl_analysis', {}).get('max_post_close_hours', 48)
+        
+        if extension_hours is None:
+            extension_hours = max(min_hours, min(max_hours, default_extension.total_seconds() / 3600))
+        
+        # Define post-close period
+        start_dt = position.close_timestamp
+        end_dt = position.close_timestamp + timedelta(hours=extension_hours)
+        
+        # Fetch using existing method
+        return self.fetch_ochlv_data(
+            position.pool_address, start_dt, end_dt, 
+            use_cache_only=False, force_refetch=False
+        )
+
+    def extend_cache_with_post_close(self, position: 'Position', post_close_data: List[Dict]) -> bool:
+        """
+        Extend existing offline_processed cache files with post-close data.
+        Strategy: Append to existing monthly cache files rather than separate storage.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Determine which monthly files need updating
+            start_dt = position.close_timestamp
+            end_dt = datetime.fromtimestamp(post_close_data[-1]['timestamp']) if post_close_data else start_dt
+            
+            monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
+            
+            for month_start, _ in monthly_periods:
+                month_str = month_start.strftime('%Y-%m')
+                
+                # Update both raw and offline_processed caches
+                for cache_type in ['raw', 'offline_processed']:
+                    cache_dir = os.path.join(self.cache_dir, cache_type, month_str)
+                    cache_file = os.path.join(cache_dir, f"{position.pool_address}.json")
+                    
+                    if cache_type == 'offline_processed':
+                        # Convert OCHLV to simple price format
+                        simple_data = [{'timestamp': d['timestamp'], 'close': d['close']} for d in post_close_data]
+                        self._merge_and_save_raw_cache([], simple_data, position.pool_address, month_start)
+                    else:
+                        # Save raw OCHLV data
+                        self._merge_and_save_raw_cache([], post_close_data, position.pool_address, month_start)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to extend cache with post-close data: {e}")
+            return False

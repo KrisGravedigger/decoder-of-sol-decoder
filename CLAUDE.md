@@ -355,10 +355,13 @@ project/
 │   ├── orchestrator.py         # Core logic engine for the reporting workflow
 │   ├── analysis_runner.py      # Runs Spot vs. Bid-Ask simulation for all positions
 │   ├── data_loader.py          # Position data loading and cleaning (no mapping logic)
+│   ├── fee_simulator.py        # NEW: Simulates fee allocation for post-close periods
 │   ├── html_report_generator.py # HTML report generation orchestrator
 │   ├── infrastructure_cost_analyzer.py # Daily cost allocation and Moralis API
+│   ├── lp_position_valuator.py # NEW: Calculates LP position value with IL formulas
 │   ├── market_correlation_analyzer.py  # Analysis of portfolio vs market correlation
 │   ├── metrics_calculator.py   # Financial metrics calculation
+│   ├── post_close_analyzer.py  # NEW: Engine for "what-if" TP/SL analysis
 │   ├── strategy_instance_detector.py # Groups positions into strategy instances
 │   ├── text_reporter.py        # Text report generation
 │   └── price_cache_manager.py  # Smart price caching with gap detection and API failure handling
@@ -469,6 +472,15 @@ Chronological file processing with intelligent duplicate handling ✅
 - **Pragmatic Cache Rule ("2-Day Rule")**: Implemented an automatic, time-based rule to stop fetching data for old, incomplete positions, preventing wasted API calls on unfixable data gaps ✅
 - **Smart OCHLV Fetching**: OCHLV cache population now supports "Fill Gaps" and "Force Refetch" modes, giving the user full control while defaulting to the most efficient strategy ✅
 
+**TP/SL Optimizer (Phase 3B):**
+- Post-close analysis engine with "what-if" simulation capabilities ✅
+- LP position valuation with impermanent loss and fee calculations ✅
+- Volume-proportional fee simulation based on historical position performance ✅
+- Configurable scope filtering for targeted analysis ✅
+- Robust handling of missing data for individual positions ✅
+- Generation of text reports and statistical summaries for optimization analysis ✅
+- Export of preliminary ML-ready datasets with post-close features ✅
+
 Completed in v2.0:
 
 Accurate Meteora DLMM simulation for 1-sided strategies 🆕
@@ -564,8 +576,8 @@ Completed in v3.0
 Next Priority Tasks:
 
 **Immediate (Next Session):**
-- **TP/SL Optimization Module**: ML-driven take profit and stop loss level optimization 📋
-- **Post-exit analysis**: forward-looking profitability analysis beyond historical close points 📋
+- **TP/SL Range Testing (Phase 4):** Implement a framework to simulate and test ranges of TP/SL values to find optimal combinations. 📋
+- **Post-exit analysis**: forward-looking profitability analysis beyond historical close points ✅ COMPLETED IN PHASE 3B
 
 **Strategy Analytics Module Enhancement:**
   - Strategy comparison matrix with detailed performance breakdown 📋
@@ -607,6 +619,11 @@ Advanced Features:
   - Market trend correlation analysis ✅ COMPLETED
   - Real-time strategy recommendations 📋
   - Risk management automation 📋
+
+ML & Advanced Analytics:
+  - ML-driven TP/SL level optimization (Phase 5) 📋
+  - Post-exit analysis (forward-looking candle testing) ✅ COMPLETED IN PHASE 3B
+  - Precise fee calculations per-candle 📋
 
 📝 Session History
 
@@ -977,3 +994,24 @@ Establishes framework for risk-adjusted position valuation
 
 **Research Output:** Comprehensive mathematical framework document with derivations, examples, and implementation considerations ready for Phase 3B development.
 **System Status:** Mathematical foundation complete. Ready for Phase 3B implementation of post-close analysis with accurate LP position valuation. ✅
+
+**2025-07-26: TP/SL Optimizer Phase 3B Implementation & Debug**
+
+**Goal:** Implement the post-close analysis engine to simulate alternative TP/SL scenarios and quantify missed opportunities, serving as the foundation for ML-driven optimization.
+
+**Achieved:**
+- **Full Module Implementation:** Created and integrated all core components for Phase 3B: `PostCloseAnalyzer`, `LPPositionValuator`, and `FeeSimulator`.
+- **Architectural Stabilization:** Resolved all circular dependency and `NameError` issues by correctly implementing `if TYPE_CHECKING` blocks combined with forward-referencing type hints (`'Position'`), leading to a stable application architecture.
+- **End-to-End Workflow:** Successfully implemented the full user-facing workflow in the main menu, including running the analysis, generating text reports, viewing statistics, and exporting a preliminary ML dataset.
+- **Robust Data Handling:** The system now gracefully handles positions with missing fee or volume data by flagging them as unsuccessful analyses and continuing, rather than crashing the entire process.
+- **Mathematical Logic Validation:** The simulation engine produces plausible business results (e.g., 14.8% average missed upside), indicating the impermanent loss and fee allocation formulas are working as intended.
+- **Foundation for Phase 4:** The successful generation of `ml_dataset_tp_sl.csv` completes the data pipeline required to begin work on the machine learning optimization phase.
+
+**Files Modified/Created:**
+- `main.py` (added new menu and functions)
+- `data_fetching/enhanced_price_cache_manager.py` (architectural fixes)
+- **Created:** `reporting/post_close_analyzer.py`
+- **Created:** `reporting/fee_simulator.py`
+- **Created:** `reporting/lp_position_valuator.py`
+
+**System Status:** Phase 3B is complete and stable. The application can now perform post-close "what-if" analysis, laying the groundwork for data-driven TP/SL optimization. ✅

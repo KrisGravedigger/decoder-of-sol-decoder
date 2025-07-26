@@ -4,6 +4,7 @@ import sys
 from dotenv import load_dotenv
 from typing import Optional
 from typing import Dict
+from datetime import datetime
 
 # --- Setup Project Path & Environment ---
 load_dotenv()
@@ -161,6 +162,172 @@ def cache_analyzer_menu():
         else:
             print("Invalid choice, please try again.")
 
+def tp_sl_analysis_menu():
+    """
+    TP/SL Analysis submenu.
+    """
+    while True:
+        print("\n" + "="*70)
+        print("--- TP/SL ANALYSIS & OPTIMIZATION ---")
+        print("="*70)
+        print("1. Run post-close analysis for recent positions")
+        print("2. Generate TP/SL optimization report")
+        print("3. View analysis results and statistics")
+        print("4. Export ML dataset for Phase 4")
+        print("5. Back to main menu")
+        
+        choice = input("\nSelect option (1-5): ").strip()
+        
+        if choice == "1":
+            run_post_close_analysis()
+        elif choice == "2":
+            generate_tp_sl_report()
+        elif choice == "3":
+            view_analysis_results()
+        elif choice == "4":
+            export_ml_dataset()
+        elif choice == "5":
+            break
+
+def run_post_close_analysis():
+    """
+    Run post-close analysis with user feedback.
+    """
+    try:
+        from reporting.post_close_analyzer import PostCloseAnalyzer
+        from reporting.data_loader import load_and_prepare_positions
+        
+        analyzer = PostCloseAnalyzer()
+        positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
+        
+        print(f"\nLoaded {len(positions_df)} positions for analysis...")
+        
+        # Apply filters and show results
+        filtered_df = analyzer.apply_scope_filters(positions_df)
+        print(f"After applying filters: {len(filtered_df)} positions selected")
+        
+        if filtered_df.empty:
+            print("No positions meet analysis criteria. Check configuration filters.")
+            return
+            
+        # Run analysis with progress
+        results = analyzer.run_bulk_analysis(filtered_df)
+        
+        print(f"\n✅ Analysis complete!")
+        print(f"  Successful: {results['successful_analyses']}/{results['total_positions']}")
+        print(f"  Missed opportunities identified: {results['positions_with_missed_upside']}")
+        print(f"  Average missed upside: {results['avg_missed_upside_pct']:.1f}%")
+        
+        # Save results for later viewing
+        import json
+        with open("reporting/output/tp_sl_analysis_results.json", "w") as f:
+            json.dump(results, f, indent=2, default=str)
+        print("\nResults saved to reporting/output/tp_sl_analysis_results.json")
+        
+    except Exception as e:
+        logger.error(f"Post-close analysis failed: {e}")
+        print(f"❌ Analysis failed: {e}")
+
+def generate_tp_sl_report():
+    """
+    Generate comprehensive TP/SL optimization report.
+    """
+    try:
+        import json
+        
+        # Load previous analysis results
+        with open("reporting/output/tp_sl_analysis_results.json", "r") as f:
+            results = json.load(f)
+            
+        # Generate report content
+        report_lines = [
+            "="*70,
+            "TP/SL OPTIMIZATION ANALYSIS REPORT",
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "="*70,
+            "",
+            f"Total Positions Analyzed: {results['total_positions']}",
+            f"Successful Analyses: {results['successful_analyses']}",
+            f"Positions with Missed Upside (>2%): {results['positions_with_missed_upside']}",
+            f"Average Missed Upside: {results['avg_missed_upside_pct']:.1f}%",
+            "",
+            "TOP MISSED OPPORTUNITIES:",
+            "-"*50,
+        ]
+        
+        # Sort by missed upside
+        sorted_results = sorted(
+            [r for r in results['analysis_results'] if r['analysis_successful'] and r.get('missed_upside_pct', 0) > 0],
+            key=lambda x: x['missed_upside_pct'],
+            reverse=True
+        )[:10]
+        
+        for r in sorted_results:
+            report_lines.append(
+                f"{r['position_id']}: {r['missed_upside_pct']:.1f}% missed upside, "
+                f"optimal exit after {r['days_to_optimal_exit']:.1f} days"
+            )
+            
+        # Save report
+        report_path = f"reporting/output/tp_sl_optimization_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(report_path, "w") as f:
+            f.write("\n".join(report_lines))
+            
+        print(f"\n✅ Report generated: {report_path}")
+        
+    except FileNotFoundError:
+        print("❌ No analysis results found. Please run analysis first (option 1).")
+    except Exception as e:
+        print(f"❌ Report generation failed: {e}")
+
+def view_analysis_results():
+    """
+    View summary of analysis results.
+    """
+    try:
+        import json
+        
+        with open("reporting/output/tp_sl_analysis_results.json", "r") as f:
+            results = json.load(f)
+            
+        print("\n" + "="*70)
+        print("TP/SL ANALYSIS RESULTS SUMMARY")
+        print("="*70)
+        print(f"Total Positions: {results['total_positions']}")
+        print(f"Successfully Analyzed: {results['successful_analyses']}")
+        print(f"Positions with Missed Upside: {results['positions_with_missed_upside']}")
+        print(f"Average Missed Upside: {results['avg_missed_upside_pct']:.1f}%")
+        
+        # Show distribution
+        if results['analysis_results']:
+            missed_upsides = [r['missed_upside_pct'] for r in results['analysis_results'] 
+                            if r['analysis_successful'] and r.get('missed_upside_pct', 0) > 0]
+            
+            if missed_upsides:
+                print(f"\nMissed Upside Distribution:")
+                print(f"  Min: {min(missed_upsides):.1f}%")
+                print(f"  Max: {max(missed_upsides):.1f}%")
+                print(f"  Median: {sorted(missed_upsides)[len(missed_upsides)//2]:.1f}%")
+                
+    except FileNotFoundError:
+        print("❌ No analysis results found. Please run analysis first (option 1).")
+    except Exception as e:
+        print(f"❌ Failed to view results: {e}")
+
+def export_ml_dataset():
+    """
+    Export ML dataset for Phase 4.
+    """
+    try:
+        from reporting.post_close_analyzer import PostCloseAnalyzer
+        
+        analyzer = PostCloseAnalyzer()
+        output_path = analyzer.export_ml_dataset()
+        
+        print(f"\n✅ ML dataset exported to: {output_path}")
+        
+    except Exception as e:
+        print(f"❌ Export failed: {e}")
 
 def main_menu():
     """Displays the main interactive menu."""
@@ -189,7 +356,8 @@ def main_menu():
         print(f"5. Step 5: Generate Comprehensive Report {mode_label}")
         print("6. TP/SL Optimizer: Cache Management (OCHLV+Volume)")
         print("7. Run Full Pipeline (Steps 1 -> 5)")
-        print("8. Exit")
+        print("8. TP/SL Analysis & Optimization")
+        print("9. Exit")
         
         choice = input("Select an option (1-8): ")
 
@@ -210,6 +378,8 @@ def main_menu():
         elif choice == '7':
             run_full_pipeline(api_key)
         elif choice == '8':
+            tp_sl_analysis_menu()
+        elif choice == '9':
             print("Exiting application...")
             break
         else:
