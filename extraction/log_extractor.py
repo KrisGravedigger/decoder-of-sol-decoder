@@ -5,6 +5,7 @@ import logging
 from typing import Dict, List, Optional, Any
 import sys
 from pathlib import Path
+import yaml
 
 
 
@@ -40,13 +41,23 @@ DEBUG_LEVEL = "DEBUG"                   # "DEBUG" for detailed logs, "INFO" for 
 CONTEXT_EXPORT_ENABLED = True          # Enable/disable context export completely
 DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event logging
 
+# === TARGETED DEBUGGING FOR SPECIFIC POSITIONS ===
+TARGETED_DEBUG_ENABLED = False
+DEBUG_TARGET_IDS = {
+    "pos_05-22-16-22-13_1847283",
+    "pos_05-27-10-24-54_2689461"
+}
+DEBUG_TRACE_FILE = "peak_pnl_debug.txt"
+
+
 # AIDEV-NOTE-CLAUDE: Imports updated to reflect new project structure.
 from core.models import Position
 from extraction.parsing_utils import (
     _parse_custom_timestamp,
     clean_ansi, find_context_value, normalize_token_pair,
     extract_close_timestamp, parse_position_from_open_line,
-    parse_final_pnl_with_line_info
+    parse_final_pnl_with_line_info,
+    extract_peak_pnl_from_logs, extract_total_fees_from_logs
 )
 from tools.debug_analyzer import DebugAnalyzer
 
@@ -86,6 +97,17 @@ class StrategyParsingDiagnostic:
         self.diagnostic_cases: List[Dict[str, Any]] = []
         self.all_lines: List[str] = []
         self.file_line_mapping: List[Dict[str, Any]] = []
+    
+    def _load_config(self) -> Dict:
+        """Load configuration from portfolio_config.yaml."""
+        config_path = "reporting/config/portfolio_config.yaml"
+        try:
+            import yaml
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except (FileNotFoundError, ImportError):
+            logger.warning(f"Config file not found or yaml not available: {config_path}, using defaults")
+            return {}
         
     def set_log_data(self, lines: List[str], file_mapping: List[Dict[str, Any]]):
         """Set log lines and file mapping for diagnostic."""
@@ -243,6 +265,7 @@ class LogParser:
     def __init__(self):
         """Initialize the log parser."""
         self.all_lines: List[str] = []
+        self.config = self._load_config()
         self.active_positions: Dict[str, Position] = {}
         self.finalized_positions: List[Position] = []
         self.debug_analyzer = DebugAnalyzer(
@@ -251,6 +274,16 @@ class LogParser:
         )
         self.strategy_diagnostic = StrategyParsingDiagnostic(enabled=STRATEGY_DIAGNOSTIC_ENABLED)
         self.file_line_mapping: List[Dict[str, Any]] = []
+
+    def _load_config(self) -> Dict:
+        """Load configuration from portfolio_config.yaml."""
+        config_path = "reporting/config/portfolio_config.yaml"
+        try:
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except (FileNotFoundError, ImportError):
+            logger.warning(f"Config file not found: {config_path}, using defaults")
+            return {}
 
     def _process_open_event(self, line_content: str, index: int):
         """
@@ -268,6 +301,11 @@ class LogParser:
 
         if not details:
             return
+
+        # Create a temporary position object just to get the ID for filtering
+        temp_pos_for_id = Position(details['timestamp'], details['version'], index)
+        if TARGETED_DEBUG_ENABLED and temp_pos_for_id.position_id not in DEBUG_TARGET_IDS:
+            return # Skip this position entirely if targeted debug is on and it's not a target
 
         token_pair = normalize_token_pair(details.get('token_pair'))
         if not token_pair:
@@ -296,6 +334,9 @@ class LogParser:
             wallet_id=details.get('wallet_address', folder_wallet_id), 
             source_file=source_file
         )
+
+        if TARGETED_DEBUG_ENABLED:
+            pass # Specific debug output is handled in extract_peak_pnl_from_logs
         
         pos.token_pair = token_pair
         pos.pool_address = details.get('pool_address')
@@ -370,6 +411,10 @@ class LogParser:
                     # Remove from active positions and do not add to finalized list.
                     del self.active_positions[closed_pair]
                     return # Stop all further processing for this corrupted position.
+
+        if TARGETED_DEBUG_ENABLED:
+            pass # Specific debug output is handled in extract_peak_pnl_from_logs
+
         
         # If no critical failures were found, proceed with normal closing logic.
         pos.close_timestamp = extract_close_timestamp(
@@ -380,10 +425,75 @@ class LogParser:
         )
         pos.close_reason = self._classify_close_reason(index)
         pos.close_line_index = index
-        pnl_result = parse_final_pnl_with_line_info(self.all_lines, index, 50, debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"))
+        pnl_result = parse_final_pnl_with_line_info(
+            self.all_lines, index, 70, 
+            debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"),
+            debug_file_path=DEBUG_TRACE_FILE if TARGETED_DEBUG_ENABLED else None
+        )
         pos.final_pnl = pnl_result['pnl']
         
         self.debug_analyzer.process_close_event(pos, index)
+        
+        # PHASE 3A: Extract peak PnL and fees
+        if pos.close_reason != "active_at_log_end":
+            significance_threshold = self.config.get('tp_sl_analysis', {}).get('significance_threshold', 0.01)
+            
+            # For targeted debugging, pass the file path and position ID
+            peak_pnl_debug_path = DEBUG_TRACE_FILE if (TARGETED_DEBUG_ENABLED and pos.position_id in DEBUG_TARGET_IDS) else None
+
+            # Smart extraction based on close reason
+            if pos.close_reason == 'TP':
+                # We already know max profit (final PnL), but still extract max_loss
+                peak_pnl_data = extract_peak_pnl_from_logs(
+                    self.all_lines, pos.open_line_index, index, significance_threshold,
+                    debug_file_path=peak_pnl_debug_path,
+                    position_id=pos.position_id
+                )
+                pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
+                
+                # Calculate max profit from final PnL
+                if pos.final_pnl is not None and pos.final_pnl > 0 and pos.initial_investment:
+                    pos.max_profit_during_position = round((pos.final_pnl / pos.initial_investment) * 100, 2)
+                else:
+                    pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
+                    
+            elif pos.close_reason == 'SL':
+                # We already know max loss (final PnL), but still extract max_profit
+                peak_pnl_data = extract_peak_pnl_from_logs(
+                    self.all_lines, pos.open_line_index, index, significance_threshold,
+                    debug_file_path=peak_pnl_debug_path,
+                    position_id=pos.position_id
+                )
+                pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
+                
+                # Calculate max loss from final PnL
+                if pos.final_pnl is not None and pos.final_pnl < 0 and pos.initial_investment:
+                    pos.max_loss_during_position = round((pos.final_pnl / pos.initial_investment) * 100, 2)
+                else:
+                    pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
+                    
+            else:  # 'LV', 'OOR', 'other'
+                # Extract both max profit and max loss
+                peak_pnl_data = extract_peak_pnl_from_logs(
+                    self.all_lines, pos.open_line_index, index, significance_threshold,
+                    debug_file_path=peak_pnl_debug_path,
+                    position_id=pos.position_id
+                )
+                pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
+                pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
+            
+            # Extract total fees (same for all close reasons)
+            pos.total_fees_collected = extract_total_fees_from_logs(
+                self.all_lines, pos.open_line_index, index,
+                debug_file_path=DEBUG_TRACE_FILE if TARGETED_DEBUG_ENABLED else None
+            )
+            
+            if DEBUG_ENABLED:
+                logger.debug(f"Peak PnL for {pos.position_id}: "
+                            f"Max profit: {pos.max_profit_during_position}%, "
+                            f"Max loss: {pos.max_loss_during_position}%, "
+                            f"Total fees: {pos.total_fees_collected} SOL, "
+                            f"Samples: {peak_pnl_data.get('samples_found', 0)}")
         
         self.finalized_positions.append(pos)
         del self.active_positions[closed_pair]
@@ -430,6 +540,11 @@ class LogParser:
         Returns:
             List of validated position dictionaries ready for CSV writing.
         """
+        if TARGETED_DEBUG_ENABLED:
+            if os.path.exists(DEBUG_TRACE_FILE):
+                os.remove(DEBUG_TRACE_FILE)
+            logger.warning(f"TARGETED (PEAK PNL) DEBUG ENABLED FOR: {DEBUG_TARGET_IDS}. Output will be in {DEBUG_TRACE_FILE}.")
+
         log_files_info = []
         if os.path.exists(log_dir):
             for item in sorted(os.listdir(log_dir)):
@@ -476,14 +591,27 @@ class LogParser:
         for pos in self.active_positions.values():
             pos.close_reason = "active_at_log_end"
             self.finalized_positions.append(pos)
-            logger.warning(f"Position {pos.position_id} ({pos.token_pair}) remained active at end of logs.")
+            if not TARGETED_DEBUG_ENABLED:
+                logger.warning(f"Position {pos.position_id} ({pos.token_pair}) remained active at end of logs.")
+
+        if TARGETED_DEBUG_ENABLED:
+            logger.warning(f"Targeted debug run finished. Check '{DEBUG_TRACE_FILE}' for trace details.")
+            if self.finalized_positions:
+                 logger.info(f"Found and processed {len(self.finalized_positions)} target positions.")
+            return [] # Prevents writing to CSV in debug mode
 
         validated_positions = []
         skipped_low_pnl = 0
         skipped_time_machine = 0
         skipped_validation = 0
+        skipped_superseded = 0
 
         for pos in self.finalized_positions:
+            # Filter 0: Superseded positions are not needed for analysis
+            if pos.close_reason == "Superseded":
+                skipped_superseded += 1
+                continue
+
             # Filter 1: Basic validation errors (e.g., missing essential fields)
             validation_errors = pos.get_validation_errors()
             if validation_errors:
@@ -519,6 +647,7 @@ class LogParser:
         logger.info(f"  - {skipped_validation} skipped due to missing essential data.")
         logger.info(f"  - {skipped_time_machine} skipped due to 'Time Machine' error.")
         logger.info(f"  - {skipped_low_pnl} skipped due to low PnL.")
+        logger.info(f"  - {skipped_superseded} skipped because they were superseded.")
         
         return validated_positions
     
@@ -595,6 +724,9 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     parser = LogParser()
     extracted_data = parser.run(log_dir)
     
+    if TARGETED_DEBUG_ENABLED:
+        return True # Stop execution here in targeted debug mode
+
     # AIDEV-NOTE-CLAUDE: Logic to manually skip positions based on an external file.
     # This allows for manual data correction for known errors in bot logs.
     skip_file = 'reporting/config/positions_to_skip.csv'
