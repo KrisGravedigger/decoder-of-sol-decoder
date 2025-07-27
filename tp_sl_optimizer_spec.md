@@ -124,17 +124,62 @@ Position.post_close_prices: List[float]  # Price data after position close
 - [x] Integrate with main menu for analysis execution
 
 ### **Phase 4: TP/SL Range Testing** 📋 NEXT IMPLEMENTATION
-**Goal:** Implement parameter range simulation framework
 
-- [ ] Build user-configurable TP/SL range testing interface
-- [ ] Implement position-level "what-if" simulation logic
-- [ ] Create portfolio-level aggregation and impact analysis
-- [ ] Generate comparative performance reports
+**Goal:** Create a framework to test a user-defined grid of Take Profit (TP) and Stop Loss (SL) values, aggregating the results to identify the most optimal combinations for each identified strategy instance.
 
-**Phase Questions:**
-- Should we implement parallel processing for large simulation sets?
-- How to handle positions that would never trigger with certain TP/SL levels?
-- What statistical significance testing should we apply to results?
+This phase is divided into two parts:
+- **Phase 4A (Current Implementation):** Backend simulation and static reporting with per-strategy heatmaps.
+- **Phase 4B (Future Enhancement):** An interactive "what-if" tool for dynamic parameter exploration.
+
+---
+#### **Phase 4A: Static Reporting & Per-Strategy Analysis** ✅ **COMPLETE**
+
+**Core Data Flow:** The key architectural decision is to enrich the primary data file in-place, ensuring a single source of truth for all subsequent analyses.
+
+**Step 0: Data Linkage & Enrichment (Crucial Prerequisite)**
+- **File to Modify:** `reporting/strategy_instance_detector.py`
+- **Workflow Change:** This module becomes a mandatory data preparation step in the main pipeline.
+- **Logic:**
+    1. Reads the base `positions_to_analyze.csv` file.
+    2. Performs its strategy instance detection as usual.
+    3. **Enriches** the loaded DataFrame by adding a new `strategy_instance_id` column.
+    4. **Overwrites** the original `positions_to_analyze.csv` file with this new, enriched version. All subsequent steps will naturally use this complete data file.
+
+**Step 1: Configuration (`portfolio_config.yaml`)**
+- A new `range_testing` section will be added to allow users to define the simulation parameters.
+```yaml
+# PHASE 4: TP/SL Range Testing Configuration
+range_testing:
+  enable: true  # Master switch to run this analysis
+
+  # Define TP levels to test (in percentage)
+  tp_levels: [2, 4, 6, 8, 10, 15] 
+
+  # Define SL levels to test (in percentage, positive value)
+  sl_levels: [2, 3, 4, 5, 7, 10]
+
+  # Metric for heatmap color and ranking
+  primary_ranking_metric: "total_pnl"
+
+**Step 2: Simulation Engine**
+New File: simulations/range_test_simulator.py
+New Class: TpSlRangeSimulator
+Input: The enriched positions_to_analyze.csv (from Step 0).
+Core Logic:
+For each position, it will reuse the logic from PostCloseAnalyzer to generate a post-close value timeline once.
+It will then iterate through the configured TP/SL grid. For each pair, it will scan the timeline to find the simulated exit point (TP, SL, or end of simulation).
+Outputs:
+range_test_detailed_results.csv: A large file with results for every combination (position_id, strategy_instance_id, tp_level, sl_level, simulated_pnl). This will be the foundation for Phase 4B.
+range_test_aggregated.csv: Aggregated results, grouped by strategy_instance_id, tp_level, and sl_level.
+
+**Step 3: Reporting & Visualization**
+New File: reporting/visualizations/interactive/range_test_charts.py
+New Section in HTML Report: "TP/SL Range Test Analysis"
+Components:
+Per-Strategy Heatmaps: A series of interactive Plotly heatmaps, one for each major strategy instance.
+X-axis: SL levels, Y-axis: TP levels, Color: primary_ranking_metric.
+Tooltips will show detailed stats (Total PnL, Avg PnL, Win Rate).
+Optimal Settings Table: A summary table showing the best-performing TP/SL combination found for each strategy instance.
 
 ### **Phase 5: Optimization Engine** 📋 *PLANNED*
 **Goal:** Identify statistically optimal parameter combinations

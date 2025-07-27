@@ -165,7 +165,38 @@
             {% endif %}
                         
         </div>
-        
+    
+        <!-- TP/SL Range Testing Results -->
+        {% if charts.get('range_test_heatmaps') %}
+        <div class="section">
+            <h2>TP/SL Range Testing Analysis (Phase 4A)</h2>
+            <p>This section shows the results of testing different Take Profit and Stop Loss combinations for each strategy instance. The heatmaps visualize performance across the parameter grid, with the star (★) marking the optimal combination.</p>
+            
+            <!-- Optimal Settings Summary -->
+            <h3>Optimal TP/SL Settings by Strategy</h3>
+            <div id="optimal_settings_table">{{ charts.range_test_optimal_table | safe }}</div>
+            
+            <!-- Strategy Comparison -->
+            <h3>Strategy Performance Comparison (Optimal Settings)</h3>
+            <div id="strategy_comparison" class="plotly-chart">{{ charts.range_test_comparison | safe }}</div>
+            
+            <!-- Individual Strategy Heatmaps -->
+            <h3>Detailed TP/SL Optimization Heatmaps</h3>
+            {% for heatmap in charts.range_test_heatmaps %}
+                <div class="plotly-chart" style="margin-bottom: 30px;">
+                    <h4>{{ heatmap.strategy_id }}</h4>
+                    {{ heatmap.html | safe }}
+                </div>
+            {% endfor %}
+            
+            <!-- AIDEV-TODO-CLAUDE: Placeholder for Phase 4B interactive tool -->
+            <div class="recommendation" style="background-color: #f0f0f0; color: #333; margin-top: 30px;">
+                <h4>Coming Soon: Interactive TP/SL Explorer</h4>
+                <p>Phase 4B will add an interactive tool allowing you to dynamically explore different TP/SL combinations and see their impact on individual positions in real-time.</p>
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 </body>
 </html>

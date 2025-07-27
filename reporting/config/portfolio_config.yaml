@@ -102,3 +102,16 @@ tp_sl_analysis:
     batch_size: 50                        # Positions per batch
     max_parallel_fetches: 3               # Concurrent API calls
     enable_progress_logging: true         # Show progress during bulk analysis
+
+  # PHASE 4: TP/SL Range Testing Configuration
+range_testing:
+  enable: true  # Master switch to run this analysis
+
+  # Define TP levels to test (in percentage)
+  tp_levels: [2, 6, 12] 
+
+  # Define SL levels to test (in percentage, positive value)
+  sl_levels: [3, 6, 9, 15]
+
+  # Metric for heatmap color and ranking
+  primary_ranking_metric: "total_pnl"

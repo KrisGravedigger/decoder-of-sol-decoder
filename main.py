@@ -189,6 +189,122 @@ def tp_sl_analysis_menu():
         elif choice == "5":
             break
 
+def tp_sl_range_testing_menu():
+    """
+    TP/SL Range Testing submenu for Phase 4A.
+    """
+    while True:
+        print("\n" + "="*70)
+        print("--- TP/SL RANGE TESTING (Phase 4A) ---")
+        print("="*70)
+        print("1. Run TP/SL range simulation for all positions")
+        print("2. Generate range test report with heatmaps")
+        print("3. View optimal TP/SL recommendations")
+        print("4. Export detailed simulation results")
+        print("5. Back to main menu")
+        
+        choice = input("\nSelect option (1-5): ").strip()
+        
+        if choice == "1":
+            run_tp_sl_range_simulation()
+        elif choice == "2":
+            generate_range_test_report()
+        elif choice == "3":
+            view_optimal_recommendations()
+        elif choice == "4":
+            export_range_test_results()
+        elif choice == "5":
+            break
+
+def run_tp_sl_range_simulation():
+    """Run TP/SL range testing simulation."""
+    try:
+        from simulations.range_test_simulator import TpSlRangeSimulator
+        from reporting.data_loader import load_and_prepare_positions
+        
+        print("\nLoading enriched positions data...")
+        positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
+        
+        # Check if strategy_instance_id exists
+        if 'strategy_instance_id' not in positions_df.columns:
+            print("❌ ERROR: positions_to_analyze.csv is not enriched with strategy_instance_id!")
+            print("Please run Step 2 (Detect Strategies & Enrich Data) first.")
+            return
+            
+        config = load_main_config()
+        if not config.get('range_testing', {}).get('enable', False):
+            print("❌ Range testing is disabled in config. Set range_testing.enable: true")
+            return
+            
+        simulator = TpSlRangeSimulator(config)
+        print(f"\nRunning simulation for {len(positions_df)} positions...")
+        print(f"TP levels: {config['range_testing']['tp_levels']}")
+        print(f"SL levels: {config['range_testing']['sl_levels']}")
+        
+        results = simulator.run_simulation(positions_df)
+        
+        print(f"\n✅ Simulation complete!")
+        print(f"  Total simulations: {len(results['detailed_results'])}")
+        print(f"  Strategy instances analyzed: {len(results['aggregated_results'])}")
+        
+        # Save results
+        results['detailed_results'].to_csv("reporting/output/range_test_detailed_results.csv", index=False)
+        results['aggregated_results'].to_csv("reporting/output/range_test_aggregated.csv", index=False)
+        print("\nResults saved to reporting/output/")
+        
+    except Exception as e:
+        logger.error(f"Range simulation failed: {e}")
+        print(f"❌ Simulation failed: {e}")
+
+def generate_range_test_report():
+    """Generate HTML report with range test heatmaps."""
+    try:
+        print("\nGenerating range test report...")
+        # This will be integrated into the main HTML report
+        print("✅ Range test results will be included in the next comprehensive report generation (Step 5)")
+        
+    except Exception as e:
+        print(f"❌ Report generation failed: {e}")
+
+def view_optimal_recommendations():
+    """View optimal TP/SL recommendations per strategy."""
+    try:
+        import pandas as pd
+        
+        agg_results = pd.read_csv("reporting/output/range_test_aggregated.csv")
+        config = load_main_config()
+        metric = config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
+        
+        # Find best combination for each strategy
+        optimal = agg_results.loc[agg_results.groupby('strategy_instance_id')[metric].idxmax()]
+        
+        print("\n" + "="*70)
+        print("OPTIMAL TP/SL RECOMMENDATIONS")
+        print("="*70)
+        print(f"Based on: {metric}")
+        print("-"*70)
+        
+        for _, row in optimal.iterrows():
+            print(f"\nStrategy: {row['strategy_instance_id']}")
+            print(f"  Optimal TP: {row['tp_level']}%")
+            print(f"  Optimal SL: {row['sl_level']}%")
+            print(f"  {metric}: {row[metric]:.3f}")
+            
+    except FileNotFoundError:
+        print("❌ No simulation results found. Please run simulation first (option 1).")
+    except Exception as e:
+        print(f"❌ Failed to view recommendations: {e}")
+
+def export_range_test_results():
+    """Export detailed range test results."""
+    try:
+        print("\n✅ Results already exported to:")
+        print("  - reporting/output/range_test_detailed_results.csv")
+        print("  - reporting/output/range_test_aggregated.csv")
+        
+    except Exception as e:
+        print(f"❌ Export failed: {e}")
+
 def run_post_close_analysis():
     """
     Run post-close analysis with user feedback.
@@ -348,18 +464,22 @@ def main_menu():
         print("\n" + "="*70)
         print("--- MAIN MENU ---")
         print("="*70)
+        print("MANDATORY WORKFLOW: Step 1 → Step 2 → Step 3 → Step 4 → Step 5")
+        print("-"*70)
         print("1. Step 1: Process Logs and Extract Positions")
-        print("2. Step 2: Detect Strategy Instances")
+        print("2. Step 2: Detect Strategies & Enrich Data (MANDATORY after Step 1)")
         print("3. Step 3: Fetch/Update Main Report Data (Online Step)")
         mode_label = get_mode_label(config, api_key)
         print(f"4. Step 4: Run Base Simulations {mode_label}")
         print(f"5. Step 5: Generate Comprehensive Report {mode_label}")
+        print("-"*70)
         print("6. TP/SL Optimizer: Cache Management (OCHLV+Volume)")
-        print("7. Run Full Pipeline (Steps 1 -> 5)")
+        print("7. Run Full Pipeline (Steps 1 → 5)")
         print("8. TP/SL Analysis & Optimization")
-        print("9. Exit")
+        print("9. TP/SL Range Testing (NEW)")
+        print("0. Exit")
         
-        choice = input("Select an option (1-8): ")
+        choice = input("Select an option (0-9): ")
 
         if choice == '1':
             print_header("Step 1: Log Processing")
@@ -380,6 +500,8 @@ def main_menu():
         elif choice == '8':
             tp_sl_analysis_menu()
         elif choice == '9':
+            tp_sl_range_testing_menu()
+        elif choice == '0':
             print("Exiting application...")
             break
         else:

@@ -17,6 +17,7 @@ import plotly.offline as pyo
 from jinja2 import Environment, FileSystemLoader
 
 from .visualizations import interactive as interactive_charts
+from .visualizations.interactive import range_test_charts
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -115,7 +116,47 @@ class HTMLReportGenerator:
         # AIDEV-NOTE-CLAUDE: Generate the new charts for strategy simulations.
         if strategy_simulations:
             charts['strategy_simulation_comparison'] = interactive_charts.create_strategy_simulation_chart(strategy_simulations, portfolio_analysis)
-              
+
+        # Range Test Charts (Phase 4A)
+        try:
+            # Check if range test results exist
+            import os
+            if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                import pandas as pd
+                agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                
+                # Get unique strategies
+                strategies = agg_df['strategy_instance_id'].unique()[:5]  # Top 5 for space
+                
+                # Create heatmaps for each strategy
+                charts['range_test_heatmaps'] = []
+                for strategy_id in strategies:
+                    heatmap_html = range_test_charts.create_range_test_heatmap(
+                        agg_df, strategy_id, 
+                        self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
+                    )
+                    charts['range_test_heatmaps'].append({
+                        'strategy_id': strategy_id,
+                        'html': heatmap_html
+                    })
+                    
+                # Create optimal settings table
+                charts['range_test_optimal_table'] = range_test_charts.create_optimal_settings_table(
+                    agg_df,
+                    self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
+                )
+                
+                # Create comparison chart
+                charts['range_test_comparison'] = range_test_charts.create_strategy_comparison_chart(
+                    agg_df,
+                    self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
+                )
+                
+                # AIDEV-TODO-CLAUDE: Placeholder for Phase 4B interactive tool
+                
+        except Exception as e:
+            logger.warning(f"Could not generate range test charts: {e}")
+
         return charts
             
     def _prepare_template_data(self, 
