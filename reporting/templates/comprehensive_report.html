@@ -189,11 +189,207 @@
                 </div>
             {% endfor %}
             
-            <!-- AIDEV-TODO-CLAUDE: Placeholder for Phase 4B interactive tool -->
-            <div class="recommendation" style="background-color: #f0f0f0; color: #333; margin-top: 30px;">
-                <h4>Coming Soon: Interactive TP/SL Explorer</h4>
-                <p>Phase 4B will add an interactive tool allowing you to dynamically explore different TP/SL combinations and see their impact on individual positions in real-time.</p>
+            <!-- Phase 4B: Interactive What-If Tool -->
+            <div class="recommendation" style="background-color: #f9f9f9; color: #333; margin-top: 30px; border: 2px solid #3498db;">
+                <h4>Interactive TP/SL Explorer (Phase 4B)</h4>
+                
+                <!-- Filter Controls -->
+                <div style="margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <div>
+                            <label for="tp-input" style="display: block; margin-bottom: 5px;">Take Profit (%):</label>
+                            <input type="number" id="tp-input" min="0.5" max="50" step="0.5" value="6" style="width: 100%; padding: 5px;">
+                        </div>
+                        <div>
+                            <label for="sl-input" style="display: block; margin-bottom: 5px;">Stop Loss (%):</label>
+                            <input type="number" id="sl-input" min="0.5" max="50" step="0.5" value="10" style="width: 100%; padding: 5px;">
+                        </div>
+                        <div>
+                            <label for="date-from" style="display: block; margin-bottom: 5px;">Date From:</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="date" id="date-from" style="flex: 1; padding: 5px;">
+                                <button onclick="document.getElementById('date-from').value=''; updateWhatIfAnalysis();" style="padding: 5px 10px;">Clear</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="date-to" style="display: block; margin-bottom: 5px;">Date To:</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="date" id="date-to" style="flex: 1; padding: 5px;">
+                                <button onclick="document.getElementById('date-to').value=''; updateWhatIfAnalysis();" style="padding: 5px 10px;">Clear</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="min-positions" style="display: block; margin-bottom: 5px;">Min. Positions per Strategy:</label>
+                            <input type="number" id="min-positions" min="1" max="100" step="1" value="5" style="width: 100%; padding: 5px;">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Results Table -->
+                <div style="overflow-x: auto;">
+                    <table id="whatif-results-table" style="width: 100%; margin-top: 20px;">
+                        <thead>
+                            <tr>
+                                <th>Strategy Instance</th>
+                                <th>Positions Count</th>
+                                <th>Simulated PnL (SOL)</th>
+                                <th>Avg PnL per Position</th>
+                                <th>Exit Breakdown</th>
+                            </tr>
+                        </thead>
+                        <tbody id="whatif-results-body">
+                            <!-- Results will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <p style="margin-top: 20px; font-size: 0.9em; color: #666;">
+                    <strong>Note:</strong> This tool simulates "what-if" scenarios based on historical data. 
+                    Results show the closest available TP/SL combination from the simulation grid.
+                </p>
             </div>
+            
+            <!-- JavaScript for Interactive Tool -->
+            <script>
+                // Embed enriched simulation data
+                const detailedSimulationData = {{ enriched_simulation_json | safe }};
+                
+                // Main update function
+                function updateWhatIfAnalysis() {
+                    // Get filter values
+                    const tpValue = parseFloat(document.getElementById('tp-input').value) || 6;
+                    const slValue = parseFloat(document.getElementById('sl-input').value) || 10;
+                    const dateFrom = document.getElementById('date-from').value;
+                    const dateTo = document.getElementById('date-to').value;
+                    const minPositions = parseInt(document.getElementById('min-positions').value) || 5;
+                    
+                    // Apply filters in cascade
+                    let filteredData = [...detailedSimulationData];
+                    
+                    // Date filter
+                    if (dateFrom || dateTo) {
+                        filteredData = filteredData.filter(row => {
+                            if (!row.open_timestamp) return false;
+                            const rowDate = new Date(row.open_timestamp);
+                            if (dateFrom && rowDate < new Date(dateFrom)) return false;
+                            if (dateTo && rowDate > new Date(dateTo)) return false;
+                            return true;
+                        });
+                    }
+                    
+                    // Strategy count filter
+                    filteredData = filteredData.filter(row => 
+                        (row.analyzed_position_count || 0) >= minPositions
+                    );
+                    
+                    // Group by strategy and find closest TP/SL
+                    const strategyGroups = {};
+                    filteredData.forEach(row => {
+                        const strategyId = row.strategy_instance_id;
+                        if (!strategyGroups[strategyId]) {
+                            strategyGroups[strategyId] = [];
+                        }
+                        strategyGroups[strategyId].push(row);
+                    });
+                    
+                    // For each strategy, find the closest TP/SL combination
+                    const results = [];
+                    Object.entries(strategyGroups).forEach(([strategyId, rows]) => {
+                        // Find closest TP/SL combination
+                        let closestRow = null;
+                        let minDistance = Infinity;
+                        
+                        rows.forEach(row => {
+                            const distance = Math.sqrt(
+                                Math.pow(row.tp_level - tpValue, 2) + 
+                                Math.pow(row.sl_level - slValue, 2)
+                            );
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                closestRow = row;
+                            }
+                        });
+                        
+                        if (closestRow) {
+                            // Calculate aggregated metrics for this TP/SL combination
+                            const matchingRows = rows.filter(r => 
+                                r.tp_level === closestRow.tp_level && 
+                                r.sl_level === closestRow.sl_level
+                            );
+                            
+                            const totalPnL = matchingRows.reduce((sum, r) => sum + (r.simulated_pnl || 0), 0);
+                            const avgPnL = totalPnL / matchingRows.length;
+                            
+                            // Count exit reasons
+                            const exitCounts = { TP: 0, SL: 0, END: 0, NO_DATA: 0 };
+                            matchingRows.forEach(r => {
+                                if (r.exit_reason && exitCounts.hasOwnProperty(r.exit_reason)) {
+                                    exitCounts[r.exit_reason]++;
+                                }
+                            });
+                            
+                            results.push({
+                                strategyId: strategyId,
+                                positionCount: matchingRows[0].analyzed_position_count || matchingRows.length,
+                                totalPnL: totalPnL,
+                                avgPnL: avgPnL,
+                                exitCounts: exitCounts,
+                                actualTP: closestRow.tp_level,
+                                actualSL: closestRow.sl_level
+                            });
+                        }
+                    });
+                    
+                    // Sort by total PnL descending
+                    results.sort((a, b) => b.totalPnL - a.totalPnL);
+                    
+                    // Update table
+                    const tbody = document.getElementById('whatif-results-body');
+                    tbody.innerHTML = '';
+                    
+                    if (results.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No strategies match the current filters</td></tr>';
+                        return;
+                    }
+                    
+                    results.forEach(result => {
+                        const row = tbody.insertRow();
+                        
+                        // Strategy Instance
+                        row.insertCell().innerHTML = `${result.strategyId}<br><small>(TP: ${result.actualTP}%, SL: ${result.actualSL}%)</small>`;
+                        
+                        // Positions Count
+                        row.insertCell().textContent = result.positionCount;
+                        
+                        // Total PnL
+                        const pnlCell = row.insertCell();
+                        pnlCell.textContent = result.totalPnL.toFixed(3);
+                        pnlCell.className = result.totalPnL >= 0 ? 'positive' : 'negative';
+                        
+                        // Avg PnL
+                        const avgCell = row.insertCell();
+                        avgCell.textContent = result.avgPnL.toFixed(3);
+                        avgCell.className = result.avgPnL >= 0 ? 'positive' : 'negative';
+                        
+                        // Exit Breakdown
+                        const exitBreakdown = `TP: ${result.exitCounts.TP}, SL: ${result.exitCounts.SL}, END: ${result.exitCounts.END}`;
+                        row.insertCell().textContent = exitBreakdown;
+                    });
+                }
+                
+                // Add event listeners
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Initial load
+                    updateWhatIfAnalysis();
+                    
+                    // Add listeners to all inputs
+                    document.getElementById('tp-input').addEventListener('input', updateWhatIfAnalysis);
+                    document.getElementById('sl-input').addEventListener('input', updateWhatIfAnalysis);
+                    document.getElementById('date-from').addEventListener('change', updateWhatIfAnalysis);
+                    document.getElementById('date-to').addEventListener('change', updateWhatIfAnalysis);
+                    document.getElementById('min-positions').addEventListener('input', updateWhatIfAnalysis);
+                });
+            </script>
         </div>
         {% endif %}
 
