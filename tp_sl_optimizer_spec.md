@@ -129,7 +129,12 @@ Position.post_close_prices: List[float]  # Price data after position close
 
 This phase is divided into two parts:
 - **Phase 4A (Current Implementation):** Backend simulation and static reporting with per-strategy heatmaps.
-- **Phase 4B (Future Enhancement):** An interactive "what-if" tool for dynamic parameter exploration.
+- **Phase 4B: Interactive "What-If" Tool** ✅ **COMPLETE**
+    - **Summary:** Implemented a fully interactive, client-side tool within the HTML report. It is powered by a pre-calculated, enriched JSON data object.
+    - **Key Features:**
+        - Dynamic filtering by date range and minimum positions per strategy.
+        - Smart TP/SL matching using Euclidean distance.
+        - Real-time updates of a comprehensive results table.
 
 ---
 #### **Phase 4A: Static Reporting & Per-Strategy Analysis** ✅ **COMPLETE**
