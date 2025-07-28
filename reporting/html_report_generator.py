@@ -11,6 +11,7 @@ Creates comprehensive interactive HTML reports combining:
 
 import logging
 import os
+import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import plotly.offline as pyo
@@ -169,6 +170,9 @@ class HTMLReportGenerator:
         
         formatted_weekend_data = self._format_weekend_data(weekend_analysis)
         best_sim_strategy = self._get_best_sim_strategy(strategy_simulations)
+        
+        # AIDEV-TPSL-CLAUDE: Phase 4B - Prepare enriched simulation data for interactive tool
+        enriched_simulation_json = self._prepare_enriched_simulation_data()
 
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -179,7 +183,8 @@ class HTMLReportGenerator:
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
             'config': self.config,  # Add config for template
-            'plotly_js': pyo.get_plotlyjs()
+            'plotly_js': pyo.get_plotlyjs(),
+            'enriched_simulation_json': enriched_simulation_json  # Phase 4B data
         }
         
         return template_data
@@ -219,7 +224,64 @@ class HTMLReportGenerator:
             
         best_name = max(sim_pnl, key=sim_pnl.get)
         return {'name': best_name, 'pnl': sim_pnl[best_name]}
+
+    def _prepare_enriched_simulation_data(self) -> str:
+        """
+        Prepare enriched simulation data for Phase 4B interactive tool.
         
+        Returns:
+            JSON string containing enriched simulation results
+        """
+        import json
+        import pandas as pd
+        
+        try:
+            # Check if range test results exist
+            if not os.path.exists("reporting/output/range_test_detailed_results.csv"):
+                logger.info("No range test results found for enrichment")
+                return json.dumps([])
+                
+            # Load the three data sources
+            detailed_results_df = pd.read_csv("reporting/output/range_test_detailed_results.csv")
+            positions_df = pd.read_csv("positions_to_analyze.csv")
+            strategy_instances_df = pd.read_csv("strategy_instances.csv")
+            
+            # Parse timestamps in positions_df
+            from reporting.data_loader import _parse_custom_timestamp
+            positions_df['open_timestamp'] = positions_df['open_timestamp'].apply(_parse_custom_timestamp)
+            
+            # First merge: Add open_timestamp to detailed results
+            enriched_df = pd.merge(
+                detailed_results_df,
+                positions_df[['position_id', 'open_timestamp']],
+                on='position_id',
+                how='left'
+            )
+            
+            # Second merge: Add analyzed_position_count from strategy instances
+            enriched_df = pd.merge(
+                enriched_df,
+                strategy_instances_df[['strategy_instance_id', 'analyzed_position_count']],
+                on='strategy_instance_id',
+                how='left'
+            )
+            
+            # Convert timestamps to ISO format for JSON
+            enriched_df['open_timestamp'] = enriched_df['open_timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Replace NaN values with None for cleaner JSON
+            enriched_df = enriched_df.where(pd.notnull(enriched_df), None)
+            
+            # Convert to JSON
+            enriched_json = enriched_df.to_json(orient='records')
+            
+            logger.info(f"Enriched {len(enriched_df)} simulation results for Phase 4B")
+            return enriched_json
+            
+        except Exception as e:
+            logger.error(f"Failed to prepare enriched simulation data: {e}")
+            return json.dumps([])
+
     def _render_html_template(self, template_data: Dict[str, Any]) -> str:
         """Render HTML template with data."""
         try:
