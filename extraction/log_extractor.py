@@ -756,22 +756,18 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
     # Apply manual position skipping
     if ids_to_skip:
         original_count = len(extracted_data)
-        extracted_data = [pos for pos in extracted_data if pos.get('position_id') not in ids_to_skip]
+        def should_skip_position(pos):
+            position_id = pos.get('position_id', '')
+            # Check if any timestamp prefix in skip list matches this position
+            for skip_prefix in ids_to_skip:
+                if position_id.startswith(skip_prefix):
+                    return True
+            return False
+        
+        extracted_data = [pos for pos in extracted_data if not should_skip_position(pos)]
         skipped_count = original_count - len(extracted_data)
         if skipped_count > 0:
-            logger.warning(f"Manually skipped {skipped_count} positions based on {skip_file}.")
-    
-    # Apply manual position skipping
-    if ids_to_skip:
-        original_count = len(extracted_data)
-        extracted_data = [pos for pos in extracted_data if pos.get('position_id') not in ids_to_skip]
-        skipped_count = original_count - len(extracted_data)
-        if skipped_count > 0:
-            logger.warning(f"Manually skipped {skipped_count} positions based on {skip_file}.")
-
-    if not extracted_data:
-        logger.error("Failed to extract any complete positions. CSV file will not be created.")
-        return False
+            logger.warning(f"Manually skipped {skipped_count} positions based on timestamp prefixes from {skip_file}.")
         
     try:
         existing_data = []
