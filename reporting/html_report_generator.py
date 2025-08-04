@@ -158,6 +158,23 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.warning(f"Could not generate range test charts: {e}")
 
+        # Phase 5: TP/SL Optimization Results
+        try:
+            if os.path.exists("reporting/output/tp_sl_recommendations.csv"):
+                # Run optimization to get visualizations
+                from optimization.tp_sl_optimizer import run_tp_sl_optimization
+                
+                optimization_results = run_tp_sl_optimization()
+                
+                if optimization_results['status'] == 'SUCCESS':
+                    charts['optimization_matrix'] = optimization_results['visualizations']['performance_matrix']
+                    charts['optimization_win_rate'] = optimization_results['visualizations']['win_rate_chart']
+                    charts['optimization_sl_floor'] = optimization_results['visualizations']['sl_floor_table']
+                    charts['optimization_summary'] = optimization_results['summary']
+                    
+        except Exception as e:
+            logger.warning(f"Could not generate optimization charts: {e}")
+
         return charts
             
     def _prepare_template_data(self, 

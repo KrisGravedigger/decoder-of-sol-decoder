@@ -392,6 +392,40 @@
             </script>
         </div>
         {% endif %}
+        
+        <!-- TP/SL Optimization Engine Results (Phase 5) -->
+        {% if charts.get('optimization_matrix') %}
+        <div class="section">
+            <h2>TP/SL Optimization Engine Results (Phase 5)</h2>
+            <p>This section provides prescriptive analytics to identify statistically optimal TP/SL parameters for each strategy based on net effect analysis and Expected Value calculations.</p>
+            
+            <!-- Summary Statistics -->
+            {% if charts.get('optimization_summary') %}
+            <div class="recommendation" style="background-color: #3498db; color: white;">
+                <h3>Optimization Summary</h3>
+                <p>Strategies Analyzed: {{ charts.optimization_summary.total_strategies }}</p>
+                <p>Changes Recommended: {{ charts.optimization_summary.changes_recommended }}</p>
+                <p>Average Expected Improvement: {{ "%.2f"|format(charts.optimization_summary.avg_improvement) }}%</p>
+                <p>Time Weighting: {{ "Enabled" if charts.optimization_summary.time_weighted else "Disabled" }}</p>
+            </div>
+            {% endif %}
+            
+            <!-- Strategy Performance Matrix -->
+            <h3>Strategy Performance Matrix</h3>
+            <p>Shows the net PnL impact of changing to optimal TP/SL parameters for each strategy.</p>
+            <div id="optimization_matrix" class="plotly-chart">{{ charts.optimization_matrix | safe }}</div>
+            
+            <!-- Win Rate Analysis -->
+            <h3>Win Rate vs Required Win Rate Analysis</h3>
+            <p>Visualizes the relationship between historical and required win rates at different SL levels.</p>
+            <div id="optimization_win_rate" class="plotly-chart">{{ charts.optimization_win_rate | safe }}</div>
+            
+            <!-- SL Floor Table -->
+            <h3>Dynamic Stop Loss Floor Analysis</h3>
+            <p>Shows the deepest viable stop loss for each take profit level based on Expected Value calculations.</p>
+            <div id="optimization_sl_floor" class="plotly-chart">{{ charts.optimization_sl_floor | safe }}</div>
+        </div>
+        {% endif %}
 
     </div>
 </body>

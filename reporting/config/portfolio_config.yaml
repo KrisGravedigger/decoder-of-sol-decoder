@@ -115,3 +115,15 @@ range_testing:
 
   # Metric for heatmap color and ranking
   primary_ranking_metric: "total_pnl"
+
+  # PHASE 5: TP/SL Optimization Engine
+optimization_engine:
+  enable: true
+  min_positions_for_optimization: 1 # Min positions for a strategy to be analyzed
+
+  # Time decay settings for weighting recent performance
+  time_weighting:
+    enable: true
+    last_n_days_full_weight: 7
+    decay_period_weeks: 4
+    minimum_weight: 0.5

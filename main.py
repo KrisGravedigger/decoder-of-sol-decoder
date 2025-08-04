@@ -201,7 +201,8 @@ def tp_sl_range_testing_menu():
         print("2. Generate range test report with heatmaps")
         print("3. View optimal TP/SL recommendations")
         print("4. Export detailed simulation results")
-        print("5. Back to main menu")
+        print("5. Run TP/SL Optimization Engine (Phase 5)")
+        print("6. Back to main menu")
         
         choice = input("\nSelect option (1-5): ").strip()
         
@@ -214,6 +215,8 @@ def tp_sl_range_testing_menu():
         elif choice == "4":
             export_range_test_results()
         elif choice == "5":
+            run_tp_sl_optimization_engine()
+        elif choice == "6":
             break
 
 def run_tp_sl_range_simulation():
@@ -304,6 +307,54 @@ def export_range_test_results():
         
     except Exception as e:
         print(f"❌ Export failed: {e}")
+
+def run_tp_sl_optimization_engine():
+    """Run Phase 5 TP/SL Optimization Engine."""
+    try:
+        from optimization.tp_sl_optimizer import run_tp_sl_optimization
+        
+        print("\n" + "="*70)
+        print("RUNNING TP/SL OPTIMIZATION ENGINE (Phase 5)")
+        print("="*70)
+        
+        # Check prerequisites
+        if not os.path.exists("reporting/output/range_test_detailed_results.csv"):
+            print("❌ ERROR: Range test results not found!")
+            print("Please run Phase 4A simulation first (option 1).")
+            return
+            
+        config = load_main_config()
+        if not config.get('optimization_engine', {}).get('enable', False):
+            print("❌ Optimization engine is disabled in config.")
+            print("Set optimization_engine.enable: true in portfolio_config.yaml")
+            return
+            
+        print("Analyzing simulation results to find optimal TP/SL parameters...")
+        print(f"Minimum positions required: {config.get('optimization_engine', {}).get('min_positions_for_optimization', 30)}")
+        print(f"Time weighting: {'Enabled' if config.get('optimization_engine', {}).get('time_weighting', {}).get('enable', True) else 'Disabled'}")
+        
+        results = run_tp_sl_optimization()
+        
+        if results['status'] == 'SUCCESS':
+            summary = results['summary']
+            print(f"\n✅ Optimization complete!")
+            print(f"  Strategies analyzed: {summary['total_strategies']}")
+            print(f"  Changes recommended: {summary['changes_recommended']}")
+            print(f"  Average improvement: {summary['avg_improvement']:.2f}%")
+            print(f"  Maximum improvement: {summary['max_improvement']:.2f}%")
+            print("\nRecommendations exported to: reporting/output/tp_sl_recommendations.csv")
+            print("Optimization results will be included in the next comprehensive report.")
+            
+        elif results['status'] == 'NO_QUALIFIED_STRATEGIES':
+            print(f"\n⚠️  {results['message']}")
+            print("Consider lowering min_positions_for_optimization in config.")
+            
+        else:
+            print(f"\n❌ Optimization failed: {results.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        logger.error(f"Optimization engine failed: {e}")
+        print(f"❌ Failed to run optimization: {e}")
 
 def run_post_close_analysis():
     """
