@@ -1,8 +1,8 @@
 import re
 import logging
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any, Tuple
 import pandas as pd
+from datetime import datetime
 
 # Get logger
 logger = logging.getLogger('ParsingUtils')
@@ -419,3 +419,62 @@ def extract_total_fees_from_logs(lines: List[str], start_line: int, end_line: in
     if debug_file_path:
         _trace("--- FEE EXTRACTION FAILED: No valid 'Pnl Calculation:' line found in lookback range. ---\n")
     return None
+
+def extract_dlmm_range(log_lines: List[str], open_line_index: int) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Extract min and max price range from DLMM pool log messages.
+    
+    AIDEV-NOTE-CLAUDE: Searches upward from OPENED line to find "Pool out of range" 
+    log messages with bottom/top price information for OOR simulation.
+    
+    Args:
+        log_lines: All log lines
+        open_line_index: Line index where position was opened
+        
+    Returns:
+        Tuple of (min_price, max_price) or (None, None) if not found
+    """
+    # Search upwards from the open line (max 60 lines)
+    for i in range(open_line_index, max(-1, open_line_index - 60), -1):
+        line = clean_ansi(log_lines[i])
+        
+        # Method 1: Look for bottom range, then find corresponding top
+        if "Pool out of range to the bottom" in line:
+            # Extract bottom price: "Pool out of range to the bottom when price reaches: $0.000152"
+            bottom_match = re.search(r'price reaches: \$([0-9.]+)', line)
+            if bottom_match:
+                try:
+                    min_price = float(bottom_match.group(1))
+                    # Look for the corresponding top range in nearby lines (±5 lines)
+                    for j in range(max(0, i-5), min(len(log_lines), i+6)):
+                        next_line = clean_ansi(log_lines[j])
+                        if "Pool out of range to the top" in next_line:
+                            top_match = re.search(r'price reaches: \$([0-9.]+)', next_line)
+                            if top_match:
+                                max_price = float(top_match.group(1))
+                                logger.debug(f"Found DLMM range: min={min_price}, max={max_price} at lines {i + 1}-{j + 1}")
+                                return min_price, max_price
+                except ValueError:
+                    logger.warning(f"Failed to parse DLMM range values at line {i + 1}")
+        
+        # Method 2: Look for top range, then find corresponding bottom
+        elif "Pool out of range to the top" in line:
+            # Extract top price: "Pool out of range to the top when price reaches: $0.000300"
+            top_match = re.search(r'price reaches: \$([0-9.]+)', line)
+            if top_match:
+                try:
+                    max_price = float(top_match.group(1))
+                    # Look for the corresponding bottom range in nearby lines (±5 lines)
+                    for j in range(max(0, i-5), min(len(log_lines), i+6)):
+                        next_line = clean_ansi(log_lines[j])
+                        if "Pool out of range to the bottom" in next_line:
+                            bottom_match = re.search(r'price reaches: \$([0-9.]+)', next_line)
+                            if bottom_match:
+                                min_price = float(bottom_match.group(1))
+                                logger.debug(f"Found DLMM range: min={min_price}, max={max_price} at lines {j + 1}-{i + 1}")
+                                return min_price, max_price
+                except ValueError:
+                    logger.warning(f"Failed to parse DLMM range values at line {i + 1}")
+    
+    logger.debug(f"No DLMM range found for position at line {open_line_index + 1}")
+    return None, None

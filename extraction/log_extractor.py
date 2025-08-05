@@ -57,7 +57,8 @@ from extraction.parsing_utils import (
     clean_ansi, find_context_value, normalize_token_pair,
     extract_close_timestamp, parse_position_from_open_line,
     parse_final_pnl_with_line_info,
-    extract_peak_pnl_from_logs, extract_total_fees_from_logs
+    extract_peak_pnl_from_logs, extract_total_fees_from_logs,
+    extract_dlmm_range
 )
 from tools.debug_analyzer import DebugAnalyzer
 
@@ -344,6 +345,11 @@ class LogParser:
         pos.take_profit = details.get('take_profit', 0.0)
         pos.stop_loss = details.get('stop_loss', 0.0)
         pos.initial_investment = details.get('initial_investment')
+        
+        # AIDEV-NOTE-CLAUDE: Extract DLMM price range for OOR simulation
+        min_price, max_price = extract_dlmm_range(self.all_lines, index)
+        pos.min_bin_price = min_price
+        pos.max_bin_price = max_price
         
         self.active_positions[token_pair] = pos
         
@@ -753,6 +759,7 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
         strategy_stats = parser.strategy_diagnostic.export_diagnostic(STRATEGY_DIAGNOSTIC_FILE)
         if strategy_stats:
              logger.warning(f"Strategy diagnostic found issues: {dict(strategy_stats)}")
+
     # Apply manual position skipping
     if ids_to_skip:
         original_count = len(extracted_data)

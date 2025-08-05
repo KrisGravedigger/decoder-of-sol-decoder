@@ -119,7 +119,7 @@ range_testing:
   # PHASE 5: TP/SL Optimization Engine
 optimization_engine:
   enable: true
-  min_positions_for_optimization: 1 # Min positions for a strategy to be analyzed
+  min_positions_for_optimization: 3 # Min positions for a strategy to be analyzed
 
   # Time decay settings for weighting recent performance
   time_weighting:

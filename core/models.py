@@ -41,6 +41,10 @@ class Position:
         self.max_loss_during_position: Optional[float] = None    # Maximum % loss during lifetime  
         self.total_fees_collected: Optional[float] = None        # Total fees in SOL
         
+        # PHASE 1: Price range for OOR simulation
+        self.min_bin_price: Optional[float] = None  # Minimum price of liquidity range
+        self.max_bin_price: Optional[float] = None  # Maximum price of liquidity range
+        
         # AIDEV-PHASE-C-PLACEHOLDER: Post-close analysis fields (Phase 3B)
         # self.max_profit_post_close: Optional[float] = None
         # self.max_loss_post_close: Optional[float] = None
@@ -107,6 +111,10 @@ class Position:
             "max_profit_during_position": self.max_profit_during_position,
             "max_loss_during_position": self.max_loss_during_position,
             "total_fees_collected": self.total_fees_collected,
+            
+            # PHASE 1: Price range fields
+            "min_bin_price": self.min_bin_price,
+            "max_bin_price": self.max_bin_price,
             
             "investment_sol": self.initial_investment,
             "pnl_sol": self.final_pnl,

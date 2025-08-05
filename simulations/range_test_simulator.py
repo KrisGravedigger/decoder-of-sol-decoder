@@ -163,6 +163,14 @@ class TpSlRangeSimulator:
 
         for point in timeline:
             pnl_pct = point.get('pnl_pct', 0.0)
+            current_price = point.get('price', 0.0)
+
+            # AIDEV-NOTE-CLAUDE: Check for Out of Range (OOR) trigger first - has priority like in bot
+            if position.min_bin_price is not None and position.max_bin_price is not None:
+                if current_price < position.min_bin_price or current_price > position.max_bin_price:
+                    exit_point = point
+                    exit_reason = 'OOR'
+                    break
 
             # Check for Take Profit trigger
             if pnl_pct >= tp_level:
@@ -176,7 +184,7 @@ class TpSlRangeSimulator:
                 exit_reason = 'SL'
                 break
 
-        # If no TP/SL was hit, the position closes at the end of the simulation period
+        # If no TP/SL/OOR was hit, the position closes at the end of the simulation period
         if exit_point is None and timeline:
             exit_point = timeline[-1]
 
@@ -304,5 +312,7 @@ class TpSlRangeSimulator:
         position.close_reason = row['close_reason']
         position.actual_strategy = row['strategy_raw']
         position.total_fees_collected = row.get('total_fees_collected', 0.0)
+        position.min_bin_price = row.get('min_bin_price')
+        position.max_bin_price = row.get('max_bin_price')
         
         return position
