@@ -108,10 +108,10 @@ range_testing:
   enable: true  # Master switch to run this analysis
 
   # Define TP levels to test (in percentage)
-  tp_levels: [2, 6, 12] 
+  tp_levels: [2, 3, 4, 5, 6, 7, 8, 9] 
 
   # Define SL levels to test (in percentage, positive value)
-  sl_levels: [3, 6, 9, 15]
+  sl_levels: [6, 7, 8, 9, 10, 11, 12]
 
   # Metric for heatmap color and ranking
   primary_ranking_metric: "total_pnl"

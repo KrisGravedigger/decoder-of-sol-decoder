@@ -7,7 +7,14 @@ import sys
 from pathlib import Path
 import yaml
 
-
+from extraction.parsing_utils import (
+    _parse_custom_timestamp,
+    clean_ansi, find_context_value, normalize_token_pair,
+    extract_close_timestamp, parse_position_from_open_line,
+    parse_final_pnl_with_line_info,
+    extract_peak_pnl_from_logs, extract_total_fees_from_logs,
+    extract_dlmm_range, extract_oor_parameters
+)
 
 # Failed position detection patterns
 FAILED_POSITION_PATTERNS = [
@@ -605,6 +612,15 @@ class LogParser:
             if self.finalized_positions:
                  logger.info(f"Found and processed {len(self.finalized_positions)} target positions.")
             return [] # Prevents writing to CSV in debug mode
+
+        # AIDEV-NOTE-CLAUDE: Post-process to add dynamic OOR parameters before validation.
+        for pos in self.finalized_positions:
+            # We only search for OOR params if the position was actually closed in the logs.
+            if pos.close_line_index:
+                # This check ensures we don't search for positions active at the end of logs.
+                oor_params = extract_oor_parameters(self.all_lines, pos.open_line_index, pos.close_line_index)
+                pos.oor_timeout_minutes = oor_params.get('timeout_minutes')
+                pos.oor_threshold_pct = oor_params.get('threshold_pct')
 
         validated_positions = []
         skipped_low_pnl = 0

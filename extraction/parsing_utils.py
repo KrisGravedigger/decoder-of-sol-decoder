@@ -424,57 +424,130 @@ def extract_dlmm_range(log_lines: List[str], open_line_index: int) -> Tuple[Opti
     """
     Extract min and max price range from DLMM pool log messages.
     
-    AIDEV-NOTE-CLAUDE: Searches upward from OPENED line to find "Pool out of range" 
-    log messages with bottom/top price information for OOR simulation.
-    
-    Args:
-        log_lines: All log lines
-        open_line_index: Line index where position was opened
-        
-    Returns:
-        Tuple of (min_price, max_price) or (None, None) if not found
+    AIDEV-TPSL-CLAUDE: Fixed conversion - logs show SOL prices, we need USDC prices.
+    Multiply by SOL/USDC rate instead of dividing!
     """
     # Search upwards from the open line (max 60 lines)
     for i in range(open_line_index, max(-1, open_line_index - 60), -1):
         line = clean_ansi(log_lines[i])
         
-        # Method 1: Look for bottom range, then find corresponding top
         if "Pool out of range to the bottom" in line:
-            # Extract bottom price: "Pool out of range to the bottom when price reaches: $0.000152"
             bottom_match = re.search(r'price reaches: \$([0-9.]+)', line)
             if bottom_match:
                 try:
-                    min_price = float(bottom_match.group(1))
-                    # Look for the corresponding top range in nearby lines (±5 lines)
+                    min_price_sol = float(bottom_match.group(1))
+                    
+                    # Look for the corresponding top range
                     for j in range(max(0, i-5), min(len(log_lines), i+6)):
                         next_line = clean_ansi(log_lines[j])
                         if "Pool out of range to the top" in next_line:
                             top_match = re.search(r'price reaches: \$([0-9.]+)', next_line)
                             if top_match:
-                                max_price = float(top_match.group(1))
-                                logger.debug(f"Found DLMM range: min={min_price}, max={max_price} at lines {i + 1}-{j + 1}")
-                                return min_price, max_price
-                except ValueError:
-                    logger.warning(f"Failed to parse DLMM range values at line {i + 1}")
-        
-        # Method 2: Look for top range, then find corresponding bottom
-        elif "Pool out of range to the top" in line:
-            # Extract top price: "Pool out of range to the top when price reaches: $0.000300"
-            top_match = re.search(r'price reaches: \$([0-9.]+)', line)
-            if top_match:
-                try:
-                    max_price = float(top_match.group(1))
-                    # Look for the corresponding bottom range in nearby lines (±5 lines)
-                    for j in range(max(0, i-5), min(len(log_lines), i+6)):
-                        next_line = clean_ansi(log_lines[j])
-                        if "Pool out of range to the bottom" in next_line:
-                            bottom_match = re.search(r'price reaches: \$([0-9.]+)', next_line)
-                            if bottom_match:
-                                min_price = float(bottom_match.group(1))
-                                logger.debug(f"Found DLMM range: min={min_price}, max={max_price} at lines {j + 1}-{i + 1}")
-                                return min_price, max_price
+                                max_price_sol = float(top_match.group(1))
+                                
+                                # CRITICAL FIX: Logs show price in SOL, we need USDC
+                                # MULTIPLY by SOL price, not divide!
+                                sol_price_usd = _extract_sol_price_near_position(log_lines, open_line_index)
+                                
+                                if sol_price_usd and sol_price_usd > 0:
+                                    # Convert: token_price_in_usdc = token_price_in_sol * sol_price_in_usdc
+                                    min_price_usdc = min_price_sol * sol_price_usd
+                                    max_price_usdc = max_price_sol * sol_price_usd
+                                    
+                                    logger.debug(f"Converted bin range from SOL [{min_price_sol:.6f}, {max_price_sol:.6f}] "
+                                               f"to USDC [{min_price_usdc:.6f}, {max_price_usdc:.6f}] "
+                                               f"(SOL price: ${sol_price_usd})")
+                                    return min_price_usdc, max_price_usdc
+                                else:
+                                    # Can't convert without SOL price
+                                    logger.warning(f"Cannot convert SOL bin prices without SOL/USDC rate at line {open_line_index + 1}")
+                                    return None, None
+                                    
                 except ValueError:
                     logger.warning(f"Failed to parse DLMM range values at line {i + 1}")
     
     logger.debug(f"No DLMM range found for position at line {open_line_index + 1}")
     return None, None
+
+
+def _extract_sol_price_near_position(log_lines: List[str], position_line: int) -> Optional[float]:
+    """
+    Extract SOL/USD price from logs near position opening.
+    
+    Looks for patterns like:
+    - "SOL: $165.25"
+    - "SOL/USDC: 165.25"
+    - "SOL Price: $165.25"
+    """
+    # Search in vicinity of position opening (before and after)
+    search_range = 100
+    
+    for i in range(max(0, position_line - search_range), 
+                   min(len(log_lines), position_line + search_range)):
+        line = clean_ansi(log_lines[i])
+        
+        # Multiple patterns for SOL price
+        patterns = [
+            r'SOL[:/]?\s*\$?([\d.]+)',           # SOL: $165.25 or SOL/165.25
+            r'SOL/USDC[:\s]+\$?([\d.]+)',        # SOL/USDC: 165.25
+            r'SOL\s+Price[:\s]+\$?([\d.]+)',     # SOL Price: $165.25
+            r'price.*SOL.*\$?([\d.]+)',          # any price...SOL...$165
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                try:
+                    price = float(match.group(1))
+                    # Sanity check - SOL price should be between $10 and $1000
+                    if 10 < price < 1000:
+                        logger.debug(f"Found SOL price ${price} at line {i + 1}")
+                        return price
+                except ValueError:
+                    continue
+    
+    # Fallback: use approximate SOL price for May 2025
+    # This should be configured or fetched from API
+    DEFAULT_SOL_PRICE = 165.0  # Approximate for your data period
+    logger.warning(f"Could not find SOL price in logs, using default ${DEFAULT_SOL_PRICE}")
+    return DEFAULT_SOL_PRICE
+
+def extract_oor_parameters(log_lines: List[str], start_line: int, end_line: int) -> Dict[str, Optional[float]]:
+    """
+    Extracts OOR timeout and price threshold from log lines.
+
+    Searches for a line matching:
+    "...Will close after X minutes if still out of range.Price is Y% out of range..."
+    between the position open and close events.
+
+    Args:
+        log_lines: All log lines.
+        start_line: Position open line index.
+        end_line: Position close line index.
+
+    Returns:
+        A dictionary with 'timeout_minutes' and 'threshold_pct', or None values if not found.
+    """
+    timeout_pattern = re.compile(r'Will close after ([\d.]+) minutes', re.IGNORECASE)
+    threshold_pattern = re.compile(r'Price is ([\d.]+)% out of range', re.IGNORECASE)
+
+    # Search only within the position's lifetime
+    for i in range(start_line, min(end_line + 1, len(log_lines))):
+        cleaned_line = clean_ansi(log_lines[i])
+
+        timeout_match = timeout_pattern.search(cleaned_line)
+        threshold_match = threshold_pattern.search(cleaned_line)
+
+        # Both patterns must be present on the same line to ensure context is correct
+        if timeout_match and threshold_match:
+            try:
+                timeout = float(timeout_match.group(1))
+                threshold = float(threshold_match.group(1))
+                logger.debug(f"Found OOR params on line {i+1}: Timeout={timeout}m, Threshold={threshold}%")
+                return {'timeout_minutes': timeout, 'threshold_pct': threshold}
+            except (ValueError, TypeError):
+                logger.warning(f"Could not parse OOR params from line {i+1}")
+                continue # Try next line in case of parsing error
+    
+    # Return a dictionary with None values if no matching line is found
+    return {'timeout_minutes': None, 'threshold_pct': None}

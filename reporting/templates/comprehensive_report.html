@@ -256,33 +256,25 @@
                 
                 // Main update function
                 function updateWhatIfAnalysis() {
-                    // Get filter values
                     const tpValue = parseFloat(document.getElementById('tp-input').value) || 6;
                     const slValue = parseFloat(document.getElementById('sl-input').value) || 10;
-                    const dateFrom = document.getElementById('date-from').value;
-                    const dateTo = document.getElementById('date-to').value;
+                    const dateFromStr = document.getElementById('date-from').value;
+                    const dateToStr = document.getElementById('date-to').value;
                     const minPositions = parseInt(document.getElementById('min-positions').value) || 5;
+
+                    const dateFrom = dateFromStr ? new Date(dateFromStr) : null;
+                    const dateTo = dateToStr ? new Date(dateToStr) : null;
+
+                    // 1. Filter data based on UI controls
+                    let filteredData = detailedSimulationData.filter(row => {
+                        if (!row.open_timestamp || (row.analyzed_position_count || 0) < minPositions) return false;
+                        const rowDate = new Date(row.open_timestamp);
+                        if (dateFrom && rowDate < dateFrom) return false;
+                        if (dateTo && rowDate > dateTo) return false;
+                        return true;
+                    });
                     
-                    // Apply filters in cascade
-                    let filteredData = [...detailedSimulationData];
-                    
-                    // Date filter
-                    if (dateFrom || dateTo) {
-                        filteredData = filteredData.filter(row => {
-                            if (!row.open_timestamp) return false;
-                            const rowDate = new Date(row.open_timestamp);
-                            if (dateFrom && rowDate < new Date(dateFrom)) return false;
-                            if (dateTo && rowDate > new Date(dateTo)) return false;
-                            return true;
-                        });
-                    }
-                    
-                    // Strategy count filter
-                    filteredData = filteredData.filter(row => 
-                        (row.analyzed_position_count || 0) >= minPositions
-                    );
-                    
-                    // Group by strategy and find closest TP/SL
+                    // 2. Group data by strategy
                     const strategyGroups = {};
                     filteredData.forEach(row => {
                         const strategyId = row.strategy_instance_id;
@@ -291,54 +283,91 @@
                         }
                         strategyGroups[strategyId].push(row);
                     });
-                    
-                    // For each strategy, find the closest TP/SL combination
+
+                    // 3. Process each strategy group to get aggregated results
                     const results = [];
                     Object.entries(strategyGroups).forEach(([strategyId, rows]) => {
-                        // Find closest TP/SL combination
+                        // Find the single closest TP/SL combination available in the data for this strategy
                         let closestRow = null;
                         let minDistance = Infinity;
-                        
                         rows.forEach(row => {
-                            const distance = Math.sqrt(
-                                Math.pow(row.tp_level - tpValue, 2) + 
-                                Math.pow(row.sl_level - slValue, 2)
-                            );
+                            const distance = Math.sqrt(Math.pow(row.tp_level - tpValue, 2) + Math.pow(row.sl_level - slValue, 2));
                             if (distance < minDistance) {
                                 minDistance = distance;
                                 closestRow = row;
                             }
                         });
-                        
-                        if (closestRow) {
-                            // Calculate aggregated metrics for this TP/SL combination
-                            const matchingRows = rows.filter(r => 
-                                r.tp_level === closestRow.tp_level && 
-                                r.sl_level === closestRow.sl_level
-                            );
-                            
-                            const totalPnL = matchingRows.reduce((sum, r) => sum + (r.simulated_pnl || 0), 0);
-                            const avgPnL = totalPnL / matchingRows.length;
-                            
-                            // Count exit reasons
-                            const exitCounts = { TP: 0, SL: 0, END: 0, NO_DATA: 0 };
-                            matchingRows.forEach(r => {
-                                if (r.exit_reason && exitCounts.hasOwnProperty(r.exit_reason)) {
-                                    exitCounts[r.exit_reason]++;
-                                }
-                            });
-                            
-                            results.push({
-                                strategyId: strategyId,
-                                positionCount: matchingRows[0].analyzed_position_count || matchingRows.length,
-                                totalPnL: totalPnL,
-                                avgPnL: avgPnL,
-                                exitCounts: exitCounts,
-                                actualTP: closestRow.tp_level,
-                                actualSL: closestRow.sl_level
-                            });
-                        }
+
+                        if (!closestRow) return;
+
+                        // AIDEV-NOTE-CLAUDE: THIS IS THE CRITICAL FIX.
+                        // Filter for ALL rows that match the closest TP/SL combination found.
+                        const matchingRows = rows.filter(r => 
+                            r.tp_level === closestRow.tp_level && 
+                            r.sl_level === closestRow.sl_level
+                        );
+
+                        // Aggregate metrics from ALL matching rows
+                        const totalPnL = matchingRows.reduce((sum, r) => sum + (r.simulated_pnl || 0), 0);
+                        const positionCount = rows[0].analyzed_position_count; // Use the official count from strategy detection
+                        const avgPnL = positionCount > 0 ? totalPnL / positionCount : 0;
+
+                        // Correctly aggregate all exit reasons from matching rows
+                        const exitCounts = matchingRows.reduce((acc, r) => {
+                            const reason = r.exit_reason || 'NO_DATA';
+                            acc[reason] = (acc[reason] || 0) + 1;
+                            return acc;
+                        }, {});
+
+                        results.push({
+                            strategyId: strategyId,
+                            positionCount: positionCount,
+                            totalPnL: totalPnL,
+                            avgPnL: avgPnL,
+                            tpCount: exitCounts['TP'] || 0,
+                            slCount: exitCounts['SL'] || 0,
+                            oorCount: exitCounts['OOR'] || 0,
+                            endCount: (exitCounts['END'] || 0) + (exitCounts['NO_DATA'] || 0),
+                            actualTP: closestRow.tp_level,
+                            actualSL: closestRow.sl_level
+                        });
                     });
+
+                    // 4. Sort and display the aggregated results
+                    results.sort((a, b) => b.totalPnL - a.totalPnL);
+
+                    const tbody = document.getElementById('whatif-results-body');
+                    tbody.innerHTML = '';
+
+                    if (results.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No strategies match the current filters</td></tr>';
+                        return;
+                    }
+
+                    results.forEach(result => {
+                        const pnlClass = result.totalPnL >= 0 ? 'positive' : 'negative';
+                        const avgPnlClass = result.avgPnL >= 0 ? 'positive' : 'negative';
+                        
+                        // Construct the exit breakdown string
+                        const exitBreakdown = `
+                            TP: <span class="${result.tpCount > 0 ? 'positive' : ''}">${result.tpCount}</span>, 
+                            SL: <span class="${result.slCount > 0 ? 'negative' : ''}">${result.slCount}</span>, 
+                            OOR: <span>${result.oorCount}</span>, 
+                            END: <span class="text-muted">${result.endCount}</span>
+                        `;
+                        
+                        const row = `
+                            <tr>
+                                <td>${result.strategyId}<br><small class="text-muted">Using TP: ${result.actualTP}%, SL: ${result.actualSL}%</small></td>
+                                <td>${result.positionCount}</td>
+                                <td class="${pnlClass}">${result.totalPnL.toFixed(3)}</td>
+                                <td class="${avgPnlClass}">${result.avgPnL.toFixed(3)}</td>
+                                <td>${exitBreakdown}</td>
+                            </tr>
+                        `;
+                        tbody.innerHTML += row;
+                    });
+                }
                     
                     // Sort by total PnL descending
                     results.sort((a, b) => b.totalPnL - a.totalPnL);
