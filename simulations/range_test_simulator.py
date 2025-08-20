@@ -321,13 +321,22 @@ class TpSlRangeSimulator:
             'days_to_exit_mean': 'avg_days_to_exit'
         })
         
-        # Calculate win rate
-        def calculate_win_rate(exit_reasons):
+        # Calculate complex win rate metrics
+        def calculate_rates(exit_reasons):
             total = sum(exit_reasons.values())
-            tp_count = exit_reasons.get('TP', 0)
-            return (tp_count / total * 100) if total > 0 else 0
+            if total == 0:
+                return pd.Series([0, 0], index=['win_rate', 'tp_rate'])
             
-        aggregated['win_rate'] = aggregated['exit_reasons'].apply(calculate_win_rate)
+            tp_count = exit_reasons.get('TP', 0)
+            oor_count = exit_reasons.get('OOR', 0)
+            
+            win_rate = (tp_count + oor_count) / total * 100
+            tp_rate = tp_count / total * 100
+            
+            return pd.Series([win_rate, tp_rate], index=['win_rate', 'tp_rate'])
+            
+        rates_df = aggregated['exit_reasons'].apply(calculate_rates)
+        aggregated = pd.concat([aggregated, rates_df], axis=1)
         
         # Reset index
         aggregated = aggregated.reset_index()

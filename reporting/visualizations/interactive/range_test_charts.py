@@ -38,7 +38,8 @@ def create_range_test_heatmap(aggregated_df: pd.DataFrame, strategy_id: str,
     )
     
     # Create hover text with additional metrics
-    hover_data = strategy_data.pivot(index='tp_level', columns='sl_level', values='win_rate')
+    win_rate_pivot = strategy_data.pivot(index='tp_level', columns='sl_level', values='win_rate')
+    tp_rate_pivot = strategy_data.pivot(index='tp_level', columns='sl_level', values='tp_rate')
     position_counts = strategy_data.pivot(index='tp_level', columns='sl_level', values='position_count')
     
     hover_text = []
@@ -46,12 +47,13 @@ def create_range_test_heatmap(aggregated_df: pd.DataFrame, strategy_id: str,
         row_text = []
         for j, sl in enumerate(pivot_data.columns):
             val = pivot_data.iloc[i, j]
-            win_rate = hover_data.iloc[i, j] if not pd.isna(hover_data.iloc[i, j]) else 0
+            win_rate = win_rate_pivot.iloc[i, j] if not pd.isna(win_rate_pivot.iloc[i, j]) else 0
+            tp_rate = tp_rate_pivot.iloc[i, j] if not pd.isna(tp_rate_pivot.iloc[i, j]) else 0
             pos_count = position_counts.iloc[i, j] if not pd.isna(position_counts.iloc[i, j]) else 0
             
             text = f"TP: {tp}%, SL: {sl}%<br>"
             text += f"{metric}: {val:.3f}<br>"
-            text += f"Win Rate: {win_rate:.1f}%<br>"
+            text += f"Win Rate: {win_rate:.1f}% (TP: {tp_rate:.1f}%)<br>"
             text += f"Positions: {int(pos_count)}"
             row_text.append(text)
         hover_text.append(row_text)
@@ -119,7 +121,7 @@ def create_optimal_settings_table(aggregated_df: pd.DataFrame,
             'Optimal TP': f"{optimal_row['tp_level']}%",
             'Optimal SL': f"{optimal_row['sl_level']}%", 
             metric.replace('_', ' ').title(): f"{optimal_row[metric]:.3f}",
-            'Win Rate': f"{optimal_row['win_rate']:.1f}%",
+            'Win Rate': f"{optimal_row['win_rate']:.1f}% (TP: {optimal_row['tp_rate']:.1f}%)",
             'Positions': int(optimal_row['position_count'])
         })
         

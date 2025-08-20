@@ -290,7 +290,10 @@
                         // Find the single closest TP/SL combination available in the data for this strategy
                         let closestRow = null;
                         let minDistance = Infinity;
-                        rows.forEach(row => {
+                        
+                        const uniqueCombos = [...new Map(rows.map(item => [`${item.tp_level}-${item.sl_level}`, item])).values()];
+                        
+                        uniqueCombos.forEach(row => {
                             const distance = Math.sqrt(Math.pow(row.tp_level - tpValue, 2) + Math.pow(row.sl_level - slValue, 2));
                             if (distance < minDistance) {
                                 minDistance = distance;
@@ -300,8 +303,7 @@
 
                         if (!closestRow) return;
 
-                        // AIDEV-NOTE-CLAUDE: THIS IS THE CRITICAL FIX.
-                        // Filter for ALL rows that match the closest TP/SL combination found.
+                        // CRITICAL FIX: Filter for ALL rows that match the closest TP/SL combination found.
                         const matchingRows = rows.filter(r => 
                             r.tp_level === closestRow.tp_level && 
                             r.sl_level === closestRow.sl_level
@@ -309,10 +311,9 @@
 
                         // Aggregate metrics from ALL matching rows
                         const totalPnL = matchingRows.reduce((sum, r) => sum + (r.simulated_pnl || 0), 0);
-                        const positionCount = rows[0].analyzed_position_count; // Use the official count from strategy detection
+                        const positionCount = rows[0].analyzed_position_count;
                         const avgPnL = positionCount > 0 ? totalPnL / positionCount : 0;
 
-                        // Correctly aggregate all exit reasons from matching rows
                         const exitCounts = matchingRows.reduce((acc, r) => {
                             const reason = r.exit_reason || 'NO_DATA';
                             acc[reason] = (acc[reason] || 0) + 1;
@@ -348,7 +349,6 @@
                         const pnlClass = result.totalPnL >= 0 ? 'positive' : 'negative';
                         const avgPnlClass = result.avgPnL >= 0 ? 'positive' : 'negative';
                         
-                        // Construct the exit breakdown string
                         const exitBreakdown = `
                             TP: <span class="${result.tpCount > 0 ? 'positive' : ''}">${result.tpCount}</span>, 
                             SL: <span class="${result.slCount > 0 ? 'negative' : ''}">${result.slCount}</span>, 
