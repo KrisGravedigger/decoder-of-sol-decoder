@@ -368,43 +368,6 @@
                         tbody.innerHTML += row;
                     });
                 }
-                    
-                    // Sort by total PnL descending
-                    results.sort((a, b) => b.totalPnL - a.totalPnL);
-                    
-                    // Update table
-                    const tbody = document.getElementById('whatif-results-body');
-                    tbody.innerHTML = '';
-                    
-                    if (results.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No strategies match the current filters</td></tr>';
-                        return;
-                    }
-                    
-                    results.forEach(result => {
-                        const row = tbody.insertRow();
-                        
-                        // Strategy Instance
-                        row.insertCell().innerHTML = `${result.strategyId}<br><small>(TP: ${result.actualTP}%, SL: ${result.actualSL}%)</small>`;
-                        
-                        // Positions Count
-                        row.insertCell().textContent = result.positionCount;
-                        
-                        // Total PnL
-                        const pnlCell = row.insertCell();
-                        pnlCell.textContent = result.totalPnL.toFixed(3);
-                        pnlCell.className = result.totalPnL >= 0 ? 'positive' : 'negative';
-                        
-                        // Avg PnL
-                        const avgCell = row.insertCell();
-                        avgCell.textContent = result.avgPnL.toFixed(3);
-                        avgCell.className = result.avgPnL >= 0 ? 'positive' : 'negative';
-                        
-                        // Exit Breakdown
-                        const exitBreakdown = `TP: ${result.exitCounts.TP}, SL: ${result.exitCounts.SL}, END: ${result.exitCounts.END}`;
-                        row.insertCell().textContent = exitBreakdown;
-                    });
-                }
                 
                 // Add event listeners
                 document.addEventListener('DOMContentLoaded', function() {

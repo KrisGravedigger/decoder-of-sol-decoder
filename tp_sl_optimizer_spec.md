@@ -532,3 +532,16 @@ Proceed with implementation, following stage-gate approach - validate each compo
 - **Report Aggregation Fix:** The JavaScript function `updateWhatIfAnalysis` in the HTML template was rewritten to correctly filter for *all* positions matching the selected TP/SL combination and properly sum their PnL and exit reasons.
 
 **Status:** The core simulation logic has been fixed. The system is now capable of realistically testing the TP/SL grid and generating meaningful, aggregated results.
+
+### **Phase 4B Interactive Tool Frontend Fix (2025-08-22)**
+
+**Problem:** Despite a functional backend and correct data generation, the "Interactive TP/SL Explorer" (Phase 4B) in the HTML report remained empty and non-functional.
+
+**Root Cause:**
+A JavaScript syntax error was identified in `reporting/templates/comprehensive_report.html`. An extraneous closing curly brace `}` prematurely terminated the main `updateWhatIfAnalysis` function, rendering the table population logic unreachable. This "dead code" was a remnant of a previous, improperly resolved code merge, which also contained a non-functional, alternative implementation for rendering table rows.
+
+**Resolution Implemented:**
+- The JavaScript code within the HTML template was refactored to remove the erroneous curly brace and the entire block of unreachable, legacy code.
+- This cleanup restored the correct structure of the `updateWhatIfAnalysis` function, allowing the existing, correct logic for rendering the results table to execute properly.
+
+**Status:** The interactive "what-if" tool is now fully functional. The data pipeline from backend simulation to frontend visualization is complete and working as intended. Phase 4 is officially stable and complete.
