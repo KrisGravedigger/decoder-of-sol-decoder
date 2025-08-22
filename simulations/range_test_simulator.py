@@ -10,6 +10,7 @@ import numpy as np
 from typing import Dict, List, Any, Tuple
 from datetime import datetime
 from tqdm import tqdm
+import json  # AIDEV-DEBUG
 
 from reporting.post_close_analyzer import PostCloseAnalyzer
 from reporting.data_loader import load_and_prepare_positions
@@ -22,18 +23,19 @@ class TpSlRangeSimulator:
     Simulates various TP/SL combinations to find optimal parameters.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], post_close_analyzer: PostCloseAnalyzer):
         """
         Initialize range test simulator.
         
         Args:
             config: Main configuration dictionary
+            post_close_analyzer: A pre-configured instance of PostCloseAnalyzer
         """
         self.config = config
         self.range_config = config.get('range_testing', {})
         self.tp_levels = self.range_config.get('tp_levels', [2, 4, 6, 8, 10])
         self.sl_levels = self.range_config.get('sl_levels', [3, 5, 7, 10, 15])
-        self.post_close_analyzer = PostCloseAnalyzer(config_path="reporting/config/portfolio_config.yaml")
+        self.post_close_analyzer = post_close_analyzer
         
     def run_simulation(self, positions_df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         """
@@ -89,40 +91,40 @@ class TpSlRangeSimulator:
         
     def _get_position_timeline(self, position: Any) -> List[Dict]:
         """
-        Get post-close timeline for a position using PostCloseAnalyzer.
-        
-        Args:
-            position: Position object
-            
-        Returns:
-            Timeline list or empty list if unavailable
+        Get a COMPLETE historical timeline for a position, combining the actual
+        in-position period with the post-close simulation period.
         """
         try:
-            # Use PostCloseAnalyzer's internal methods
-            end_datetime, extension_hours = self.post_close_analyzer._calculate_post_close_period(position)
-            
-            # Fetch post-close data
-            post_close_data = self.post_close_analyzer.cache_manager.fetch_post_close_data(
-                position, extension_hours
-            )
-            
-            if not post_close_data:
-                return []
-                
-            # Get position volume data for fee simulation
-            position_volume_data = self.post_close_analyzer.cache_manager.fetch_ochlv_data(
+            # --- 1. Fetch data for the actual "in-position" period (from cache) ---
+            in_position_data = self.post_close_analyzer.cache_manager.fetch_ochlv_data(
                 position.pool_address,
                 position.open_timestamp,
                 position.close_timestamp,
                 use_cache_only=True
             )
+
+            # --- 2. Fetch data for the "post-close" simulation period ---
+            _, extension_hours = self.post_close_analyzer._calculate_post_close_period(position)
+            post_close_data = self.post_close_analyzer.cache_manager.fetch_post_close_data(
+                position, extension_hours
+            )
+
+            combined_price_data = in_position_data + post_close_data
+            if not combined_price_data:
+                logger.warning(f"No price data available for position {position.position_id}")
+                return []
             
-            # Simulate fees
+            unique_points = {p['timestamp']: p for p in combined_price_data}
+            sorted_price_data = sorted(unique_points.values(), key=lambda x: x['timestamp'])
+
+            # --- 3. Simulate fees for the ENTIRE combined period ---
+            position_volume_data = in_position_data
+            
             allocated_fees = self.post_close_analyzer.fee_simulator.calculate_fee_allocation(
-                position, position_volume_data, post_close_data
+                position, position_volume_data, sorted_price_data
             )
             
-            # Initialize LP valuator
+            # --- 4. Initialize LP valuator and generate the final timeline ---
             strategy_parts = position.actual_strategy.split()
             strategy_type = "Bid-Ask" if "Bid-Ask" in position.actual_strategy else "Spot"
             step_size = "MEDIUM"
@@ -134,13 +136,12 @@ class TpSlRangeSimulator:
             from reporting.lp_position_valuator import LPPositionValuator
             lp_valuator = LPPositionValuator(strategy_type, step_size)
             
-            # Get timeline
-            timeline = lp_valuator.simulate_position_timeline(position, post_close_data, allocated_fees)
+            timeline = lp_valuator.simulate_position_timeline(position, sorted_price_data, allocated_fees)
             
             return timeline
             
         except Exception as e:
-            logger.error(f"Failed to get timeline for position {position.position_id}: {e}")
+            logger.error(f"Failed to get complete timeline for position {position.position_id}: {e}", exc_info=True)
             return []
 
     def _find_exit_in_timeline(self, position: Any, timeline: List[Dict], tp_level: float, sl_level: float) -> Dict[str, Any]:
@@ -151,43 +152,36 @@ class TpSlRangeSimulator:
         if not timeline:
             return {'simulated_pnl': 0.0, 'simulated_pnl_pct': 0.0, 'exit_reason': 'NO_DATA', 'days_to_exit': 0.0}
 
-        # Use dynamic parameters from the position object, with sensible defaults if they are missing.
         oor_timeout_minutes = position.oor_timeout_minutes if pd.notna(position.oor_timeout_minutes) else 30.0
-        oor_threshold_pct = position.oor_threshold_pct if pd.notna(position.oor_threshold_pct) else 2.0
-        
-        # Calculate the actual max price threshold for OOR, including the percentage buffer
-        max_price_threshold = None
-        if position.max_bin_price is not None and pd.notna(position.max_bin_price):
-            max_price_threshold = position.max_bin_price * (1 + oor_threshold_pct / 100)
+        min_price = getattr(position, 'min_bin_price', None)
+        max_price = getattr(position, 'max_bin_price', None)
 
         oor_start_timestamp = None
         exit_point = None
-        exit_reason = 'END' # Default reason if no other condition is met
-
+        exit_reason = 'END'
+                
         for i, point in enumerate(timeline):
             pnl_pct = point.get('pnl_pct', 0.0)
             current_price = point.get('price', 0.0)
             current_timestamp = point.get('timestamp')
-
-            # --- OOR LOGIC WITH DYNAMIC TIMEOUT & THRESHOLD ---
-            is_out_of_range = (max_price_threshold is not None and current_price > max_price_threshold)
+            
+            # --- OOR LOGIC ---
+            is_out_of_range = (min_price is not None and current_price < min_price) or \
+                              (max_price is not None and current_price > max_price)
 
             if is_out_of_range:
                 if oor_start_timestamp is None:
-                    # First time price is out of range, start the timer
                     oor_start_timestamp = current_timestamp
                 
-                # Check if the timeout has elapsed since the timer started
                 time_in_oor = (current_timestamp - oor_start_timestamp).total_seconds() / 60
                 if time_in_oor >= oor_timeout_minutes:
                     exit_reason = 'OOR'
                     exit_point = point
-                    break # Exit the loop, OOR is confirmed
+                    break
             else:
-                # Price is back in range, so reset the OOR timer
                 oor_start_timestamp = None
 
-            # --- TP/SL LOGIC (RUNS EVERY CANDLE, CAN OVERRIDE OOR TIMEOUT) ---
+            # --- TP/SL LOGIC ---
             if pnl_pct >= tp_level:
                 exit_reason = 'TP'
                 exit_point = point
@@ -198,7 +192,7 @@ class TpSlRangeSimulator:
                 exit_point = point
                 break
         
-        if exit_point is None: # This runs if the loop completed without a 'break'
+        if exit_point is None:
             exit_reason = 'END'
             exit_point = timeline[-1]
 
@@ -361,8 +355,10 @@ class TpSlRangeSimulator:
         # Map columns
         position.position_id = row['position_id']
         position.pool_address = row['pool_address']
-        position.open_timestamp = row['open_timestamp']
-        position.close_timestamp = row['close_timestamp']
+        # AIDEV-TPSL-CLAUDE: CRITICAL FIX - Ensure timestamps are datetime objects.
+        # DataFrame can sometimes hold them as strings or pd.Timestamp, causing downstream errors.
+        position.open_timestamp = pd.to_datetime(row['open_timestamp'])
+        position.close_timestamp = pd.to_datetime(row['close_timestamp'])
         position.initial_investment = row['investment_sol']
         position.final_pnl = row['pnl_sol']
         position.close_reason = row['close_reason']

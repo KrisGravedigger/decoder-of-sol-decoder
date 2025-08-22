@@ -515,3 +515,20 @@ Proceed with implementation, following stage-gate approach - validate each compo
 - **Report Aggregation Fix:** The JavaScript function `updateWhatIfAnalysis` in the HTML template was rewritten to correctly filter for *all* positions matching the selected TP/SL combination and properly sum their PnL and exit reasons.
 
 **Status:** The core simulation logic has been fixed. The system is now capable of realistically testing the TP/SL grid and generating meaningful, aggregated results.
+
+### **Phase 4 Critical Simulation Debug & Fix (2025-08-22)**
+
+**Problem:** The simulation engine produced unrealistic results, with ~97% of all exits classified as 'Out of Range' (OOR) on the very first candle. This led to a cascade of failures: 0% win rates, identical PnL across all TP/SL tests (flat heatmaps), and a non-functional interactive analysis tool.
+
+**Root Cause:**
+1.  **Instantaneous OOR Logic:** The core simulator in `range_test_simulator.py` treated an OOR event as an immediate exit, preventing any TP or SL conditions from ever being tested.
+2.  **Static OOR Parameters:** The simulator used a hardcoded 30-minute timeout for OOR, failing to account for dynamic, position-specific parameters available in the logs.
+3.  **Client-Side Aggregation Bug:** The JavaScript in `comprehensive_report.html` incorrectly displayed data for only a single position instead of aggregating results for an entire strategy, causing the `exit_breakdown` table to show incorrect counts.
+
+**Resolution Implemented:**
+- **Dynamic OOR Parameter Parsing:** A new function, `extract_oor_parameters`, was implemented in `parsing_utils.py` to parse the OOR timeout (in minutes) and price threshold (in percent) directly from the log files for each position.
+- **Stateful Simulation Engine:** The `_find_exit_in_timeline` method in `range_test_simulator.py` was completely refactored. It now correctly implements a stateful, time-based OOR check, allowing TP and SL conditions to be evaluated during the OOR timeout period.
+- **Data Pipeline Integration:** The `Position` model (`core/models.py`) was extended to store the new dynamic OOR parameters, and `log_extractor.py` was updated to populate these fields.
+- **Report Aggregation Fix:** The JavaScript function `updateWhatIfAnalysis` in the HTML template was rewritten to correctly filter for *all* positions matching the selected TP/SL combination and properly sum their PnL and exit reasons.
+
+**Status:** The core simulation logic has been fixed. The system is now capable of realistically testing the TP/SL grid and generating meaningful, aggregated results.

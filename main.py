@@ -1,6 +1,18 @@
 import logging
 import os
 import sys
+
+# --- Configure Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('portfolio_analysis.log', mode='w'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 from dotenv import load_dotenv
 from typing import Optional
 from typing import Dict
@@ -30,7 +42,7 @@ from tools.cache_debugger import cache_debugger_menu
 
 # --- Configure Logging ---
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('portfolio_analysis.log', mode='w'),
@@ -224,6 +236,7 @@ def run_tp_sl_range_simulation():
     try:
         from simulations.range_test_simulator import TpSlRangeSimulator
         from reporting.data_loader import load_and_prepare_positions
+        from reporting.post_close_analyzer import PostCloseAnalyzer
         
         print("\nLoading enriched positions data...")
         positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
@@ -238,8 +251,11 @@ def run_tp_sl_range_simulation():
         if not config.get('range_testing', {}).get('enable', False):
             print("❌ Range testing is disabled in config. Set range_testing.enable: true")
             return
+        
+        # Create a single, correctly configured analyzer instance
+        post_close_analyzer = PostCloseAnalyzer()
             
-        simulator = TpSlRangeSimulator(config)
+        simulator = TpSlRangeSimulator(config, post_close_analyzer)
         print(f"\nRunning simulation for {len(positions_df)} positions...")
         print(f"TP levels: {config['range_testing']['tp_levels']}")
         print(f"SL levels: {config['range_testing']['sl_levels']}")
