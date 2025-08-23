@@ -112,10 +112,9 @@ def run_comprehensive_report_offline():
         logger.error(f"Comprehensive reporting failed: {e}", exc_info=True)
         print(f"\n[ERROR] An error occurred during report generation: {e}")
 
-
 def run_full_pipeline(api_key: Optional[str]):
     """Executes the entire analysis pipeline from start to finish."""
-    print_header("Executing Full Pipeline")
+    print_header("Executing Full Standard Pipeline")
 
     # Step 1 & 2
     print_header("Steps 1 & 2: Log Extraction & Strategy Detection")
@@ -124,21 +123,24 @@ def run_full_pipeline(api_key: Optional[str]):
 
     # Step 3 (Online) - Run in standard 'none' mode for a full pipeline run.
     from data_fetching.main_data_orchestrator import run_all_data_fetching
+    print_header("Step 3: Data Fetching for Simulations & Reports")
     run_all_data_fetching(api_key, refetch_mode='none')
     
     # Step 4 (Offline)
+    print_header("Step 4: Running Base Simulations")
     run_spot_vs_bidask_analysis_offline()
 
     # Step 5 (Offline)
+    print_header("Step 5: Generating Comprehensive Report")
     run_comprehensive_report_offline()
         
-    print_header("Full Pipeline Completed")
+    print_header("Full Standard Pipeline Completed")
 
 def cache_analyzer_menu():
     """Cache validation and analysis menu for TP/SL Optimizer."""
     while True:
         print("\n" + "-"*70)
-        print("--- TP/SL Optimizer: Cache Analysis & Management ---")
+        print("--- Cache Management & Debugging ---")
         print("Manage and analyze OCHLV+Volume data for optimization.")
         print("-"*70)
         print("1. Fetch/Update OCHLV+Volume Data (Online)")
@@ -180,7 +182,7 @@ def tp_sl_analysis_menu():
     """
     while True:
         print("\n" + "="*70)
-        print("--- TP/SL ANALYSIS & OPTIMIZATION ---")
+        print("--- Post-Close 'What-If' Analysis (Legacy Phase 3B) ---")
         print("="*70)
         print("1. Run post-close analysis for recent positions")
         print("2. Generate TP/SL optimization report")
@@ -207,7 +209,7 @@ def tp_sl_range_testing_menu():
     """
     while True:
         print("\n" + "="*70)
-        print("--- TP/SL RANGE TESTING (Phase 4A) ---")
+        print("--- TP/SL Range Testing & Optimization Submenu (Phase 4 & 5) ---")
         print("="*70)
         print("1. Run TP/SL range simulation for all positions")
         print("2. Generate range test report with heatmaps")
@@ -216,7 +218,7 @@ def tp_sl_range_testing_menu():
         print("5. Run TP/SL Optimization Engine (Phase 5)")
         print("6. Back to main menu")
         
-        choice = input("\nSelect option (1-5): ").strip()
+        choice = input("\nSelect option (1-6): ").strip()
         
         if choice == "1":
             run_tp_sl_range_simulation()
@@ -272,7 +274,7 @@ def run_tp_sl_range_simulation():
         print("\nResults saved to reporting/output/")
         
     except Exception as e:
-        logger.error(f"Range simulation failed: {e}")
+        logger.error(f"Range simulation failed: {e}", exc_info=True)
         print(f"❌ Simulation failed: {e}")
 
 def generate_range_test_report():
@@ -512,6 +514,55 @@ def export_ml_dataset():
     except Exception as e:
         print(f"❌ Export failed: {e}")
 
+# --- New Menu Wrapper Functions ---
+
+def run_data_preparation_pipeline():
+    """Step 1 & 2 combined: Log Processing and Strategy Enrichment."""
+    print_header("Steps 1 & 2: Log Processing & Strategy Enrichment")
+    if not run_extraction(): return
+    run_instance_detection()
+    print_header("Data Preparation Completed")
+
+def run_core_analysis_and_report_pipeline():
+    """Steps 4 & 5 combined: Run Base Simulations and Generate Report."""
+    print_header("Steps 4 & 5: Running Analysis & Generating Report")
+    run_spot_vs_bidask_analysis_offline()
+    run_comprehensive_report_offline()
+    print_header("Core Analysis & Reporting Completed")
+
+def run_full_optimization_pipeline(api_key: Optional[str]):
+    """Executes the entire analysis pipeline including optimization (Steps 1-5 + Phase 4/5)."""
+    print_header("Executing Full Optimization Pipeline")
+
+    # 1. Data Preparation (Steps 1 & 2)
+    print_header("1. Log Extraction & Strategy Enrichment")
+    if not run_extraction(): return
+    run_instance_detection()
+
+    # 2. Data Fetching Online (Step 3)
+    print_header("2. Data Fetching for Simulations & Reports")
+    from data_fetching.main_data_orchestrator import run_all_data_fetching
+    run_all_data_fetching(api_key, refetch_mode='none')
+    
+    # 3. Base Simulation (Part of original Step 4)
+    print_header("3. Running Base Spot vs. Bid-Ask Simulations")
+    run_spot_vs_bidask_analysis_offline()
+    
+    # 4. TP/SL Range Simulation (Phase 4A Prerequisite)
+    print_header("4. Running TP/SL Range Simulation (Phase 4A Prerequisite)")
+    run_tp_sl_range_simulation()
+
+    # 5. Optimization Engine (Phase 5)
+    print_header("5. Running TP/SL Optimization Engine (Phase 5)")
+    run_tp_sl_optimization_engine()
+
+    # 6. Final Report Generation (Step 5)
+    print_header("6. Generating Comprehensive Report with All Analyses")
+    run_comprehensive_report_offline()
+        
+    print_header("Full Optimization Pipeline Completed")
+
+
 def main_menu():
     """Displays the main interactive menu."""
     config = load_main_config()
@@ -529,45 +580,43 @@ def main_menu():
 
     while True:
         print("\n" + "="*70)
-        print("--- MAIN MENU ---")
-        print("="*70)
-        print("MANDATORY WORKFLOW: Step 1 → Step 2 → Step 3 → Step 4 → Step 5")
-        print("-"*70)
-        print("1. Step 1: Process Logs and Extract Positions")
-        print("2. Step 2: Detect Strategies & Enrich Data (MANDATORY after Step 1)")
-        print("3. Step 3: Fetch/Update Main Report Data (Online Step)")
+        print("--- SOL DECODER PORTFOLIO ANALYZER ---")
         mode_label = get_mode_label(config, api_key)
-        print(f"4. Step 4: Run Base Simulations {mode_label}")
-        print(f"5. Step 5: Generate Comprehensive Report {mode_label}")
+        print(f"Current Operational Mode: {mode_label}")
+        print("="*70)
+        print("--- CORE WORKFLOW ---")
+        print("1. Data Preparation (Logs -> Enriched Positions)")
+        print("2. Data Fetching (Online: Get market data for analysis)")
+        print("3. Reporting (Offline: Generate report from prepared data)")
         print("-"*70)
-        print("6. TP/SL Optimizer: Cache Management (OCHLV+Volume)")
-        print("7. Run Full Pipeline (Steps 1 → 5)")
-        print("8. TP/SL Analysis & Optimization")
-        print("9. TP/SL Range Testing (NEW)")
+        print("--- AUTOMATED PIPELINES ---")
+        print("4. Full Standard Pipeline (Steps 1-3 -> Report with Phase 4A/B)")
+        print("5. Full Optimization Pipeline (Steps 1-3 -> Phase 4A Sim -> Phase 5 Engine -> Final Report)")
+        print("-"*70)
+        print("--- ADVANCED ANALYSIS & TOOLS ---")
+        print("6. TP/SL Range Testing & Optimization Submenu (Phase 4 & 5)")
+        print("7. Post-Close 'What-If' Analysis (Legacy Phase 3B)")
+        print("8. Cache Management & Debugging")
         print("0. Exit")
         
-        choice = input("Select an option (0-9): ")
+        choice = input("Select an option (0-8): ")
 
         if choice == '1':
-            print_header("Step 1: Log Processing")
-            run_extraction()
+            run_data_preparation_pipeline()
         elif choice == '2':
-            print_header("Step 2: Strategy Instance Detection")
-            run_instance_detection()
-        elif choice == '3':
             data_fetching_menu(api_key)
+        elif choice == '3':
+            run_core_analysis_and_report_pipeline()
         elif choice == '4':
-            run_spot_vs_bidask_analysis_offline()
-        elif choice == '5':
-            run_comprehensive_report_offline()
-        elif choice == '6':
-            cache_analyzer_menu()
-        elif choice == '7':
             run_full_pipeline(api_key)
-        elif choice == '8':
-            tp_sl_analysis_menu()
-        elif choice == '9':
+        elif choice == '5':
+            run_full_optimization_pipeline(api_key)
+        elif choice == '6':
             tp_sl_range_testing_menu()
+        elif choice == '7':
+            tp_sl_analysis_menu()
+        elif choice == '8':
+            cache_analyzer_menu()
         elif choice == '0':
             print("Exiting application...")
             break
