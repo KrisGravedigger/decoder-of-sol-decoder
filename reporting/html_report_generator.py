@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 import plotly.offline as pyo
 from jinja2 import Environment, FileSystemLoader
+import pandas as pd
 
 from .visualizations import interactive as interactive_charts
 from .visualizations.interactive import range_test_charts
@@ -48,7 +49,6 @@ class HTMLReportGenerator:
                                     portfolio_analysis: Dict[str, Any],
                                     correlation_analysis: Optional[Dict[str, Any]] = None,
                                     weekend_analysis: Optional[Dict[str, Any]] = None,
-                                    # AIDEV-NOTE-CLAUDE: Added missing argument to accept new data.
                                     strategy_simulations: Optional[List[Dict]] = None) -> str:
         """
         Generate comprehensive HTML report combining all analyses.
@@ -85,23 +85,17 @@ class HTMLReportGenerator:
                                    portfolio_analysis: Dict[str, Any],
                                    correlation_analysis: Optional[Dict[str, Any]],
                                    weekend_analysis: Optional[Dict[str, Any]],
-                                   # AIDEV-NOTE-CLAUDE: Accept new simulation data for charting.
                                    strategy_simulations: Optional[List[Dict]]) -> Dict[str, str]:
         """
         Generate interactive Plotly charts for the report.
         """
         charts = {}
         
-        # Original charts
         charts['metrics_summary'] = interactive_charts.create_metrics_summary_chart(portfolio_analysis)
-        
-        # Professional charts from chart_generator.py
         charts['professional_equity_curve'] = interactive_charts.create_professional_equity_curve(portfolio_analysis)
         charts['professional_drawdown'] = interactive_charts.create_professional_drawdown_analysis(portfolio_analysis)
         charts['professional_strategy_heatmap'] = interactive_charts.create_professional_strategy_heatmap(portfolio_analysis, self.config if hasattr(self, 'config') else {})
         charts['professional_cost_impact'] = interactive_charts.create_professional_cost_impact(portfolio_analysis)
-        
-        # Strategy AVG PnL summary (replaces old heatmap)
         charts['strategy_avg_pnl_summary'] = interactive_charts.create_strategy_avg_pnl_summary(self.config if hasattr(self, 'config') else {})
         
         if correlation_analysis and 'error' not in correlation_analysis:
@@ -112,51 +106,36 @@ class HTMLReportGenerator:
         if weekend_analysis and not weekend_analysis.get('analysis_skipped'):
              if 'error' not in weekend_analysis:
                 charts['weekend_comparison'] = interactive_charts.create_weekend_comparison_chart(weekend_analysis)
-                charts['weekend_distribution'] = interactive_charts.create_weekend_distribution_chart(weekend_analysis)
         
-        # AIDEV-NOTE-CLAUDE: Generate the new charts for strategy simulations.
         if strategy_simulations:
             charts['strategy_simulation_comparison'] = interactive_charts.create_strategy_simulation_chart(strategy_simulations, portfolio_analysis)
 
         # Range Test Charts (Phase 4A)
         try:
-            # Check if range test results exist
-            import os
             if os.path.exists("reporting/output/range_test_aggregated.csv"):
-                import pandas as pd
                 agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
-                
-                # Get unique strategies
-                strategies = agg_df['strategy_instance_id'].unique()[:5]  # Top 5 for space
-                
-                # Create heatmaps for each strategy
+                strategies = agg_df['strategy_instance_id'].unique()[:5]
                 charts['range_test_heatmaps'] = []
                 for strategy_id in strategies:
-                    heatmap_html = range_test_charts.create_range_test_heatmap(
-                        agg_df, strategy_id, 
-                        self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
-                    )
-                    charts['range_test_heatmaps'].append({
-                        'strategy_id': strategy_id,
-                        'html': heatmap_html
-                    })
-                    
-                # Create optimal settings table
-                charts['range_test_optimal_table'] = range_test_charts.create_optimal_settings_table(
-                    agg_df,
-                    self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
-                )
-                
-                # Create comparison chart
-                charts['range_test_comparison'] = range_test_charts.create_strategy_comparison_chart(
-                    agg_df,
-                    self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
-                )
-                
-                # AIDEV-TODO-CLAUDE: Placeholder for Phase 4B interactive tool
-                
+                    heatmap_html = range_test_charts.create_range_test_heatmap(agg_df, strategy_id, self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl'))
+                    charts['range_test_heatmaps'].append({'strategy_id': strategy_id, 'html': heatmap_html})
+                charts['range_test_optimal_table'] = range_test_charts.create_optimal_settings_table(agg_df, self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl'))
+                charts['range_test_comparison'] = range_test_charts.create_strategy_comparison_chart(agg_df, self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl'))
         except Exception as e:
             logger.warning(f"Could not generate range test charts: {e}")
+
+        # Phase 5: TP/SL Optimization Results
+        try:
+            if os.path.exists("reporting/output/tp_sl_recommendations.csv"):
+                from optimization.tp_sl_optimizer import run_tp_sl_optimization
+                optimization_results = run_tp_sl_optimization()
+                if optimization_results['status'] == 'SUCCESS':
+                    charts['optimization_matrix'] = optimization_results['visualizations']['performance_matrix']
+                    charts['optimization_win_rate'] = optimization_results['visualizations']['win_rate_chart']
+                    charts['optimization_sl_floor'] = optimization_results['visualizations']['sl_floor_table']
+                    charts['optimization_summary'] = optimization_results['summary']
+        except Exception as e:
+            logger.warning(f"Could not generate optimization charts: {e}")
 
         return charts
             
@@ -170,114 +149,84 @@ class HTMLReportGenerator:
         
         formatted_weekend_data = self._format_weekend_data(weekend_analysis)
         best_sim_strategy = self._get_best_sim_strategy(strategy_simulations)
-        
-        # AIDEV-TPSL-CLAUDE: Phase 4B - Prepare enriched simulation data for interactive tool
         enriched_simulation_json = self._prepare_enriched_simulation_data()
+        # AIDEV-NOTE-CLAUDE: Create a map of optimal settings for the interactive tool
+        optimal_settings_map = {}
+        try:
+            if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                metric = self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
+                optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')[metric].idxmax()]
+                optimal_settings_map = optimal_df.set_index('strategy_instance_id')[['tp_level', 'sl_level']].to_dict('index')
+        except Exception as e:
+            logger.warning(f"Could not generate optimal settings map for interactive tool: {e}")
+
+        # Pass tested TP/SL levels to the template for JS logic
+        tested_tp_levels = self.config.get('range_testing', {}).get('tp_levels', [])
+        tested_sl_levels = self.config.get('range_testing', {}).get('sl_levels', [])
 
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'portfolio_analysis': portfolio_analysis,
             'correlation_analysis': correlation_analysis,
-            'weekend_analysis': formatted_weekend_data, # Use formatted data
+            'weekend_analysis': formatted_weekend_data,
             'strategy_simulations': strategy_simulations,
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
-            'config': self.config,  # Add config for template
+            'config': self.config,
             'plotly_js': pyo.get_plotlyjs(),
-            'enriched_simulation_json': enriched_simulation_json  # Phase 4B data
+            'enriched_simulation_json': enriched_simulation_json,
+            'optimal_settings_json': json.dumps(optimal_settings_map),
+            'tested_tp_levels_json': json.dumps(sorted(tested_tp_levels)),
+            'tested_sl_levels_json': json.dumps(sorted(tested_sl_levels))
         }
         
         return template_data
 
     def _format_weekend_data(self, weekend_analysis: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Formats the weekend analysis dictionary for easier rendering in Jinja2."""
         if not weekend_analysis or weekend_analysis.get('analysis_skipped') or 'error' in weekend_analysis:
             return {'is_valid': False, 'raw': weekend_analysis}
-        
-        # Extracting nested dictionaries for easier access in the template
         comparison = weekend_analysis.get('performance_comparison', {})
         return {
-            'is_valid': True,
-            'raw': weekend_analysis, # Keep raw data for flexibility
+            'is_valid': True, 'raw': weekend_analysis,
             'metadata': weekend_analysis.get('analysis_metadata', {}),
             'recommendations': weekend_analysis.get('recommendations', {}),
-            'classification': weekend_analysis.get('position_classification', {}),
             'current_scenario': comparison.get('current_scenario', {}),
             'alternative_scenario': comparison.get('alternative_scenario', {}),
             'impact_analysis': comparison.get('impact_analysis', {}),
         }
 
     def _get_best_sim_strategy(self, simulation_results: Optional[List[Dict]]) -> Optional[Dict]:
-        """Find the best overall simulated strategy."""
-        if not simulation_results:
-            return None
-            
+        if not simulation_results: return None
         sim_pnl = {}
         for res in simulation_results:
             if not res or 'simulation_results' not in res: continue
             for name, data in res['simulation_results'].items():
                 if 'pnl_sol' in data:
                     sim_pnl[name] = sim_pnl.get(name, 0) + data['pnl_sol']
-                    
-        if not sim_pnl:
-            return None
-            
+        if not sim_pnl: return None
         best_name = max(sim_pnl, key=sim_pnl.get)
         return {'name': best_name, 'pnl': sim_pnl[best_name]}
 
     def _prepare_enriched_simulation_data(self) -> str:
-        """
-        Prepare enriched simulation data for Phase 4B interactive tool.
-        
-        Returns:
-            JSON string containing enriched simulation results
-        """
-        import json
-        import pandas as pd
-        
+        """Prepare enriched simulation data for Phase 4B interactive tool."""
         try:
-            # Check if range test results exist
             if not os.path.exists("reporting/output/range_test_detailed_results.csv"):
-                logger.info("No range test results found for enrichment")
                 return json.dumps([])
-                
-            # Load the three data sources
             detailed_results_df = pd.read_csv("reporting/output/range_test_detailed_results.csv")
             positions_df = pd.read_csv("positions_to_analyze.csv")
             strategy_instances_df = pd.read_csv("strategy_instances.csv")
             
-            # Parse timestamps in positions_df
             from reporting.data_loader import _parse_custom_timestamp
             positions_df['open_timestamp'] = positions_df['open_timestamp'].apply(_parse_custom_timestamp)
             
-            # First merge: Add open_timestamp to detailed results
-            enriched_df = pd.merge(
-                detailed_results_df,
-                positions_df[['position_id', 'open_timestamp']],
-                on='position_id',
-                how='left'
-            )
-            
-            # Second merge: Add analyzed_position_count from strategy instances
-            enriched_df = pd.merge(
-                enriched_df,
-                strategy_instances_df[['strategy_instance_id', 'analyzed_position_count']],
-                on='strategy_instance_id',
-                how='left'
-            )
-            
-            # Convert timestamps to ISO format for JSON
+            enriched_df = pd.merge(detailed_results_df, positions_df[['position_id', 'open_timestamp']], on='position_id', how='left')
+            enriched_df = pd.merge(enriched_df, strategy_instances_df[['strategy_instance_id', 'analyzed_position_count']], on='strategy_instance_id', how='left')
             enriched_df['open_timestamp'] = enriched_df['open_timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Replace NaN values with None for cleaner JSON
             enriched_df = enriched_df.where(pd.notnull(enriched_df), None)
             
-            # Convert to JSON
-            enriched_json = enriched_df.to_json(orient='records')
-            
             logger.info(f"Enriched {len(enriched_df)} simulation results for Phase 4B")
-            return enriched_json
-            
+            return enriched_df.to_json(orient='records')
         except Exception as e:
             logger.error(f"Failed to prepare enriched simulation data: {e}")
             return json.dumps([])

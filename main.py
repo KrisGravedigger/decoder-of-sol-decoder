@@ -1,6 +1,18 @@
 import logging
 import os
 import sys
+
+# --- Configure Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('portfolio_analysis.log', mode='w'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 from dotenv import load_dotenv
 from typing import Optional
 from typing import Dict
@@ -30,7 +42,7 @@ from tools.cache_debugger import cache_debugger_menu
 
 # --- Configure Logging ---
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('portfolio_analysis.log', mode='w'),
@@ -100,10 +112,9 @@ def run_comprehensive_report_offline():
         logger.error(f"Comprehensive reporting failed: {e}", exc_info=True)
         print(f"\n[ERROR] An error occurred during report generation: {e}")
 
-
 def run_full_pipeline(api_key: Optional[str]):
     """Executes the entire analysis pipeline from start to finish."""
-    print_header("Executing Full Pipeline")
+    print_header("Executing Full Standard Pipeline")
 
     # Step 1 & 2
     print_header("Steps 1 & 2: Log Extraction & Strategy Detection")
@@ -112,21 +123,24 @@ def run_full_pipeline(api_key: Optional[str]):
 
     # Step 3 (Online) - Run in standard 'none' mode for a full pipeline run.
     from data_fetching.main_data_orchestrator import run_all_data_fetching
+    print_header("Step 3: Data Fetching for Simulations & Reports")
     run_all_data_fetching(api_key, refetch_mode='none')
     
     # Step 4 (Offline)
+    print_header("Step 4: Running Base Simulations")
     run_spot_vs_bidask_analysis_offline()
 
     # Step 5 (Offline)
+    print_header("Step 5: Generating Comprehensive Report")
     run_comprehensive_report_offline()
         
-    print_header("Full Pipeline Completed")
+    print_header("Full Standard Pipeline Completed")
 
 def cache_analyzer_menu():
     """Cache validation and analysis menu for TP/SL Optimizer."""
     while True:
         print("\n" + "-"*70)
-        print("--- TP/SL Optimizer: Cache Analysis & Management ---")
+        print("--- Cache Management & Debugging ---")
         print("Manage and analyze OCHLV+Volume data for optimization.")
         print("-"*70)
         print("1. Fetch/Update OCHLV+Volume Data (Online)")
@@ -162,48 +176,22 @@ def cache_analyzer_menu():
         else:
             print("Invalid choice, please try again.")
 
-def tp_sl_analysis_menu():
-    """
-    TP/SL Analysis submenu.
-    """
-    while True:
-        print("\n" + "="*70)
-        print("--- TP/SL ANALYSIS & OPTIMIZATION ---")
-        print("="*70)
-        print("1. Run post-close analysis for recent positions")
-        print("2. Generate TP/SL optimization report")
-        print("3. View analysis results and statistics")
-        print("4. Export ML dataset for Phase 4")
-        print("5. Back to main menu")
-        
-        choice = input("\nSelect option (1-5): ").strip()
-        
-        if choice == "1":
-            run_post_close_analysis()
-        elif choice == "2":
-            generate_tp_sl_report()
-        elif choice == "3":
-            view_analysis_results()
-        elif choice == "4":
-            export_ml_dataset()
-        elif choice == "5":
-            break
-
 def tp_sl_range_testing_menu():
     """
     TP/SL Range Testing submenu for Phase 4A.
     """
     while True:
         print("\n" + "="*70)
-        print("--- TP/SL RANGE TESTING (Phase 4A) ---")
+        print("--- TP/SL Range Testing & Optimization Submenu (Phase 4 & 5) ---")
         print("="*70)
         print("1. Run TP/SL range simulation for all positions")
         print("2. Generate range test report with heatmaps")
         print("3. View optimal TP/SL recommendations")
         print("4. Export detailed simulation results")
-        print("5. Back to main menu")
+        print("5. Run TP/SL Optimization Engine (Phase 5)")
+        print("6. Back to main menu")
         
-        choice = input("\nSelect option (1-5): ").strip()
+        choice = input("\nSelect option (1-6): ").strip()
         
         if choice == "1":
             run_tp_sl_range_simulation()
@@ -214,6 +202,8 @@ def tp_sl_range_testing_menu():
         elif choice == "4":
             export_range_test_results()
         elif choice == "5":
+            run_tp_sl_optimization_engine()
+        elif choice == "6":
             break
 
 def run_tp_sl_range_simulation():
@@ -221,6 +211,7 @@ def run_tp_sl_range_simulation():
     try:
         from simulations.range_test_simulator import TpSlRangeSimulator
         from reporting.data_loader import load_and_prepare_positions
+        from reporting.post_close_analyzer import PostCloseAnalyzer
         
         print("\nLoading enriched positions data...")
         positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
@@ -235,8 +226,11 @@ def run_tp_sl_range_simulation():
         if not config.get('range_testing', {}).get('enable', False):
             print("❌ Range testing is disabled in config. Set range_testing.enable: true")
             return
+        
+        # Create a single, correctly configured analyzer instance
+        post_close_analyzer = PostCloseAnalyzer()
             
-        simulator = TpSlRangeSimulator(config)
+        simulator = TpSlRangeSimulator(config, post_close_analyzer)
         print(f"\nRunning simulation for {len(positions_df)} positions...")
         print(f"TP levels: {config['range_testing']['tp_levels']}")
         print(f"SL levels: {config['range_testing']['sl_levels']}")
@@ -253,7 +247,7 @@ def run_tp_sl_range_simulation():
         print("\nResults saved to reporting/output/")
         
     except Exception as e:
-        logger.error(f"Range simulation failed: {e}")
+        logger.error(f"Range simulation failed: {e}", exc_info=True)
         print(f"❌ Simulation failed: {e}")
 
 def generate_range_test_report():
@@ -305,44 +299,53 @@ def export_range_test_results():
     except Exception as e:
         print(f"❌ Export failed: {e}")
 
-def run_post_close_analysis():
-    """
-    Run post-close analysis with user feedback.
-    """
+def run_tp_sl_optimization_engine():
+    """Run Phase 5 TP/SL Optimization Engine."""
     try:
-        from reporting.post_close_analyzer import PostCloseAnalyzer
-        from reporting.data_loader import load_and_prepare_positions
+        from optimization.tp_sl_optimizer import run_tp_sl_optimization
         
-        analyzer = PostCloseAnalyzer()
-        positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
+        print("\n" + "="*70)
+        print("RUNNING TP/SL OPTIMIZATION ENGINE (Phase 5)")
+        print("="*70)
         
-        print(f"\nLoaded {len(positions_df)} positions for analysis...")
-        
-        # Apply filters and show results
-        filtered_df = analyzer.apply_scope_filters(positions_df)
-        print(f"After applying filters: {len(filtered_df)} positions selected")
-        
-        if filtered_df.empty:
-            print("No positions meet analysis criteria. Check configuration filters.")
+        # Check prerequisites
+        if not os.path.exists("reporting/output/range_test_detailed_results.csv"):
+            print("❌ ERROR: Range test results not found!")
+            print("Please run Phase 4A simulation first (option 1).")
             return
             
-        # Run analysis with progress
-        results = analyzer.run_bulk_analysis(filtered_df)
+        config = load_main_config()
+        if not config.get('optimization_engine', {}).get('enable', False):
+            print("❌ Optimization engine is disabled in config.")
+            print("Set optimization_engine.enable: true in portfolio_config.yaml")
+            return
+            
+        print("Analyzing simulation results to find optimal TP/SL parameters...")
+        print(f"Minimum positions required: {config.get('optimization_engine', {}).get('min_positions_for_optimization', 30)}")
+        print(f"Time weighting: {'Enabled' if config.get('optimization_engine', {}).get('time_weighting', {}).get('enable', True) else 'Disabled'}")
         
-        print(f"\n✅ Analysis complete!")
-        print(f"  Successful: {results['successful_analyses']}/{results['total_positions']}")
-        print(f"  Missed opportunities identified: {results['positions_with_missed_upside']}")
-        print(f"  Average missed upside: {results['avg_missed_upside_pct']:.1f}%")
+        results = run_tp_sl_optimization()
         
-        # Save results for later viewing
-        import json
-        with open("reporting/output/tp_sl_analysis_results.json", "w") as f:
-            json.dump(results, f, indent=2, default=str)
-        print("\nResults saved to reporting/output/tp_sl_analysis_results.json")
-        
+        if results['status'] == 'SUCCESS':
+            summary = results['summary']
+            print(f"\n✅ Optimization complete!")
+            print(f"  Strategies analyzed: {summary['total_strategies']}")
+            print(f"  Changes recommended: {summary['changes_recommended']}")
+            print(f"  Average improvement: {summary['avg_improvement']:.2f}%")
+            print(f"  Maximum improvement: {summary['max_improvement']:.2f}%")
+            print("\nRecommendations exported to: reporting/output/tp_sl_recommendations.csv")
+            print("Optimization results will be included in the next comprehensive report.")
+            
+        elif results['status'] == 'NO_QUALIFIED_STRATEGIES':
+            print(f"\n⚠️  {results['message']}")
+            print("Consider lowering min_positions_for_optimization in config.")
+            
+        else:
+            print(f"\n❌ Optimization failed: {results.get('error', 'Unknown error')}")
+            
     except Exception as e:
-        logger.error(f"Post-close analysis failed: {e}")
-        print(f"❌ Analysis failed: {e}")
+        logger.error(f"Optimization engine failed: {e}")
+        print(f"❌ Failed to run optimization: {e}")
 
 def generate_tp_sl_report():
     """
@@ -445,6 +448,55 @@ def export_ml_dataset():
     except Exception as e:
         print(f"❌ Export failed: {e}")
 
+# --- New Menu Wrapper Functions ---
+
+def run_data_preparation_pipeline():
+    """Step 1 & 2 combined: Log Processing and Strategy Enrichment."""
+    print_header("Steps 1 & 2: Log Processing & Strategy Enrichment")
+    if not run_extraction(): return
+    run_instance_detection()
+    print_header("Data Preparation Completed")
+
+def run_core_analysis_and_report_pipeline():
+    """Steps 4 & 5 combined: Run Base Simulations and Generate Report."""
+    print_header("Steps 4 & 5: Running Analysis & Generating Report")
+    run_spot_vs_bidask_analysis_offline()
+    run_comprehensive_report_offline()
+    print_header("Core Analysis & Reporting Completed")
+
+def run_full_optimization_pipeline(api_key: Optional[str]):
+    """Executes the entire analysis pipeline including optimization (Steps 1-5 + Phase 4/5)."""
+    print_header("Executing Full Optimization Pipeline")
+
+    # 1. Data Preparation (Steps 1 & 2)
+    print_header("1. Log Extraction & Strategy Enrichment")
+    if not run_extraction(): return
+    run_instance_detection()
+
+    # 2. Data Fetching Online (Step 3)
+    print_header("2. Data Fetching for Simulations & Reports")
+    from data_fetching.main_data_orchestrator import run_all_data_fetching
+    run_all_data_fetching(api_key, refetch_mode='none')
+    
+    # 3. Base Simulation (Part of original Step 4)
+    print_header("3. Running Base Spot vs. Bid-Ask Simulations")
+    run_spot_vs_bidask_analysis_offline()
+    
+    # 4. TP/SL Range Simulation (Phase 4A Prerequisite)
+    print_header("4. Running TP/SL Range Simulation (Phase 4A Prerequisite)")
+    run_tp_sl_range_simulation()
+
+    # 5. Optimization Engine (Phase 5)
+    print_header("5. Running TP/SL Optimization Engine (Phase 5)")
+    run_tp_sl_optimization_engine()
+
+    # 6. Final Report Generation (Step 5)
+    print_header("6. Generating Comprehensive Report with All Analyses")
+    run_comprehensive_report_offline()
+        
+    print_header("Full Optimization Pipeline Completed")
+
+
 def main_menu():
     """Displays the main interactive menu."""
     config = load_main_config()
@@ -462,45 +514,40 @@ def main_menu():
 
     while True:
         print("\n" + "="*70)
-        print("--- MAIN MENU ---")
-        print("="*70)
-        print("MANDATORY WORKFLOW: Step 1 → Step 2 → Step 3 → Step 4 → Step 5")
-        print("-"*70)
-        print("1. Step 1: Process Logs and Extract Positions")
-        print("2. Step 2: Detect Strategies & Enrich Data (MANDATORY after Step 1)")
-        print("3. Step 3: Fetch/Update Main Report Data (Online Step)")
+        print("--- SOL DECODER PORTFOLIO ANALYZER ---")
         mode_label = get_mode_label(config, api_key)
-        print(f"4. Step 4: Run Base Simulations {mode_label}")
-        print(f"5. Step 5: Generate Comprehensive Report {mode_label}")
+        print(f"Current Operational Mode: {mode_label}")
+        print("="*70)
+        print("--- CORE WORKFLOW ---")
+        print("1. Data Preparation (Logs -> Enriched Positions)")
+        print("2. Data Fetching (Online: Get market data for analysis)")
+        print("3. Reporting (Offline: Generate report from prepared data)")
         print("-"*70)
-        print("6. TP/SL Optimizer: Cache Management (OCHLV+Volume)")
-        print("7. Run Full Pipeline (Steps 1 → 5)")
-        print("8. TP/SL Analysis & Optimization")
-        print("9. TP/SL Range Testing (NEW)")
+        print("--- AUTOMATED PIPELINES ---")
+        print("4. Full Standard Pipeline (Steps 1-3 -> Report with Phase 4A/B)")
+        print("5. Full Optimization Pipeline (Steps 1-3 -> Phase 4A Sim -> Phase 5 Engine -> Final Report)")
+        print("-"*70)
+        print("--- ADVANCED ANALYSIS & TOOLS ---")
+        print("6. TP/SL Range Testing & Optimization Submenu (Phase 4 & 5)")
+        print("7. Cache Management & Debugging")
         print("0. Exit")
         
-        choice = input("Select an option (0-9): ")
+        choice = input("Select an option (0-7): ")
 
         if choice == '1':
-            print_header("Step 1: Log Processing")
-            run_extraction()
+            run_data_preparation_pipeline()
         elif choice == '2':
-            print_header("Step 2: Strategy Instance Detection")
-            run_instance_detection()
-        elif choice == '3':
             data_fetching_menu(api_key)
+        elif choice == '3':
+            run_core_analysis_and_report_pipeline()
         elif choice == '4':
-            run_spot_vs_bidask_analysis_offline()
-        elif choice == '5':
-            run_comprehensive_report_offline()
-        elif choice == '6':
-            cache_analyzer_menu()
-        elif choice == '7':
             run_full_pipeline(api_key)
-        elif choice == '8':
-            tp_sl_analysis_menu()
-        elif choice == '9':
+        elif choice == '5':
+            run_full_optimization_pipeline(api_key)
+        elif choice == '6':
             tp_sl_range_testing_menu()
+        elif choice == '7':
+            cache_analyzer_menu()
         elif choice == '0':
             print("Exiting application...")
             break

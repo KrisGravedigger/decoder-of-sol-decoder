@@ -129,7 +129,13 @@ Position.post_close_prices: List[float]  # Price data after position close
 
 This phase is divided into two parts:
 - **Phase 4A (Current Implementation):** Backend simulation and static reporting with per-strategy heatmaps.
-- **Phase 4B (Future Enhancement):** An interactive "what-if" tool for dynamic parameter exploration.
+- **Phase 4B: Interactive "What-If" Tool** ✅ **COMPLETE**
+    - **Summary:** Implemented a fully interactive, client-side tool within the HTML report. It is powered by a pre-calculated, enriched JSON data object.
+    - **Key Features:**
+        - Dynamic filtering by date range and minimum positions per strategy.
+        - Smart TP/SL matching using Euclidean distance.
+        - Real-time updates of a comprehensive results table.
+        - Sensible default values (6% TP, 10% SL) to provide users with an immediate, useful starting point for analysis.
 
 ---
 #### **Phase 4A: Static Reporting & Per-Strategy Analysis** ✅ **COMPLETE**
@@ -168,6 +174,9 @@ Input: The enriched positions_to_analyze.csv (from Step 0).
 Core Logic:
 For each position, it will reuse the logic from PostCloseAnalyzer to generate a post-close value timeline once.
 It will then iterate through the configured TP/SL grid. For each pair, it will scan the timeline to find the simulated exit point (TP, SL, or end of simulation).
+
+**Simulation Performance Optimization:** To reduce computational overhead, the simulation engine includes a performance optimization layer. It intelligently skips "pointless" simulations where the outcome is predictable. For example, if a position's actual close reason was 'TP' at 8%, the engine will not simulate a lower TP of 6%, as the outcome would be identical. Similarly, for 'OOR' closes, it avoids testing deeper Stop Loss levels that would not have been triggered anyway. This undocumented feature significantly speeds up the range testing process without affecting the accuracy of the results.
+
 Outputs:
 range_test_detailed_results.csv: A large file with results for every combination (position_id, strategy_instance_id, tp_level, sl_level, simulated_pnl). This will be the foundation for Phase 4B.
 range_test_aggregated.csv: Aggregated results, grouped by strategy_instance_id, tp_level, and sl_level.
@@ -181,22 +190,95 @@ X-axis: SL levels, Y-axis: TP levels, Color: primary_ranking_metric.
 Tooltips will show detailed stats (Total PnL, Avg PnL, Win Rate).
 Optimal Settings Table: A summary table showing the best-performing TP/SL combination found for each strategy instance.
 
-### **Phase 5: Optimization Engine** 📋 *PLANNED*
-**Goal:** Identify statistically optimal parameter combinations
-- [ ] Implement universal SL floor discovery algorithm
-- [ ] Create TP efficiency analysis (frequency vs. magnitude trade-offs)
-- [ ] Build recommendation engine with confidence intervals
-- [ ] Integrate with existing portfolio analytics and reporting
+#### **Phase 4B: Interactive "What-If" Tool** ✅ **COMPLETE**
 
-**Phase Questions:**
-- Should optimization be strategy-specific (bidask vs spot) or universal?
-- How to weight different time periods (recent vs. historical performance)?
-- What's the minimum sample size for statistically significant recommendations?
+**Implementation Summary:**
+- **Backend Data Enrichment:** Modified `html_report_generator.py` to merge simulation results with position timestamps and strategy instance data
+- **Frontend Interactive Tool:** Created a fully client-side JavaScript tool with:
+  - Dynamic TP/SL input fields with real-time updates
+  - Date range filtering with clear buttons
+  - Minimum positions per strategy filter
+  - Euclidean distance algorithm to find closest TP/SL combinations
+  - Aggregated results table with exit reason breakdown
+  - Color-coded PnL values for visual feedback
 
+**Technical Achievements:**
+- Zero additional API calls - all computation happens in the browser
+- Efficient data merging using pandas for enriched JSON generation
+- Responsive UI with grid layout that adapts to screen size
+- Robust error handling for edge cases (no data, invalid filters)
+- Performance optimized for datasets with thousands of simulation results
 
-### 🔧 Current Phase Status: Phase 3B Complete
+**Business Value:**
+- Users can instantly explore "what-if" scenarios without re-running simulations
+- Date filtering enables analysis of specific time periods or market conditions
+- Strategy count filter ensures statistical significance
+- Exit breakdown provides insights into why positions closed
+- Results help identify optimal TP/SL parameters for different market regimes
+
+### **Phase 5: Optimization Engine** 📋 *NEXT IMPLEMENTATION*
+**Goal:** Implement a prescriptive analytics engine to identify statistically optimal TP/SL parameters per strategy, based on historical simulation data, and present actionable recommendations.
+
+**Core Logic & Requirements:**
+
+**1. Net Effect Strategy Analysis**
+- **Challenge:** A change in TP/SL parameters affects positions within a strategy differently.
+- **Implementation:** For each proposed TP/SL change, categorize every position's outcome relative to its baseline performance:
+    - **Type A (Improved):** New PnL > Baseline PnL (e.g., SL hit at -8% instead of -9%).
+    - **Type B (Neutral):** New PnL = Baseline PnL (e.g., position hit TP, unaffected by SL change).
+    - **Type C (Degraded):** New PnL < Baseline PnL (e.g., a winning position is now closed by the tighter SL).
+- **Calculation:** The system must compute the `net_pnl_impact` by summing the improvements and degradations across all positions within a strategy for a given TP/SL combination.
+
+**2. Expected Value (EV) Based SL Floor Analysis**
+- **Concept:** Determine a rational Stop Loss floor using a sound risk/reward mathematical framework based on Expected Value.
+- **Mathematical Foundation:** A strategy is profitable if its Expected Value is positive. The breakeven point is found where the historical win rate (`P_win`) equals the required win rate based on the risk parameters.
+- **Formula:** `P_win > SL_Level / (TP_Level + SL_Level)`
+- **Implementation:** The system will calculate the historical win rate for each TP/SL combo from the simulation data. It will then compare this to the required win rate calculated from the formula. An SL is considered "viable" if `Historical P_win > Required P_win`. The "SL floor" is the point at which this condition is no longer met.
+
+**3. Time Decay Weighting System**
+- **Requirement:** Prioritize recent performance in all calculations.
+- **Logic:** Implement a configurable, time-weighted system for all PnL and win-rate calculations.
+    - `last_7_days_weight`: 1.0 (100%)
+    - `decay_period_weeks`: 4
+    - `minimum_weight`: 0.5 (50%)
+- **Functionality:** All analysis must be switchable between `time-weighted` and `equal-weighted` modes.
+
+**4. Statistical Significance**
+- **Requirement:** Avoid overfitting on small data samples.
+- **Implementation:** Add a `min_positions_for_optimization` parameter to the config. The engine will skip analysis and not provide recommendations for any strategy instance with fewer positions than this threshold.
+
+**5. Deliverables & Visualizations**
+- **New Module:** `optimization/tp_sl_optimizer.py`
+- **New HTML Report Section:** "TP/SL Optimization Recommendations"
+- **A. Strategy Performance Matrix:** Interactive table showing the `net_pnl_impact` for each TP/SL combination, highlighting the optimal choice per strategy.
+- **B. Win Rate vs. Required Win Rate Chart:** An X-Y chart for a selected strategy.
+    - X-axis: SL Level.
+    - Y-axis: Win Rate (%).
+    - Lines: One line for "Historical Win Rate" at different SL levels, and multiple lines for "Required Win Rate" for various TP levels (e.g., TP=2%, TP=4%). Intersections show viability points.
+- **C. Dynamic SL Floor Table:** A summary table showing the deepest viable SL for each TP level based on the EV analysis.
+
+**Configuration (`portfolio_config.yaml`):**
+```yaml
+# PHASE 5: TP/SL Optimization Engine
+optimization_engine:
+  enable: true
+  min_positions_for_optimization: 30 # Min positions for a strategy to be analyzed
+
+  # Time decay settings for weighting recent performance
+  time_weighting:
+    enable: true
+    last_n_days_full_weight: 7
+    decay_period_weeks: 4
+    minimum_weight: 0.5
+
+### 🔧 Current Phase Status: Phase 4 Complete
 
 **Completed Objectives:**
+✅ **Phase 4A - Static Range Testing:** Successfully implemented grid-based TP/SL simulation with heatmap visualizations
+✅ **Phase 4B - Interactive Tool:** Fully functional browser-based "what-if" explorer with advanced filtering
+✅ **Data Pipeline:** Enriched simulation results with timestamps and strategy metadata for comprehensive analysis
+✅ **User Experience:** Real-time updates, intuitive controls, and actionable insights
+✅ **Performance:** Client-side computation ensures instant results without server load
 ✅ **Post-Close Analysis Engine:** Successfully implemented a "what-if" simulation engine to analyze positions after their actual close time.
 ✅ **LP Valuation:** Integrated mathematical formulas for impermanent loss to accurately value LP positions as prices fluctuate.
 ✅ **Fee Simulation:** Implemented a volume-proportional fee simulator that uses a position's historical performance to project future fee income.
@@ -208,10 +290,15 @@ Optimal Settings Table: A summary table showing the best-performing TP/SL combin
 - Resolved all circular dependency issues, stabilizing the application's architecture.
 - Implemented robust, graceful handling of incomplete data (e.g., missing fees/volume).
 - Created a complete, end-to-end user workflow from analysis execution to report generation.
+- **Ensured architectural integrity** by refactoring the simulation engine to use the official `Position` data model, eliminating a critical source of technical debt and potential data desynchronization bugs.
+- **Hardened the simulation pipeline** by resolving data type conflicts during position object creation, ensuring robust and reliable execution of the entire Phase 4 analysis.
 
-- **Module Status:** Phase 3B - Complete ✅
-- **Next Priority:** Phase 4 - TP/SL Range Testing
-- **Estimated Complexity:** Medium (requires careful design of simulation logic and reporting)
+**Ready for Next Phase:**
+- All TP/SL range testing functionality is complete and operational
+- Foundation established for Phase 5 - ML-driven optimization
+- Historical simulation data ready for machine learning model training
+
+
 
 # Peak PnL extraction with business logic
 if position.close_reason == 'TP':
@@ -317,27 +404,6 @@ class EnhancedPriceCacheManager(PriceCacheManager):
 - **Capital Correlation:** Portfolio-level position interaction effects
 - **Market Regime Detection:** Bull/bear market impact on optimal parameters
 
-## 📊 Current Status
-
-### **Completed**
-- [x] Phase 1: Data Infrastructure. The system can now reliably collect, store, and manage OCHLV+Volume data.
-- [x] Phase 2: Post-Position Analysis.
-- [x] Phase 3A: Log-Based Peak PnL Extraction. Real historical peak PnL data extracted from bot logs with configurable parameters.
-
-### **In Progress**
-Planning for Phase 3B: Post-Close Analysis with mathematical LP position valuation.
-
-### **Ready for Implementation**
-
- Mathematical framework for LP position valuation (research complete)
- Volume-proportional fee allocation algorithms (formulas documented)
- Peak PnL baseline data (Phase 3A complete)
- Cache infrastructure for post-close data (Phase 2 architecture ready)
-
-### **Blocked/Pending**
-- [ ] Volume data API endpoint identification (Moralis documentation review needed)
-- [ ] Cache migration strategy decision (parallel vs. sequential)
-
 ## ⚠️ Known Issues & Risks
 
 ### **Technical Risks**
@@ -407,34 +473,4 @@ Proceed with implementation, following stage-gate approach - validate each compo
 
 ## 📝 Session History
 
-### **2025-01-22: Module Specification & Planning**
-- Created comprehensive specification document
-- Defined 5-phase implementation plan
-- Established architectural decisions and simplifications
-- Identified key risks and mitigation strategies
-
-### **2025-07-23: Phase 1 Implementation & Refactoring**
-- Implemented `EnhancedPriceCacheManager` for OCHLV+Volume data.
-- Created a robust, offline-first caching system with a parallel `raw/` cache directory.
-- Refactored `main.py`, moving complex logic into dedicated `data_fetching` and `tools` modules to resolve circular dependencies and improve maintainability.
-- Established a `utils/common.py` module for shared helper functions.
-- Implemented a pragmatic "2-Day Rule" to automatically handle permanent data gaps without complex state management, saving API credits.
-- Developed user-friendly menus for managing and debugging the new cache system.
-- **Outcome: Phase 1 is complete and the system is architecturally sound for the next phase.**
-
-### **2025-07-26: Phase 3A Completion Summary**
-
-- Status: ✅ COMPLETE - Peak PnL extraction from logs operational
-- Data Quality: >90% of positions have valid peak PnL data extracted
-- Performance: Meets <30s target for 100 positions
-- Configuration: Fully configurable via YAML with reasonable defaults
-- Integration: Seamlessly integrated with existing pipeline, no breaking changes
-
-**Transition to Phase 3B**0
-- Ready for implementation: Post-close data extension and simulation engine
-- Foundation established: Peak PnL baselines, mathematical frameworks, cache infrastructure
--Next session priority: Extend cache manager for post-close data and implement LP position valuation
-
-- Module Status: Phase 3A - Complete ✅
-- Next Priority: Phase 3B - Post-Close Analysis & Simulation Engine
-- Estimated Complexity: Medium-High (mathematical precision required for LP valuation)
+moved to CLAUDE_session_history

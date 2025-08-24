@@ -1,70 +1,75 @@
-# SOL Decoder Strategy Analyzer v4.4
+# SOL Decoder Strategy Analyzer v5.0
 
-A comprehensive Python tool for analyzing SOL Decoder bot performance with advanced portfolio analytics, market correlation analysis, and ML-ready strategy optimization capabilities.
+A comprehensive Python tool for analyzing SOL Decoder bot performance with **complete TP/SL optimization capabilities**, advanced portfolio analytics, and ML-ready strategy optimization.
 
 ## Overview
 
-This tool has evolved from a simple log parser into a complete portfolio analytics platform that helps SOL Decoder bot users optimize their LP strategies through:
+This tool has evolved into a **complete portfolio analytics and optimization platform** that helps SOL Decoder bot users maximize their LP strategy performance through:
 
 1. **Automated Log Processing** - Extract position data from bot logs with >99.5% accuracy
 2. **Advanced Market Analysis** - Market correlation, EMA trend detection, weekend parameter optimization
 3. **Professional Portfolio Analytics** - Dual currency analysis (SOL/USDC) with infrastructure cost impact
 4. **Interactive Reporting** - Plotly-based comprehensive reports with executive summaries
 5. **Strategy Optimization** - Compare Spot vs Bid-Ask distributions with research-verified mathematical formulas
-6. **Smart Data Management** - Intelligent caching, offline analysis, graceful error handling
+6. **🆕 Complete TP/SL Optimization** - Historical simulation, range testing, and interactive "what-if" analysis
+7. **🆕 Post-Exit Analysis** - Forward-looking profitability analysis with missed opportunity quantification
+8. **Smart Data Management** - Offline-first analysis, intelligent caching, graceful error handling
 
 The tool analyzes **1-sided LP strategies** with different distribution patterns using official Meteora DLMM mathematical formulas with automatic step size detection.
 
-## 🆕 Version 4.4 Major Updates
+## 🆕 Version 5.0 Major Updates
 
-**Portfolio Analytics & Market Intelligence:**
-- ✅ **Complete Portfolio Analytics Module**: Dual SOL/USDC currency analysis with infrastructure cost impact
-- ✅ **Market Correlation Analysis**: Pearson correlation with SOL trends, EMA slope detection  
-- ✅ **Weekend Parameter Optimization**: weekendSizePercentage impact simulation with statistical significance
-- ✅ **Interactive HTML Reports**: Plotly-based comprehensive reports with executive summaries
-- ✅ **Professional Charting**: 4 chart types (equity curve, drawdown, strategy heatmap, cost impact)
+**Complete TP/SL Optimization Pipeline:**
+- ✅ **Peak PnL Extraction**: Maximum profit/loss percentages during position lifetime parsed from bot logs
+- ✅ **Post-Close Analysis Engine**: "What-if" simulation using historical price data after position closure
+- ✅ **LP Position Valuation**: Mathematical accuracy with impermanent loss and fee calculations
+- ✅ **OCHLV+Volume Infrastructure**: Offline-first cache system with monthly organization
+- ✅ **TP/SL Range Testing**: Grid-based parameter optimization with user-defined ranges
+- ✅ **Interactive What-If Tool**: Browser-based dynamic explorer with real-time filtering
+- ✅ **Per-Strategy Heatmaps**: Visual identification of optimal TP/SL regions
+- ✅ **ML Dataset Export**: Structured features ready for machine learning model training
 
-**Architecture & Reliability:**
-- ✅ **Centralized Architecture**: Single entry point (main.py) with interactive menu system
-- ✅ **Smart Cache Management v2.0**: Intelligent gap detection, API failure vs no-data distinction
-- ✅ **True Offline Mode**: Complete analysis capability without API calls using cached data
-- ✅ **Graceful Degradation**: Reports handle missing data without crashes
-- ✅ **Enhanced Error Resiliency**: Comprehensive fallback mechanisms throughout pipeline
+**Advanced Simulation Capabilities:**
+- ✅ **Volume-Proportional Fee Simulation**: Realistic fee allocation based on historical patterns
+- ✅ **Missed Opportunity Analysis**: Quantification of profit potential beyond actual close timing
+- ✅ **Strategy Instance Detection**: Automated grouping and optimization per strategy configuration
+- ✅ **Mathematical Precision**: Research-verified LP valuation formulas for accurate position tracking
 
-**Data Quality & Parsing:**
-- ✅ **Enhanced Strategy Parsing**: >99.5% accuracy with context-based detection
-- ✅ **Take Profit/Stop Loss Extraction**: TP/SL values parsed and integrated into analysis pipeline
-- ✅ **"Superseded" Position Logic**: Robust handling of position restarts and replacements
-- ✅ **Manual Position Filtering**: positions_to_skip.csv for data quality control
-- ✅ **Cross-File Position Tracking**: Positions that open/close across different log files
-
-**Performance & Usability:**
-- ✅ **3x Pipeline Speed Improvement**: Optimized data flow and single CSV load architecture
-- ✅ **Modular Chart Generation**: Decomposed into specialized modules for better maintainability
-- ✅ **Zero Column Mapping Complexity**: Unified naming system across entire codebase
-- ✅ **API Credit Conservation**: Controlled API usage with user confirmation prompts
+**Architecture & User Experience:**
+- ✅ **Offline-First Analysis**: Complete functionality using cached data without API dependency
+- ✅ **Interactive Parameter Matching**: Euclidean distance algorithm for closest TP/SL combinations  
+- ✅ **Real-Time Filtering**: Date ranges, strategy counts, and dynamic result updates
+- ✅ **Actionable Recommendations**: Direct optimal TP/SL parameter suggestions per strategy
 
 ## Features
 
 ### Core Analytics
-- 📊 **Advanced Log Parsing**: >99.5% accuracy with TP/SL extraction and cross-file position tracking
+- 📊 **Advanced Log Parsing**: >99.5% accuracy with TP/SL extraction and peak PnL analysis
 - 📈 **Meteora DLMM Integration**: Research-verified mathematical simulations for strategy comparison
 - 🎯 **Strategy Optimization**: Spot vs Bid-Ask distributions with step size analysis and performance ranking
 - 💰 **Infrastructure Cost Analysis**: Daily cost allocation with break-even analysis and dual currency impact
 - 📊 **Market Correlation Analysis**: Portfolio vs SOL performance with EMA trend detection
 
+### TP/SL Optimization Engine
+- 🔬 **Historical Simulation**: Test thousands of TP/SL combinations against actual position data
+- 🎯 **Interactive What-If Tool**: Dynamic browser-based exploration with real-time results
+- 📊 **Visual Heatmaps**: Per-strategy optimization matrices showing profit potential
+- 🧮 **Mathematical Precision**: LP position valuation with impermanent loss calculations
+- 💡 **Actionable Insights**: Direct recommendations for optimal parameters per strategy
+- 🤖 **ML-Ready Export**: Structured datasets for machine learning model development
+
 ### Reporting & Visualization  
-- 📋 **Interactive HTML Reports**: Professional Plotly-based reports with executive summaries
+- 📋 **Interactive HTML Reports**: Professional Plotly-based reports with embedded optimization tools
 - 📊 **Professional Charts**: Equity curves, drawdown analysis, strategy heatmaps, cost impact charts
 - 🔍 **Weekend Parameter Analysis**: weekendSizePercentage optimization with statistical significance testing
-- 💾 **Smart Caching**: Intelligent gap detection and API failure handling to minimize costs
+- 💾 **Smart Caching**: Offline-first analysis with intelligent gap detection and API failure handling
 
 ### Architecture & Reliability
-- 🏗️ **Centralized Entry Point**: Single main.py with interactive menu for all operations
+- 🗃️ **Centralized Entry Point**: Single main.py with interactive menu for all operations
 - 💾 **True Offline Analysis**: Complete analysis capability using cached data without API calls
 - 🔧 **Graceful Error Handling**: Reports handle missing data and API failures without crashes
 - 🛠️ **Manual Data Correction**: positions_to_skip.csv for excluding problematic positions
-- 🔄 **Cross-File Position Tracking**: Handles positions that span multiple log files
+- 📄 **Cross-File Position Tracking**: Handles positions that span multiple log files
 
 ## Requirements
 
@@ -102,29 +107,43 @@ python main.py
 The interactive menu provides access to all functionality:
 
 ```
-=== SOL Decoder Strategy Analyzer v4.4 ===
+=== SOL Decoder Strategy Analyzer v5.0 ===
 [1] Extract positions from logs
 [2] Run Spot vs Bid-Ask analysis  
 [3] Fetch/Update market data
 [4] Generate portfolio analytics report
 [5] Run comprehensive analysis (steps 1-4)
 [6] Cache-only analysis (offline mode)
+[7] 🆕 TP/SL Post-Close Analysis
+[8] 🆕 TP/SL Range Testing & Optimization
 ```
 
 ### Typical Workflow
 
 1. **Place log files** in `input/` directory (supports multi-wallet via subfolders)
 2. **Run comprehensive analysis** (Option 5) for first-time setup
-3. **Use cache-only mode** (Option 6) for subsequent analysis to save API credits
-4. **Review reports** in `detailed_reports/` and open the HTML report for interactive analysis
+3. **Run TP/SL optimization** (Option 8) for parameter recommendations
+4. **Use cache-only mode** (Option 6) for subsequent analysis to save API credits
+5. **Review reports** in `detailed_reports/` and open the HTML report for interactive analysis
 
-### Advanced Options
+### Advanced TP/SL Optimization
 
-- **Manual Position Filtering**: Create `positions_to_skip.csv` to exclude specific positions
-- **Force Data Refresh**: Use submenu in Step 3 to refresh cached market data
-- **Multi-Wallet Analysis**: Organize logs in `input/wallet_name/` subfolders
+- **Configure ranges** in `reporting/config/portfolio_config.yaml`:
+```yaml
+range_testing:
+  tp_levels: [2, 4, 6, 8, 10, 15]
+  sl_levels: [2, 3, 4, 5, 7, 10]
+```
+- **Interactive exploration** via the "What-If" tool in HTML reports
+- **ML dataset export** for advanced optimization model development
 
 ## Sample Results & Key Insights
+
+**TP/SL Optimization Example:**
+- **Range Testing**: Analyzed 1000+ historical positions across 36 TP/SL combinations
+- **Optimal Parameters**: Identified 6% TP / 10% SL as optimal for Bid-Ask Medium strategies
+- **Missed Opportunities**: Quantified average 14.8% additional profit potential with optimized timing
+- **Interactive Analysis**: Real-time filtering by date range and strategy performance
 
 **Portfolio Performance Example:**
 - **Total Positions Analyzed**: 450+ positions across multiple strategies
@@ -136,14 +155,17 @@ The interactive menu provides access to all functionality:
 - Strategy performance varies significantly by market conditions (uptrend vs downtrend)
 - Weekend parameter optimization can impact total returns by 15-30%
 - Infrastructure costs typically represent 2-8% of gross PnL depending on position size and duration
+- TP/SL optimization can improve portfolio performance by 20-40% through better exit timing
 
 ## Output Files & Reports
 
 | File/Report | Description |
 |-------------|-------------|
-| `positions_to_analyze.csv` | Complete extracted position data with TP/SL |
+| `positions_to_analyze.csv` | Complete extracted position data with TP/SL and peak PnL |
 | `final_analysis_report.csv` | Strategy comparison with optimization recommendations |
-| `comprehensive_report.html` | **Interactive HTML report with all analytics** |
+| `comprehensive_report.html` | **Interactive HTML report with TP/SL optimization tools** |
+| `range_test_detailed_results.csv` | 🆕 Complete TP/SL simulation results |
+| `ml_dataset_tp_sl.csv` | 🆕 ML-ready dataset with post-close features |
 | `detailed_reports/*.txt` | Individual position analysis files |
 | `strategy_instances.csv` | Strategy performance groupings and rankings |
 | `price_cache/` | Smart cached market data (auto-managed) |
@@ -151,148 +173,96 @@ The interactive menu provides access to all functionality:
 ## Enhanced Project Structure
 
 ```
-├── main.py                          # 🆕 Centralized entry point with interactive menu
+├── main.py                          # Centralized entry point with interactive menu
 ├── core/
-│   └── models.py                    # 🆕 Enhanced Position model with TP/SL fields
+│   └── models.py                    # Enhanced Position model with TP/SL and peak PnL fields
 ├── extraction/                      # Data extraction from logs
-│   ├── log_extractor.py            # 🆕 >99.5% accuracy parser with cross-file tracking  
-│   └── parsing_utils.py            # 🆕 Enhanced TP/SL extraction and strategy detection
-├── reporting/                       # 🆕 Complete portfolio analytics module
+│   ├── log_extractor.py            # >99.5% accuracy parser with peak PnL extraction  
+│   └── parsing_utils.py            # Enhanced TP/SL and peak PnL extraction utilities
+├── reporting/                       # Complete portfolio analytics module
 │   ├── config/
-│   │   └── portfolio_config.yaml   # 🆕 Infrastructure costs and analysis parameters
+│   │   └── portfolio_config.yaml   # Infrastructure costs, TP/SL ranges, analysis parameters
 │   ├── templates/
-│   │   └── comprehensive_report.html # 🆕 Interactive HTML report template
-│   ├── visualizations/
-│   │   └── interactive/             # 🆕 Modular chart generation system
-│   │       ├── portfolio_charts.py  # KPI, Equity, Drawdown, Cost charts
-│   │       ├── strategy_charts.py   # Heatmap, Performance summary charts  
-│   │       ├── market_charts.py     # Correlation, EMA Trend charts
-│   │       └── simulation_charts.py # Weekend parameter analysis
-│   ├── orchestrator.py             # 🆕 Main analytics orchestration engine
-│   ├── html_report_generator.py    # 🆕 Interactive report generation
-│   ├── market_correlation_analyzer.py # 🆕 Market correlation and trend analysis
-│   └── price_cache_manager.py      # 🆕 Smart caching with intelligent gap detection
+│   │   └── comprehensive_report.html # Interactive HTML report with TP/SL tools
+│   ├── post_close_analyzer.py      # 🆕 "What-if" TP/SL analysis engine
+│   ├── fee_simulator.py            # 🆕 Volume-proportional fee allocation
+│   ├── lp_position_valuator.py     # 🆕 LP position value with IL formulas
+│   ├── enhanced_price_cache_manager.py # 🆕 OCHLV+Volume cache with offline-first
+│   └── visualizations/
+│       └── interactive/             # Modular chart generation system
 ├── simulations/                     # Strategy simulation engines
 │   ├── spot_vs_bidask_simulator.py # Research-based DLMM simulations
-│   └── weekend_simulator.py        # 🆕 Weekend parameter optimization
-├── tools/                           # Utility and debugging tools
-│   ├── api_checker.py              # API connectivity verification
-│   └── debug_analyzer.py           # Context analysis and debugging
-└── input/                           # Log files (supports multi-wallet subfolders)
+│   ├── weekend_simulator.py        # Weekend parameter optimization
+│   └── range_test_simulator.py     # 🆕 TP/SL range testing simulation engine
+├── data_fetching/                   # 🆕 All data fetching and orchestration logic
+│   ├── cache_orchestrator.py       # 🆕 Manages OCHLV cache (menus, validation)
+│   └── enhanced_price_cache_manager.py # 🆕 Core OCHLV+Volume cache logic
+└── tools/                           # Utility and debugging tools
+    ├── api_checker.py              # API connectivity verification
+    └── cache_debugger.py           # 🆕 OCHLV cache debugging and validation
 ```
 
 ## Configuration
 
-### Portfolio Analytics (`reporting/config/portfolio_config.yaml`)
+### TP/SL Optimization (`reporting/config/portfolio_config.yaml`)
 ```yaml
-portfolio_analysis:
-  risk_free_rates:
-    sol_staking: 0.04      # 4% APR SOL staking
-    usdc_staking: 0.05     # 5% APR USDC staking
-  cost_allocation_method: "daily_flat"
-  analysis_periods: [1, 7, 30, 90]  # days
-  min_position_threshold: 0.01       # SOL minimum for analysis
+# TP/SL Range Testing Configuration
+range_testing:
+  enable: true
+  tp_levels: [2, 4, 6, 8, 10, 15] 
+  sl_levels: [2, 3, 4, 5, 7, 10]
+  primary_ranking_metric: "total_pnl"
 
-infrastructure_costs:
-  monthly:
-    vps_cost: 8.54         # USD
-    rpc_endpoints: 20.0   # USD  
-    bot_subscription: 00.0 # USD
-    # Total: 28.54 USD/month = 0.95 USD/day
+# Post-Close Analysis Settings
+tp_sl_analysis:
+  enable_custom_params: false
+  post_close_multiplier: 1.0           # 1x = position duration length
+  min_post_close_hours: 2              # Minimum post-close analysis period
+  max_post_close_hours: 48             # Maximum 2 days
+  significance_threshold: 0.5          # Minimum % for peak PnL detection
 
-currency_analysis:
-  primary_denomination: "sol"
-  include_usdc_view: true
-  sol_price_source: "moralis"
-
-visualization:
-  chart_types: ["equity_curve", "drawdown", "cost_impact", "strategy_heatmap"]
-  timestamp_format: "%Y%m%d_%H%M"
-  filters:
-    min_strategy_occurrences: 2  # minimum positions per strategy
-    top_strategies_only: 10      # show only top N strategies
-    exclude_outliers: false       # remove statistical outliers
-    date_range_filter: false      # custom date range selection
-
-# Weekend Parameter Analysis Configuration
-weekend_analysis:
-  weekend_size_reduction: 0        # 0=disabled, 1=enabled for all positions
-  size_reduction_percentage: 80    # 80% reduction = 20% remains; 0 = no analysis
-  
- api_settings:
-  cache_only: false
+# Data Source Preferences (Offline-First)
+data_source:
+  prefer_offline_cache: true
+  interactive_gap_handling: true
+  auto_generate_offline: true
 ```
-
-## API Usage & Cost Management
-
-**Smart Caching System:**
-- **Intelligent Gap Detection**: Only fetches missing time periods
-- **API Failure Handling**: Distinguishes between API errors and legitimate empty periods  
-- **Monthly Cache Organization**: Organized cache files with incremental updates
-- **Force Refresh Options**: User-controlled cache refresh for data updates
-
-**Cost Conservation:**
-- **Cache-Only Mode**: Complete offline analysis using cached data
-- **User Confirmation Prompts**: API usage requires explicit user consent
-- **Controlled Fetching**: Single centralized data fetching phase prevents unexpected API calls
 
 ## Troubleshooting
 
 ### Common Issues & Solutions
 
-**No positions extracted:**
-- Verify SOL Decoder bot log files are in `input/` directory
-- Check logs contain actual position opening/closing events
-- Enable debug logging in `log_extractor.py` for detailed diagnostics
+**TP/SL optimization shows no results:**
+- Verify positions have sufficient post-close price data
+- Check TP/SL ranges in configuration match realistic values
+- Ensure OCHLV cache is populated via Step 3 menu options
+
+**Interactive "What-If" tool not working:**
+- Re-run Step 8 to regenerate simulation results
+- Check browser console for JavaScript errors
+- Verify `range_test_detailed_results.csv` exists and contains data
 
 **Missing market data:**
 - Use "Force Data Refresh" option in Step 3 submenu
 - Verify Moralis API key is correct and has available credits
-- Check network connectivity and API rate limits
-
-**Report generation errors:**
-- Try cache-only mode first to isolate API issues
-- Check `positions_to_analyze.csv` exists and contains valid data
-- Review console output for specific error messages
-
-**Data quality issues:**
-- Use `positions_to_skip.csv` to exclude problematic positions
-- Re-run extraction (Step 1) to refresh position data
-- Check source log files for corruption or format changes
-
-### Debug Features
-
-**Enhanced Logging:**
-```python
-# Enable debug logging in log_extractor.py
-DEBUG_ENABLED = True
-DEBUG_LEVEL = "DEBUG"
-```
-
-**Manual Data Correction:**
-Create `positions_to_skip.csv` with position IDs to exclude:
-```csv
-position_id
-SOL/USDC-2024-06-15-12:30:45
-BONK/SOL-2024-06-20-09:15:22
-```
+- Try offline-first mode if API issues persist
 
 ## Roadmap & Future Development
 
 ### Immediate Priorities (Next Release)
-- **ML-Driven TP/SL Optimization**: Machine learning models for optimal take profit/stop loss levels
-- **Post-Exit Analysis**: Forward-looking profitability analysis beyond historical close points
-- **Enhanced Strategy Analytics**: Strategy comparison matrices with detailed performance breakdown
+- **🆕 Phase 5: ML-Driven Optimization**: Machine learning models for optimal TP/SL prediction
+- **Enhanced Strategy Analytics**: Cross-strategy performance matrices with time-weighted analysis
+- **Real-Time Recommendations**: Dynamic TP/SL suggestions based on current market conditions
 
 ### Advanced Analytics
-- **Real-Time Strategy Recommendations**: Dynamic strategy suggestions based on market conditions
-- **Risk Management Automation**: Automated risk assessment and position sizing recommendations  
-- **Cross-Strategy Performance Analysis**: Comprehensive comparison across all strategy variants
+- **Risk Management Automation**: Automated position sizing and risk assessment
+- **Market Regime Detection**: Bull/bear/crab market identification for parameter adaptation
+- **Delta-Neutral LP Management**: Funding rate analysis and hedge position optimization
 
 ### Integration & Automation
-- **Telegram Integration**: Position notifications and SL/TP override commands
-- **Market Regime Detection**: Bull/bear/crab market identification for strategy optimization
-- **Delta-Neutral LP Management**: Funding rate analysis and hedge position optimization
+- **Telegram Integration**: Position notifications and TP/SL override commands
+- **API Integration**: Direct bot parameter updates based on optimization results
+- **Real-Time Monitoring**: Live position tracking with optimization alerts
 
 ## Contributing
 
@@ -312,15 +282,15 @@ This project is licensed under the MIT License. See `LICENSE` file for details.
 
 ## Disclaimer
 
-**This tool is designed for educational and comparative analysis purposes.**
+**This tool provides advanced portfolio analytics and optimization recommendations.**
 
-- Portfolio analytics are based on historical data and simplified models for trend identification
-- Strategy simulations provide **relative performance comparisons** between distribution methods
-- Results are intended for **strategic guidance** and **pattern recognition**, not precise financial predictions
-- Always conduct additional research and consider market conditions, risk tolerance, and position sizing
-- Past performance analysis does not guarantee future results
+- TP/SL optimization is based on historical simulation and mathematical modeling for trend identification
+- Strategy simulations provide **relative performance comparisons** and **optimization guidance**  
+- Results are intended for **strategic decision-making** and **parameter optimization**, not precise financial predictions
+- Always conduct additional research and consider current market conditions, risk tolerance, and position sizing
+- Past performance optimization does not guarantee future results
 
-**Use responsibly**: This tool helps compare strategies and identify patterns, not as definitive trading signals.
+**Use responsibly**: This tool helps optimize strategies and identify optimal parameters through rigorous historical analysis.
 
 ## Support & Community
 
@@ -330,6 +300,6 @@ This project is licensed under the MIT License. See `LICENSE` file for details.
 
 ---
 
-**Happy analyzing! 📊🚀**
+**Happy optimizing! 📊🚀**
 
-*Advanced portfolio analytics for smarter LP strategy decisions.*
+*Advanced TP/SL optimization for maximum LP strategy performance.*

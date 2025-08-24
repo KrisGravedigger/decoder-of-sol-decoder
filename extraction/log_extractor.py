@@ -7,7 +7,14 @@ import sys
 from pathlib import Path
 import yaml
 
-
+from extraction.parsing_utils import (
+    _parse_custom_timestamp,
+    clean_ansi, find_context_value, normalize_token_pair,
+    extract_close_timestamp, parse_position_from_open_line,
+    parse_final_pnl_with_line_info,
+    extract_peak_pnl_from_logs, extract_total_fees_from_logs,
+    extract_dlmm_range, extract_oor_parameters
+)
 
 # Failed position detection patterns
 FAILED_POSITION_PATTERNS = [
@@ -57,7 +64,8 @@ from extraction.parsing_utils import (
     clean_ansi, find_context_value, normalize_token_pair,
     extract_close_timestamp, parse_position_from_open_line,
     parse_final_pnl_with_line_info,
-    extract_peak_pnl_from_logs, extract_total_fees_from_logs
+    extract_peak_pnl_from_logs, extract_total_fees_from_logs,
+    extract_dlmm_range
 )
 from tools.debug_analyzer import DebugAnalyzer
 
@@ -345,6 +353,11 @@ class LogParser:
         pos.stop_loss = details.get('stop_loss', 0.0)
         pos.initial_investment = details.get('initial_investment')
         
+        # AIDEV-NOTE-CLAUDE: Extract DLMM price range for OOR simulation
+        min_price, max_price = extract_dlmm_range(self.all_lines, index)
+        pos.min_bin_price = min_price
+        pos.max_bin_price = max_price
+        
         self.active_positions[token_pair] = pos
         
         self.strategy_diagnostic.detect_missing_step_size(
@@ -600,6 +613,15 @@ class LogParser:
                  logger.info(f"Found and processed {len(self.finalized_positions)} target positions.")
             return [] # Prevents writing to CSV in debug mode
 
+        # AIDEV-NOTE-CLAUDE: Post-process to add dynamic OOR parameters before validation.
+        for pos in self.finalized_positions:
+            # We only search for OOR params if the position was actually closed in the logs.
+            if pos.close_line_index:
+                # This check ensures we don't search for positions active at the end of logs.
+                oor_params = extract_oor_parameters(self.all_lines, pos.open_line_index, pos.close_line_index)
+                pos.oor_timeout_minutes = oor_params.get('timeout_minutes')
+                pos.oor_threshold_pct = oor_params.get('threshold_pct')
+
         validated_positions = []
         skipped_low_pnl = 0
         skipped_time_machine = 0
@@ -753,25 +775,22 @@ def run_extraction(log_dir: str = LOG_DIR, output_csv: str = OUTPUT_CSV) -> bool
         strategy_stats = parser.strategy_diagnostic.export_diagnostic(STRATEGY_DIAGNOSTIC_FILE)
         if strategy_stats:
              logger.warning(f"Strategy diagnostic found issues: {dict(strategy_stats)}")
-    # Apply manual position skipping
-    if ids_to_skip:
-        original_count = len(extracted_data)
-        extracted_data = [pos for pos in extracted_data if pos.get('position_id') not in ids_to_skip]
-        skipped_count = original_count - len(extracted_data)
-        if skipped_count > 0:
-            logger.warning(f"Manually skipped {skipped_count} positions based on {skip_file}.")
-    
-    # Apply manual position skipping
-    if ids_to_skip:
-        original_count = len(extracted_data)
-        extracted_data = [pos for pos in extracted_data if pos.get('position_id') not in ids_to_skip]
-        skipped_count = original_count - len(extracted_data)
-        if skipped_count > 0:
-            logger.warning(f"Manually skipped {skipped_count} positions based on {skip_file}.")
 
-    if not extracted_data:
-        logger.error("Failed to extract any complete positions. CSV file will not be created.")
-        return False
+    # Apply manual position skipping
+    if ids_to_skip:
+        original_count = len(extracted_data)
+        def should_skip_position(pos):
+            position_id = pos.get('position_id', '')
+            # Check if any timestamp prefix in skip list matches this position
+            for skip_prefix in ids_to_skip:
+                if position_id.startswith(skip_prefix):
+                    return True
+            return False
+        
+        extracted_data = [pos for pos in extracted_data if not should_skip_position(pos)]
+        skipped_count = original_count - len(extracted_data)
+        if skipped_count > 0:
+            logger.warning(f"Manually skipped {skipped_count} positions based on timestamp prefixes from {skip_file}.")
         
     try:
         existing_data = []

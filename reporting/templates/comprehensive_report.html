@@ -19,8 +19,8 @@
         .metric-card h3 { margin-top: 0; }
         .metric-card .value { font-size: 2em; font-weight: bold; color: #34495e; }
         .metric-card .label { font-size: 1em; color: #7f8c8d; }
-        .positive { color: #27ae60; }
-        .negative { color: #c0392b; }
+        .positive { color: #27ae60 !important; }
+        .negative { color: #c0392b !important; }
         .plotly-chart { width: 100%; min-height: 450px; }
         .section { margin-bottom: 40px; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
@@ -32,6 +32,8 @@
         .rec-disable { background-color: #e67e22; } /* Orange */
         .rec-keep { background-color: #3498db; } /* Blue */
         .skipped { background-color: #bdc3c7; color: #7f8c8d; padding: 15px; border-radius: 5px; text-align: center; }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -98,9 +100,6 @@
             <h3>Drawdown Analysis</h3>
             <div id="professional_drawdown" class="plotly-chart">{{ charts.professional_drawdown | safe }}</div>
             
-            <h3>Strategy Performance Heatmap</h3>
-            <div id="professional_strategy_heatmap" class="plotly-chart">{{ charts.professional_strategy_heatmap | safe }}</div>
-            
             <h3>Infrastructure Cost Impact</h3>
             <div id="professional_cost_impact" class="plotly-chart">{{ charts.professional_cost_impact | safe }}</div>
         </div>
@@ -122,12 +121,9 @@
             {% if correlation_analysis and not correlation_analysis.get('error') and charts.get('correlation_analysis') %}
                 <div id="correlation_analysis" class="plotly-chart">{{ charts.correlation_analysis | safe }}</div>
                 <div id="trend_performance" class="plotly-chart">{{ charts.trend_performance | safe }}</div>
-                
-                <!-- NEW CHART ADDED HERE -->
                 {% if charts.ema_trend_chart %}
                 <div id="ema_trend_chart" class="plotly-chart">{{ charts.ema_trend_chart | safe }}</div>
                 {% endif %}
-                
             {% else %}
                 <div class="skipped">Market Correlation analysis was not performed or failed. Reason: {{ (correlation_analysis.get('error') or correlation_analysis.get('correlation_metrics', {}).get('error')) | default('Cache data unavailable') }}</div>
             {% endif %}
@@ -137,20 +133,13 @@
         <div class="section">
             <h2>Weekend Parameter Simulation</h2>
             {% if weekend_analysis.is_valid %}
-                <div class="recommendation
-                    {% if 'ENABLE' in weekend_analysis.recommendations.primary_recommendation %}rec-enable
-                    {% elif 'DISABLE' in weekend_analysis.recommendations.primary_recommendation %}rec-disable
-                    {% else %}rec-keep
-                    {% endif %}">
+                <div class="recommendation {% if 'ENABLE' in weekend_analysis.recommendations.primary_recommendation %}rec-enable{% elif 'DISABLE' in weekend_analysis.recommendations.primary_recommendation %}rec-disable{% else %}rec-keep{% endif %}">
                     <h3>Recommendation: {{ weekend_analysis.recommendations.primary_recommendation | replace('_', ' ') }}</h3>
                     <p>{{ weekend_analysis.recommendations.explanation }}</p>
                 </div>
                 <div id="weekend_comparison" class="plotly-chart">{{ charts.weekend_comparison | safe }}</div>
             {% else %}
-                <div class="skipped">
-                    Weekend Parameter analysis was skipped.
-                    Reason: {{ weekend_analysis.raw.reason | default(weekend_analysis.reason, 'Unknown') }}
-                </div>
+                <div class="skipped">Weekend Parameter analysis was skipped. Reason: {{ weekend_analysis.raw.reason | default(weekend_analysis.reason, 'Unknown') }}</div>
             {% endif %}
         </div>
         
@@ -163,25 +152,22 @@
             {% else %}
                 <div class="skipped">Strategy performance summary could not be generated. Check if 'strategy_instances.csv' exists and has sufficient data.</div>
             {% endif %}
-                        
         </div>
     
         <!-- TP/SL Range Testing Results -->
         {% if charts.get('range_test_heatmaps') %}
         <div class="section">
-            <h2>TP/SL Range Testing Analysis (Phase 4A)</h2>
-            <p>This section shows the results of testing different Take Profit and Stop Loss combinations for each strategy instance. The heatmaps visualize performance across the parameter grid, with the star (★) marking the optimal combination.</p>
+            <h2>TP/SL Range Testing Analysis (Phase 4A & 4B)</h2>
+            <p>This section analyzes the results of testing different Take Profit and Stop Loss combinations. It combines static reports (Phase 4A) with an interactive "what-if" tool (Phase 4B) to find optimal settings.</p>
             
-            <!-- Optimal Settings Summary -->
-            <h3>Optimal TP/SL Settings by Strategy</h3>
+            <h3>Optimal TP/SL Settings by Strategy (Static Analysis)</h3>
+            <p>This table summarizes the best-performing TP/SL combination found for each strategy during the full range simulation, based on the `{{ config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl') }}` metric.</p>
             <div id="optimal_settings_table">{{ charts.range_test_optimal_table | safe }}</div>
             
-            <!-- Strategy Comparison -->
-            <h3>Strategy Performance Comparison (Optimal Settings)</h3>
-            <div id="strategy_comparison" class="plotly-chart">{{ charts.range_test_comparison | safe }}</div>
+            <div id="strategy_comparison" class="plotly-chart" style="margin-bottom: 0px;">{{ charts.range_test_comparison | safe }}</div>
             
-            <!-- Individual Strategy Heatmaps -->
-            <h3>Detailed TP/SL Optimization Heatmaps</h3>
+            <h3 style="margin-top: 0px;">Detailed TP/SL Optimization Heatmaps</h3>
+            <p>Each heatmap visualizes the performance of a strategy across the entire grid of tested TP/SL values. The star (★) marks the most optimal combination found.</p>
             {% for heatmap in charts.range_test_heatmaps %}
                 <div class="plotly-chart" style="margin-bottom: 30px;">
                     <h4>{{ heatmap.strategy_id }}</h4>
@@ -192,204 +178,236 @@
             <!-- Phase 4B: Interactive What-If Tool -->
             <div class="recommendation" style="background-color: #f9f9f9; color: #333; margin-top: 30px; border: 2px solid #3498db;">
                 <h4>Interactive TP/SL Explorer (Phase 4B)</h4>
+                <p>Use this tool to simulate the performance of your strategies with custom TP/SL values. The system will find the closest pre-calculated result from the simulation grid and show the aggregated historical impact. You can also filter by date and minimum position count to analyze specific market conditions.</p>
                 
                 <!-- Filter Controls -->
-                <div style="margin-bottom: 20px;">
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
-                        <div>
-                            <label for="tp-input" style="display: block; margin-bottom: 5px;">Take Profit (%):</label>
-                            <input type="number" id="tp-input" min="0.5" max="50" step="0.5" value="6" style="width: 100%; padding: 5px;">
-                        </div>
-                        <div>
-                            <label for="sl-input" style="display: block; margin-bottom: 5px;">Stop Loss (%):</label>
-                            <input type="number" id="sl-input" min="0.5" max="50" step="0.5" value="10" style="width: 100%; padding: 5px;">
-                        </div>
-                        <div>
-                            <label for="date-from" style="display: block; margin-bottom: 5px;">Date From:</label>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="date" id="date-from" style="flex: 1; padding: 5px;">
-                                <button onclick="document.getElementById('date-from').value=''; updateWhatIfAnalysis();" style="padding: 5px 10px;">Clear</button>
-                            </div>
-                        </div>
-                        <div>
-                            <label for="date-to" style="display: block; margin-bottom: 5px;">Date To:</label>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="date" id="date-to" style="flex: 1; padding: 5px;">
-                                <button onclick="document.getElementById('date-to').value=''; updateWhatIfAnalysis();" style="padding: 5px 10px;">Clear</button>
-                            </div>
-                        </div>
-                        <div>
-                            <label for="min-positions" style="display: block; margin-bottom: 5px;">Min. Positions per Strategy:</label>
-                            <input type="number" id="min-positions" min="1" max="100" step="1" value="5" style="width: 100%; padding: 5px;">
-                        </div>
+                <div style="margin-bottom: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div>
+                        <label for="tp-input" style="display: block; margin-bottom: 5px;">Take Profit (%):</label>
+                        <input type="number" id="tp-input" step="0.1" value="6" style="width: 100%; padding: 5px;">
+                    </div>
+                    <div>
+                        <label for="sl-input" style="display: block; margin-bottom: 5px;">Stop Loss (%):</label>
+                        <input type="number" id="sl-input" step="0.1" value="10" style="width: 100%; padding: 5px;">
+                    </div>
+                    <div>
+                        <label for="date-from" style="display: block; margin-bottom: 5px;">Date From:</label>
+                        <div style="display: flex; gap: 5px;"><input type="date" id="date-from" style="flex: 1; padding: 5px;"><button onclick="document.getElementById('date-from').value=''; updateWhatIfAnalysis();" style="padding: 5px 10px;">Clear</button></div>
+                    </div>
+                    <div>
+                        <label for="date-to" style="display: block; margin-bottom: 5px;">Date To:</label>
+                        <div style="display: flex; gap: 5px;"><input type="date" id="date-to" style="flex: 1; padding: 5px;"><button onclick="document.getElementById('date-to').value=''; updateWhatIfAnalysis();" style="padding: 5px 10px;">Clear</button></div>
+                    </div>
+                    <div>
+                        <label for="min-positions" style="display: block; margin-bottom: 5px;">Min. Positions/Strategy:</label>
+                        <input type="number" id="min-positions" min="1" step="1" value="5" style="width: 100%; padding: 5px;">
                     </div>
                 </div>
                 
-                <!-- Results Table -->
-                <div style="overflow-x: auto;">
-                    <table id="whatif-results-table" style="width: 100%; margin-top: 20px;">
-                        <thead>
-                            <tr>
-                                <th>Strategy Instance</th>
-                                <th>Positions Count</th>
-                                <th>Simulated PnL (SOL)</th>
-                                <th>Avg PnL per Position</th>
-                                <th>Exit Breakdown</th>
-                            </tr>
-                        </thead>
-                        <tbody id="whatif-results-body">
-                            <!-- Results will be populated by JavaScript -->
-                        </tbody>
-                    </table>
-                </div>
-                
-                <p style="margin-top: 20px; font-size: 0.9em; color: #666;">
-                    <strong>Note:</strong> This tool simulates "what-if" scenarios based on historical data. 
-                    Results show the closest available TP/SL combination from the simulation grid.
-                </p>
+                <div style="overflow-x: auto;"><table id="whatif-results-table"><thead><tr><th>Strategy Instance</th><th>Positions</th><th>Simulated PnL (SOL)</th><th>Avg PnL/Position</th><th>Exit Breakdown</th></tr></thead><tbody id="whatif-results-body"></tbody></table></div>
             </div>
             
-            <!-- JavaScript for Interactive Tool -->
             <script>
-                // Embed enriched simulation data
                 const detailedSimulationData = {{ enriched_simulation_json | safe }};
+                const optimalSettingsMap = JSON.parse('{{ optimal_settings_json | safe }}'); // DODAJ TĘ LINIĘ
+                const testedTpLevels = JSON.parse('{{ tested_tp_levels_json | safe }}');
+                const testedSlLevels = JSON.parse('{{ tested_sl_levels_json | safe }}');
                 
-                // Main update function
+                function getClosestTestedValue(inputValue, testedLevels) {
+                    if (!testedLevels || testedLevels.length === 0) return inputValue;
+                    let closestValue = null, minDistance = Infinity;
+                    inputValue = parseFloat(inputValue);
+                    testedLevels.forEach(level => {
+                        const distance = Math.abs(level - inputValue);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestValue = level;
+                        } else if (distance === minDistance) {
+                            if (closestValue === null || level < closestValue) closestValue = level;
+                        }
+                    });
+                    return closestValue;
+                }
+
                 function updateWhatIfAnalysis() {
-                    // Get filter values
-                    const tpValue = parseFloat(document.getElementById('tp-input').value) || 6;
-                    const slValue = parseFloat(document.getElementById('sl-input').value) || 10;
-                    const dateFrom = document.getElementById('date-from').value;
-                    const dateTo = document.getElementById('date-to').value;
+                    const rawTpValue = parseFloat(document.getElementById('tp-input').value) || 6;
+                    const rawSlValue = parseFloat(document.getElementById('sl-input').value) || 10;
+                    const tpValue = getClosestTestedValue(rawTpValue, testedTpLevels);
+                    const slValue = getClosestTestedValue(rawSlValue, testedSlLevels);
+                    if (document.getElementById('tp-input').value != tpValue) document.getElementById('tp-input').value = tpValue;
+                    if (document.getElementById('sl-input').value != slValue) document.getElementById('sl-input').value = slValue;
+
+                    const dateFrom = document.getElementById('date-from').value ? new Date(document.getElementById('date-from').value) : null;
+                    const dateTo = document.getElementById('date-to').value ? new Date(document.getElementById('date-to').value) : null;
                     const minPositions = parseInt(document.getElementById('min-positions').value) || 5;
+
+                    let filteredData = detailedSimulationData.filter(row => {
+                        if (!row.open_timestamp || (row.analyzed_position_count || 0) < minPositions) return false;
+                        const rowDate = new Date(row.open_timestamp);
+                        if (dateFrom && rowDate < dateFrom) return false;
+                        if (dateTo && rowDate > dateTo) return false;
+                        return true;
+                    });
                     
-                    // Apply filters in cascade
-                    let filteredData = [...detailedSimulationData];
-                    
-                    // Date filter
-                    if (dateFrom || dateTo) {
-                        filteredData = filteredData.filter(row => {
-                            if (!row.open_timestamp) return false;
-                            const rowDate = new Date(row.open_timestamp);
-                            if (dateFrom && rowDate < new Date(dateFrom)) return false;
-                            if (dateTo && rowDate > new Date(dateTo)) return false;
-                            return true;
-                        });
-                    }
-                    
-                    // Strategy count filter
-                    filteredData = filteredData.filter(row => 
-                        (row.analyzed_position_count || 0) >= minPositions
-                    );
-                    
-                    // Group by strategy and find closest TP/SL
                     const strategyGroups = {};
                     filteredData.forEach(row => {
-                        const strategyId = row.strategy_instance_id;
-                        if (!strategyGroups[strategyId]) {
-                            strategyGroups[strategyId] = [];
-                        }
-                        strategyGroups[strategyId].push(row);
+                        if (!strategyGroups[row.strategy_instance_id]) strategyGroups[row.strategy_instance_id] = [];
+                        strategyGroups[row.strategy_instance_id].push(row);
                     });
-                    
-                    // For each strategy, find the closest TP/SL combination
+
                     const results = [];
                     Object.entries(strategyGroups).forEach(([strategyId, rows]) => {
-                        // Find closest TP/SL combination
-                        let closestRow = null;
-                        let minDistance = Infinity;
-                        
-                        rows.forEach(row => {
-                            const distance = Math.sqrt(
-                                Math.pow(row.tp_level - tpValue, 2) + 
-                                Math.pow(row.sl_level - slValue, 2)
-                            );
-                            if (distance < minDistance) {
-                                minDistance = distance;
-                                closestRow = row;
-                            }
+                        let closestRow = null, minDistance = Infinity;
+                        const uniqueCombos = [...new Map(rows.map(item => [`${item.tp_level}-${item.sl_level}`, item])).values()];
+                        uniqueCombos.forEach(row => {
+                            const distance = Math.sqrt(Math.pow(row.tp_level - tpValue, 2) + Math.pow(row.sl_level - slValue, 2));
+                            if (distance < minDistance) { minDistance = distance; closestRow = row; }
                         });
-                        
-                        if (closestRow) {
-                            // Calculate aggregated metrics for this TP/SL combination
-                            const matchingRows = rows.filter(r => 
-                                r.tp_level === closestRow.tp_level && 
-                                r.sl_level === closestRow.sl_level
-                            );
-                            
-                            const totalPnL = matchingRows.reduce((sum, r) => sum + (r.simulated_pnl || 0), 0);
-                            const avgPnL = totalPnL / matchingRows.length;
-                            
-                            // Count exit reasons
-                            const exitCounts = { TP: 0, SL: 0, END: 0, NO_DATA: 0 };
-                            matchingRows.forEach(r => {
-                                if (r.exit_reason && exitCounts.hasOwnProperty(r.exit_reason)) {
-                                    exitCounts[r.exit_reason]++;
-                                }
-                            });
-                            
-                            results.push({
-                                strategyId: strategyId,
-                                positionCount: matchingRows[0].analyzed_position_count || matchingRows.length,
-                                totalPnL: totalPnL,
-                                avgPnL: avgPnL,
-                                exitCounts: exitCounts,
-                                actualTP: closestRow.tp_level,
-                                actualSL: closestRow.sl_level
-                            });
-                        }
+                        if (!closestRow) return;
+
+                        const matchingRows = rows.filter(r => r.tp_level === closestRow.tp_level && r.sl_level === closestRow.sl_level);
+                        const totalPnL = matchingRows.reduce((sum, r) => sum + (r.simulated_pnl || 0), 0);
+                        const positionCount = matchingRows.length;
+                        const avgPnL = positionCount > 0 ? totalPnL / positionCount : 0;
+                        const exitCounts = matchingRows.reduce((acc, r) => { acc[r.exit_reason || 'N/A'] = (acc[r.exit_reason || 'N/A'] || 0) + 1; return acc; }, {});
+
+                        results.push({ strategyId, positionCount, totalPnL, avgPnL, exitCounts, actualTP: closestRow.tp_level, actualSL: closestRow.sl_level });
                     });
-                    
-                    // Sort by total PnL descending
+
                     results.sort((a, b) => b.totalPnL - a.totalPnL);
-                    
-                    // Update table
                     const tbody = document.getElementById('whatif-results-body');
                     tbody.innerHTML = '';
-                    
                     if (results.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No strategies match the current filters</td></tr>';
                         return;
                     }
-                    
-                    results.forEach(result => {
-                        const row = tbody.insertRow();
-                        
-                        // Strategy Instance
-                        row.insertCell().innerHTML = `${result.strategyId}<br><small>(TP: ${result.actualTP}%, SL: ${result.actualSL}%)</small>`;
-                        
-                        // Positions Count
-                        row.insertCell().textContent = result.positionCount;
-                        
-                        // Total PnL
-                        const pnlCell = row.insertCell();
-                        pnlCell.textContent = result.totalPnL.toFixed(3);
-                        pnlCell.className = result.totalPnL >= 0 ? 'positive' : 'negative';
-                        
-                        // Avg PnL
-                        const avgCell = row.insertCell();
-                        avgCell.textContent = result.avgPnL.toFixed(3);
-                        avgCell.className = result.avgPnL >= 0 ? 'positive' : 'negative';
-                        
-                        // Exit Breakdown
-                        const exitBreakdown = `TP: ${result.exitCounts.TP}, SL: ${result.exitCounts.SL}, END: ${result.exitCounts.END}`;
-                        row.insertCell().textContent = exitBreakdown;
+                    results.forEach(res => {
+                        const exitBreakdown = `TP: <span class="positive">${res.exitCounts['TP']||0}</span>, SL: <span class="negative">${res.exitCounts['SL']||0}</span>, OOR: ${res.exitCounts['OOR']||0}, END: ${res.exitCounts['END']||0}`;
+                        const optimal = optimalSettingsMap[res.strategyId] || { tp_level: 'N/A', sl_level: 'N/A' };
+                        const usingText = `Simulated: TP ${res.actualTP}% SL ${res.actualSL}%`;
+                        const optimalText = ` | Optimal: TP ${optimal.tp_level}% SL ${optimal.sl_level}%`;
+                        tbody.innerHTML += `<tr><td>${res.strategyId}<br><small>${usingText}${optimalText}</small></td><td>${res.positionCount}</td><td class="${res.totalPnL >= 0 ? 'positive' : 'negative'}">${res.totalPnL.toFixed(3)}</td><td class="${res.avgPnL >= 0 ? 'positive' : 'negative'}">${res.avgPnL.toFixed(3)}</td><td>${exitBreakdown}</td></tr>`;
                     });
                 }
                 
-                // Add event listeners
+                /**
+                 * NEW UNIFIED FUNCTION: Overrides default stepper behavior for number inputs.
+                 * Handles keyboard arrows, UI stepper clicks, and mouse wheel scrolling.
+                 */
+                function setupAdvancedInput(inputId, testedValues) {
+                    const element = document.getElementById(inputId);
+                    const sortedValues = [...testedValues].sort((a, b) => a - b);
+                    // Store the last valid value directly on the element object
+                    element.lastValidValue = getClosestTestedValue(parseFloat(element.value), sortedValues);
+
+                    const jumpToNext = (direction) => {
+                        const currentValue = parseFloat(element.lastValidValue);
+                        let currentIndex = sortedValues.indexOf(currentValue);
+                        
+                        if (currentIndex === -1) { // Fallback if current value isn't in the list
+                           currentIndex = sortedValues.indexOf(getClosestTestedValue(currentValue, sortedValues));
+                        }
+
+                        const newIndex = Math.max(0, Math.min(sortedValues.length - 1, currentIndex + direction));
+                        
+                        if (newIndex !== currentIndex || element.value != sortedValues[newIndex]) {
+                            element.value = sortedValues[newIndex];
+                            element.lastValidValue = sortedValues[newIndex];
+                            updateWhatIfAnalysis();
+                        }
+                    };
+
+                    // Handler for keyboard arrows
+                    element.addEventListener('keydown', function(event) {
+                        if (event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            jumpToNext(1);
+                        } else if (event.key === 'ArrowDown') {
+                            event.preventDefault();
+                            jumpToNext(-1);
+                        }
+                    });
+
+                    // Handler for UI steppers and text input
+                    element.addEventListener('input', function(event) {
+                        const currentValue = parseFloat(element.value);
+                        if (isNaN(currentValue)) return;
+
+                        // If the value is already a valid one, just update the state
+                        if (sortedValues.includes(currentValue)) {
+                            element.lastValidValue = currentValue;
+                            return;
+                        }
+
+                        // Detect direction from UI stepper click
+                        const direction = currentValue > element.lastValidValue ? 1 : -1;
+                        jumpToNext(direction);
+                    });
+
+                    // Final validation on blur (e.g., after typing/pasting)
+                    element.addEventListener('change', function(event) {
+                        const finalValue = getClosestTestedValue(parseFloat(element.value), sortedValues);
+                        element.value = finalValue;
+                        element.lastValidValue = finalValue;
+                        updateWhatIfAnalysis();
+                    });
+                }
+
                 document.addEventListener('DOMContentLoaded', function() {
+                    // Setup advanced inputs for TP and SL
+                    setupAdvancedInput('tp-input', testedTpLevels);
+                    setupAdvancedInput('sl-input', testedSlLevels);
+
                     // Initial load
                     updateWhatIfAnalysis();
-                    
-                    // Add listeners to all inputs
-                    document.getElementById('tp-input').addEventListener('input', updateWhatIfAnalysis);
-                    document.getElementById('sl-input').addEventListener('input', updateWhatIfAnalysis);
-                    document.getElementById('date-from').addEventListener('change', updateWhatIfAnalysis);
-                    document.getElementById('date-to').addEventListener('change', updateWhatIfAnalysis);
-                    document.getElementById('min-positions').addEventListener('input', updateWhatIfAnalysis);
+
+                    // Standard 'change' listeners for non-advanced inputs
+                    ['min-positions', 'date-from', 'date-to'].forEach(id => {
+                        document.getElementById(id).addEventListener('change', updateWhatIfAnalysis);
+                    });
                 });
             </script>
+        </div>
+        {% endif %}
+        
+        <!-- TP/SL Optimization Engine Results (Phase 5) -->
+        {% if charts.get('optimization_matrix') %}
+        <div class="section">
+            <h2>TP/SL Optimization Engine Results (Phase 5)</h2>
+            <p>This section provides prescriptive analytics to identify statistically optimal TP/SL parameters for each strategy based on net effect analysis and Expected Value calculations. All analyses are performed on strategies with at least {{ config.get('optimization_engine', {}).get('min_positions_for_optimization', 30) }} positions.</p>
+            
+            {% if charts.get('optimization_summary') %}
+            <div class="recommendation" style="background-color: #3498db; color: white;">
+                <h3>Optimization Summary</h3>
+                <ul>
+                    <li><strong>Strategies Analyzed:</strong> {{ charts.optimization_summary.total_strategies }}</li>
+                    <li><strong>Changes Recommended:</strong> {{ charts.optimization_summary.changes_recommended }} (where expected impact > 0.1%)</li>
+                    <li><strong>Average Expected Improvement:</strong> {{ "%.2f"|format(charts.optimization_summary.avg_improvement) }}%</li>
+                    <li><strong>Time Weighting:</strong> {{ "Enabled" if charts.optimization_summary.time_weighted else "Disabled" }} (recent positions have more influence)</li>
+                </ul>
+            </div>
+            {% endif %}
+            
+            <h3>Strategy Performance Matrix</h3>
+            <p>This table shows the potential net PnL impact of changing from current to optimal TP/SL parameters for each strategy. A positive 'Net Impact' suggests a beneficial change. For detailed recommendations, see the <strong>`tp_sl_recommendations.csv`</strong> file.</p>
+            <div id="optimization_matrix" class="plotly-chart">{{ charts.optimization_matrix | safe }}</div>
+            
+            <h3>Win Rate vs Required Win Rate Analysis</h3>
+            <p>This chart visualizes the <strong>Expected Value (EV)</strong> framework, comparing the historical performance of the strategy against the theoretical minimum win rate required for long-term profitability.</p>
+            <ul>
+                <li>The <strong>Required Win Rate (dashed line)</strong> is the theoretical percentage of winning trades needed to break even, calculated as: <code style="background: #eee; padding: 2px 5px; border-radius: 3px;">SL / (TP + SL)</code>.</li>
+                <li>The <strong>Historical Win Rate (solid line)</strong> is the actual observed win rate from the simulation data (calculated based on positive PnL).</li>
+                <li>For a Stop Loss level to be <strong>viable</strong>, the Historical Win Rate must be <strong>above</strong> the corresponding Required Win Rate line. Viable zones (if found) are shaded green.</li>
+            </ul>
+            <div id="optimization_win_rate" class="plotly-chart">{{ charts.optimization_win_rate | safe }}</div>
+            
+            <h3>Dynamic Stop Loss Floor Analysis</h3>
+            <p>This table identifies the 'Deepest Viable SL' for each Take Profit level, ensuring the strategy maintains a positive Expected Value (EV). This analysis helps set a rational safety floor.</p>
+            <ul>
+                <li><strong>Deepest Viable SL:</strong> The largest loss percentage that the historical win rate can sustain while remaining profitable (Historical WR > Required WR).</li>
+                <li><strong>Safety Margin:</strong> The difference between Historical and Required win rates. This is color-coded to indicate statistical confidence: <span style="color: green; font-weight: bold;">Green (&ge;10%)</span>, <span style="color: #f39c12; font-weight: bold;">Yellow (5-10%)</span>, <span style="color: red; font-weight: bold;">Red (&lt;5%)</span>.</li>
+            </ul>
+            <div id="optimization_sl_floor" class="plotly-chart">{{ charts.optimization_sl_floor | safe }}</div>
         </div>
         {% endif %}
 

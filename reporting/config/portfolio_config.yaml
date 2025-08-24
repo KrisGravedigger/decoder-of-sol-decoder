@@ -108,10 +108,35 @@ range_testing:
   enable: true  # Master switch to run this analysis
 
   # Define TP levels to test (in percentage)
-  tp_levels: [2, 6, 12] 
+  tp_levels: [2, 3, 4, 5, 6, 7, 8, 9] 
 
   # Define SL levels to test (in percentage, positive value)
-  sl_levels: [3, 6, 9, 15]
+  sl_levels: [6, 7, 8, 9, 10, 11, 12]
 
   # Metric for heatmap color and ranking
   primary_ranking_metric: "total_pnl"
+
+  # PHASE 5: TP/SL Optimization Engine
+optimization_engine:
+  enable: true
+  min_positions_for_optimization: 3 # Min positions for a strategy to be analyzed
+
+  # Time decay settings for weighting recent performance
+  time_weighting:
+    enable: true
+    last_n_days_full_weight: 7
+    decay_period_weeks: 4
+    minimum_weight: 0.5
+
+  # PHASE 5: TP/SL Optimization Engine
+optimization_engine:
+  enable: true
+  min_positions_for_optimization: 3 # Min positions for a strategy to be analyzed
+  recommendation_significance_threshold: 0.1 # Minimal % PnL change to treat the recommendation as significant
+
+  # Time decay settings for weighting recent performance
+  time_weighting:
+    enable: true
+    last_n_days_full_weight: 7
+    decay_period_weeks: 4
+    minimum_weight: 0.5

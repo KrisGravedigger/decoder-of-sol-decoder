@@ -1,8 +1,8 @@
 """
 LP Position Valuator for TP/SL Optimizer Phase 3B
 
-Calculates LP position value changes using mathematical formulas for
-impermanent loss and concentrated liquidity systems.
+Calculates LP position value changes using an improved approximation model
+for impermanent loss in concentrated liquidity systems.
 """
 
 import logging
@@ -20,135 +20,71 @@ if TYPE_CHECKING:
 
 class LPPositionValuator:
     """
-    Calculate LP position value changes using mathematical formulas.
-    Implements accurate Impermanent Loss calculations for concentrated liquidity.
+    Calculates LP position value changes using a refined approximation model for
+    Impermanent Loss (IL) that considers the position's price range.
     """
     
+    # AIDEV-NOTE-GEMINI: This is a key heuristic. It defines the maximum IL
+    # percentage when the price reaches the opposite edge of the bin range.
+    # 7.5% is a reasonable assumption for a moderately concentrated pool.
+    # HUMAN-REVIEW: Adjust this value based on empirical data if available.
+    MAX_IL_AT_EDGE = 0.075
+
     def __init__(self, strategy_type: str, step_size: str, bin_step: int = 100):
-        """
-        Initialize LP position valuator.
-        
-        Args:
-            strategy_type: "Bid-Ask" or "Spot"
-            step_size: "WIDE", "MEDIUM", "NARROW", "SIXTYNINE"
-            bin_step: Bin step parameter (default 100)
-        """
         self.strategy_type = strategy_type
         self.step_size = step_size
-        self.bin_step = bin_step
-        self.price_factor = 1 + bin_step / 10000
         
-        # Map step size to number of bins
-        self.bin_map = {
-            "WIDE": 50,
-            "MEDIUM": 20, 
-            "NARROW": 10,
-            "SIXTYNINE": 69
-        }
-        self.num_bins = self.bin_map.get(step_size.upper(), 69)
-        
-    def calculate_position_value_at_price(self, position: 'Position', initial_price: float, current_price: float, 
-                                        accumulated_fees: float) -> float:
+    def _calculate_il_reduction_factor(self, position: 'Position', current_price: float) -> float:
         """
-        Calculate LP position value at specific price point.
-        
-        Uses mathematical formulas from research:
-        - Impermanent Loss for price movement impact
-        - Concentrated liquidity considerations for bin-based strategies
-        - Fee accumulation on top of asset value changes
-        
-        Args:
-            position: Position object with investment_sol, pool_address
-            current_price: Current token price in SOL
-            accumulated_fees: Total fees accumulated up to this point
-            
-        Returns:
-            Total position value in SOL
+        Calculates a reduction factor (0.0 to 1.0) based on an approximated IL.
+        A factor of 1.0 means 0% IL, 0.925 means 7.5% IL.
         """
-        # Get initial investment and price
+        min_price = getattr(position, 'min_bin_price', None)
+        max_price = getattr(position, 'max_bin_price', None)
+
+        if not all([min_price, max_price]) or min_price >= max_price:
+            return 1.0 # No range data, assume no IL
+
+        # For 1-sided entry, the reference point for zero IL is the top of the range.
+        entry_price_assumption = max_price
+        
+        # 1. Calculate how "deep" the current price is within the range (0.0 to 1.0)
+        total_range = max_price - min_price
+        distance_from_entry = entry_price_assumption - current_price
+        range_utilization = max(0, min(1, distance_from_entry / total_range))
+        
+        # 2. Apply a curve (quadratic) to model accelerating IL
+        curve_factor = range_utilization ** 2
+        
+        # 3. Calculate the final IL percentage
+        il_percentage = self.MAX_IL_AT_EDGE * curve_factor
+        
+        return 1.0 - il_percentage
+
+    def calculate_in_range_value(self, position: 'Position', initial_price: float, current_price: float, 
+                                 accumulated_fees: float) -> float:
+        """
+        Calculates the position value assuming the price is WITHIN the bin range.
+        """
         initial_investment = position.initial_investment
-        
-        # For this implementation, we need the initial price when position was opened
-        # This would ideally come from the first price point in position's price history
-        # For now, we'll use a simplified approach
-        
-        # Calculate price ratio (we'd need initial price from position data)
-        # Placeholder: assume we have access to initial price
         if initial_price <= 0:
-            logger.warning(f"Invalid initial price for position {position.position_id}")
-            return position.initial_investment + accumulated_fees
-                
-        price_ratio = current_price / initial_price
-        
-        if initial_price <= 0:
-            logger.warning(f"Invalid initial price for position {position.position_id}")
             return initial_investment + accumulated_fees
-            
-        price_ratio = current_price / initial_price
+
+        # 1. Calculate the value as if it were a simple "buy & hold"
+        buy_and_hold_value = initial_investment * (current_price / initial_price)
         
-        # Calculate impermanent loss using standard formula
-        # IL = (2√k)/(k + 1) - 1, where k = price_ratio
-        k = price_ratio
-        impermanent_loss_factor = (2 * math.sqrt(k)) / (k + 1) - 1
+        # 2. Calculate the IL reduction factor based on the price's position in the range
+        il_reduction_factor = self._calculate_il_reduction_factor(position, current_price)
+
+        # 3. Apply the reduction to get the final asset value
+        asset_value = buy_and_hold_value * il_reduction_factor
         
-        # For concentrated liquidity, IL is amplified
-        # Using simplified model for bin-based systems
-        concentration_factor = self._calculate_concentration_factor()
-        amplified_il = impermanent_loss_factor * concentration_factor
-        
-        # Calculate asset value after IL
-        asset_value = initial_investment * (1 + amplified_il)
-        
-        # Total position value includes assets + accumulated fees
-        total_value = asset_value + accumulated_fees
-        
-        logger.debug(f"Position value calculation: price_ratio={price_ratio:.4f}, "
-                    f"IL={impermanent_loss_factor:.4f}, amplified_IL={amplified_il:.4f}, "
-                    f"asset_value={asset_value:.4f}, fees={accumulated_fees:.4f}, "
-                    f"total={total_value:.4f}")
-        
-        return total_value
-        
-    def _calculate_concentration_factor(self) -> float:
-        """
-        Calculate concentration factor based on strategy and bin configuration.
-        
-        Concentrated positions experience amplified IL compared to full-range positions.
-        """
-        # Base concentration factors by step size
-        concentration_factors = {
-            "WIDE": 2.0,      # 2x amplification
-            "MEDIUM": 3.0,    # 3x amplification  
-            "NARROW": 4.0,    # 4x amplification
-            "SIXTYNINE": 1.5  # 1.5x amplification
-        }
-        
-        base_factor = concentration_factors.get(self.step_size.upper(), 2.0)
-        
-        # Bid-Ask strategies have additional concentration due to U-shaped distribution
-        if self.strategy_type == "Bid-Ask":
-            base_factor *= 1.2
-            
-        return base_factor
-        
+        return asset_value + accumulated_fees
+
     def simulate_position_timeline(self, position: 'Position', price_data: List[Dict], 
                                  fee_data: List[float]) -> List[Dict]:
         """
-        Simulate position value changes over extended timeline.
-        
-        Args:
-            position: Position object
-            price_data: List of price points with timestamp and close price
-            fee_data: List of fees per candle (same length as price_data)
-            
-        Returns:
-            List of {
-                'timestamp': datetime,
-                'price': float,
-                'position_value_sol': float,
-                'pnl_pct': float,
-                'accumulated_fees': float
-            }
+        Simulates position value over a timeline, correctly handling OOR state.
         """
         if not price_data:
             return []
@@ -156,24 +92,42 @@ class LPPositionValuator:
         timeline = []
         accumulated_fees = 0.0
         initial_investment = position.initial_investment
+        initial_price = price_data[0]['close']
         
+        min_price = getattr(position, 'min_bin_price', None)
+        max_price = getattr(position, 'max_bin_price', None)
+        
+        is_oor = False
+        oor_value = 0.0
+
         for i, price_point in enumerate(price_data):
             timestamp = datetime.fromtimestamp(price_point['timestamp'])
             current_price = price_point['close']
             
-            # Accumulate fees up to this point
             if i < len(fee_data):
                 accumulated_fees += fee_data[i]
-                
-            # Calculate position value at this price
-            # The initial price is the 'close' price of the first data point
-            initial_price = price_data[0]['close']
 
-            position_value = self.calculate_position_value_at_price(
-                position, initial_price, current_price, accumulated_fees
-            )
+            position_value = 0.0
             
-            # Calculate PnL percentage
+            # Check for OOR condition
+            is_currently_out_of_range = (min_price is not None and current_price < min_price) or \
+                                        (max_price is not None and current_price > max_price)
+
+            if not is_oor and is_currently_out_of_range:
+                # First time hitting OOR: lock the value.
+                # At OOR, we are 100% in SOL, so value is initial investment + fees.
+                is_oor = True
+                oor_value = initial_investment + accumulated_fees
+                position_value = oor_value
+            elif is_oor:
+                # Already OOR, value is locked.
+                position_value = oor_value
+            else:
+                # Still in range, calculate value dynamically.
+                position_value = self.calculate_in_range_value(
+                    position, initial_price, current_price, accumulated_fees
+                )
+            
             pnl_pct = ((position_value - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
             
             timeline.append({
