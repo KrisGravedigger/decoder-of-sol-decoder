@@ -564,3 +564,19 @@ A JavaScript syntax error was identified in `reporting/templates/comprehensive_r
   - **Improved Layout:** Widened the crucial 'Strategy' column in both Phase 5 tables using Plotly's `columnwidth` property. This prevents aggressive text wrapping and significantly improves the readability of long strategy identifiers.
 
 **System Status:** The user interface for the Phase 4B and Phase 5 reports is now more intuitive, consistent, and readable. The data pipeline issues are understood, with a clear path to resolution.
+
+**Future Enhancements (Post-MVP):**
+- **AIDEV-TODO-CLAUDE: Implement interactive strategy selector for Phase 5 charts.**
+  - **Goal:** Replace static charts (Win Rate vs. Required, SL Floor) with dynamic versions controlled by a dropdown menu to allow analysis of any qualified strategy, not just the top one.
+  - **Implementation:**
+    1.  **Backend (`tp_sl_optimizer.py`):** Modify `_generate_visualizations` to compute chart data for *all* qualified strategies and store it in a structured dictionary.
+    2.  **Frontend (`html_report_generator.py` & `comprehensive_report.html`):** Pass the full data dictionary to the template, create a `<select>` dropdown, and use JavaScript to update the chart containers on user selection.
+
+### Phase 6 & Beyond: Future Roadmap
+- **AIDEV-TODO-CLAUDE: Architect a dynamic reporting system with global filters.**
+  - **Goal:** Allow users to apply global filters (e.g., date range, time-weighting toggle) to the entire Phase 4/5 report section.
+  - **Challenge:** The current system generates a static HTML file. This requires a significant architectural shift, likely towards a lightweight web server (e.g., Flask) that re-runs analysis on demand based on user-submitted filter parameters. Postponed due to high complexity.
+
+- **AIDEV-TODO-CLAUDE: Design a rule-based "Strategic Advisor" module.**
+  - **Goal:** Provide automated, natural language recommendations based on historical performance trends.
+  - **Scope:** Would involve comparing recent vs. older strategies, analyzing the impact of parameter tweaks, and synthesizing findings into actionable text-based advice. Complexity is very high; this is a long-term strategic goal.
