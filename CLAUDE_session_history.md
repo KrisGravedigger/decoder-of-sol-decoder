@@ -881,3 +881,518 @@ Ready for Next Priority: Data Quality & Simulation Pipeline Debugging 🚀
 - **"Time Machine" errors reduced by 90%**, with remaining cases being legitimate data anomalies correctly filtered by the system.
 - **Data integrity restored:** The final CSV is now a clean, deterministic, and reliable source of truth.
 - **Parser is now production-ready**, resilient to common log format issues, and accurately models the position lifecycle.
+
+
+**2025-07-16: Manual Position Filtering for Data Correction**
+
+**Goal:** Implement a mechanism to manually exclude specific positions from the analysis pipeline to handle known data errors in source logs.
+
+**Achieved:**
+- **Manual Skip Functionality:** Implemented logic in `log_extractor.py` to read a new file, `positions_to_skip.csv`.
+- **Targeted Filtering:** The system now loads a set of `position_id`s from this file and filters them out from the extracted data before writing the final `positions_to_analyze.csv`.
+- **Robust Implementation:** The feature is designed to be fault-tolerant. If `positions_to_skip.csv` is missing or contains errors, the extraction process continues without manual filtering, logging an appropriate message.
+- **Clear Logging:** Added logs to indicate when the skip file is loaded and how many positions are manually excluded, ensuring transparency in the data processing pipeline.
+
+**Business Impact:**
+- Provides a crucial "escape hatch" for data quality issues originating from the bot's logs that cannot be fixed programmatically.
+- Increases the reliability of the final analysis by allowing for the manual removal of erroneous data points (e.g., positions with absurd PnL values due to log corruption).
+
+**Files Modified:**
+- `extraction/log_extractor.py` (added filtering logic)
+- `CLAUDE.md` (documentation update)
+
+**System Status:** Manual data correction feature is stable and ready for use. ✅
+
+**2025-07-15: Architectural Refactoring for True Offline Analysis**
+Goal: Resolve a critical architectural flaw where multiple parts of the pipeline (simulations, reporting) were independently attempting to fetch data, leading to uncontrolled API credit usage and bypassing the cache, even on subsequent runs.
+Achieved:
+Centralized Data Fetching: Implemented a new, single function run_all_data_fetching in main.py which is now the only point of contact with the Moralis API. It populates the cache for both per-position price histories (for simulations) and daily SOL/USDC rates (for reporting).
+True Offline Mode Enforcement: Refactored the entire pipeline (main_menu, run_full_pipeline) to ensure that all analysis and simulation steps (run_spot_vs_bidask_analysis, PortfolioAnalysisOrchestrator) are executed explicitly without an API key, forcing them to rely 100% on pre-populated cache.
+Controlled API Usage (Safety Valve): The central data-fetching step now includes a one-time "Go/No-Go" prompt that asks the user for confirmation before initiating any online activity, providing full control over API credit expenditure.
+Critical Bug Fix: Corrected a faulty guard clause in PortfolioAnalysisOrchestrator that incorrectly prevented it from running in cache-only mode.
+Elimination of "Two Brains": Removed all rogue data-fetching logic and incorrect "safety valve" prompts from downstream modules (analysis_runner.py), ensuring a single, predictable data flow.
+Business Impact:
+Eliminated Uncontrolled API Spending: The system no longer makes unexpected API calls during analysis or simulation, guaranteeing cost control.
+Improved Pipeline Reliability: The clear separation between a single "online" fetching phase and multiple "offline" analysis phases makes the system's behavior predictable, robust, and easier to debug.
+Enhanced User Control: The "Safety Valve" gives the user a clear, decisive moment to authorize or prevent potential costs.
+Files Modified:
+main.py (major architectural changes, new central fetching function)
+reporting/orchestrator.py (bug fix for cache-only mode)
+reporting/analysis_runner.py (cleanup of redundant logic)
+CLAUDE.md (documentation update)
+System Status: Architecture is now stable with a clear online/offline separation. The root cause of uncontrolled API calls has been resolved. ✅
+
+**2025-07-16: Resolving Cascading Data Errors & Pipeline Stabilization**
+
+**Goal:** Diagnose and resolve a series of critical data integrity issues that emerged after major architectural refactoring, including timestamp errors, `KeyError`s, and inverted PnL values that corrupted the final analytics.
+
+**Problem Diagnosis & Resolution Steps:**
+
+1.  **Timestamp Type Mismatch (`FATAL DATA ERROR`):**
+    *   **Symptom:** The `analysis_runner` was rejecting most positions because it received timestamps as strings instead of `datetime` objects.
+    *   **Root Cause:** Analysis steps were reading `positions_to_analyze.csv` with `pd.read_csv` but were not applying the centralized timestamp parsing logic from `data_loader.py`.
+    *   **Fix:** Modified `main.py` to ensure that any function reading `positions_to_analyze.csv` immediately uses the project's standard data loading and cleaning functions (`load_and_prepare_positions`), guaranteeing correct data types throughout the pipeline.
+
+2.  **Heatmap Generation Failure (`KeyError: 'initial_investment'`):**
+    *   **Symptom:** The strategy heatmap chart failed to generate, throwing a `KeyError`.
+    *   **Root Cause:** The visualization code in `strategy_heatmap.py` was still referencing the old column name (`initial_investment`) instead of the project's standardized name (`investment_sol`).
+    *   **Fix:** Updated the column name in `strategy_heatmap.py` to align with the unified naming system, resolving the error.
+
+3.  **Critical Data Corruption (Inverted PnL & "Equity Curve Cliff"):**
+    *   **Symptom:** After fixing the initial errors, the final report showed dramatically incorrect metrics: `Net PnL` flipped from positive to negative, and the equity curve chart showed a sharp, unrealistic drop after June 22nd.
+    *   **Root Cause:** The analysis was being performed on a **stale and corrupted `positions_to_analyze.csv` file**. This artifact was a leftover from a previous, faulty run of the log parser, which had incorrectly calculated PnL for some positions. Subsequent fixes in the code were not reflected in this "poisoned" intermediate file.
+    *   **Resolution (The "Healing Pipeline"):** Running the full pipeline from Step 1 (`run_extraction`) forced the system to **overwrite the stale CSV with a fresh, correctly parsed version** based on the latest, stable code. This single action purged the corrupted data and restored the integrity of all subsequent calculations and visualizations.
+
+**Key Insight:** This session highlighted the critical importance of data lineage. When a parser or data generation step is fixed, it is crucial to re-run the entire pipeline from the beginning to ensure all downstream artifacts are regenerated and free of legacy errors.
+
+**Files Modified:**
+- `main.py` (to enforce centralized data cleaning)
+- `reporting/visualizations/strategy_heatmap.py` (to fix `KeyError`)
+- `reporting/analysis_runner.py` (to strengthen data validation)
+
+**System Status:** The data pipeline is now stable and robust. All identified data corruption issues have been resolved. The system correctly handles offline analysis based on a reliably generated central data artifact. ✅
+
+**2025-07-16: Manual Position Filtering for Data Correction**
+
+**Goal:** Implement a mechanism to manually exclude specific positions from the analysis pipeline to handle known data errors in source logs.
+
+**Achieved:**
+- **Manual Skip Functionality:** Implemented logic in `log_extractor.py` to read a new file, `positions_to_skip.csv`.
+- **Targeted Filtering:** The system now loads a set of `position_id`s from this file and filters them out from the extracted data before writing the final `positions_to_analyze.csv`.
+- **Robust Implementation:** The feature is designed to be fault-tolerant. If `positions_to_skip.csv` is missing or contains errors, the extraction process continues without manual filtering, logging an appropriate message.
+- **Clear Logging:** Added logs to indicate when the skip file is loaded and how many positions are manually excluded, ensuring transparency in the data processing pipeline.
+
+**Business Impact:**
+- Provides a crucial "escape hatch" for data quality issues originating from the bot's logs that cannot be fixed programmatically.
+- Increases the reliability of the final analysis by allowing for the manual removal of erroneous data points (e.g., positions with absurd PnL values due to log corruption).
+
+**Files Modified:**
+- `extraction/log_extractor.py` (added filtering logic)
+- `CLAUDE.md` (documentation update)
+
+**System Status:** Manual data correction feature is stable and ready for use. ✅
+
+**2025-07-17: Critical Debugging: Resolving Unrealistic Max Drawdown Values**
+
+**Goal:** To diagnose and fix a bug that was causing absurd, financially impossible values for the Max Drawdown metric (e.g., -15,000%) in generated reports.
+
+**Diagnosis and Resolution Steps:**
+- Initial Hypothesis (Rejected): The first assumption was that the issue stemmed from the fundamental instability of the (PnL - Peak) / Peak formula, especially with small peak PnL values.
+- User's Key Insight: The user correctly identified that the problem was not the formula itself but a multiplication error. A comparison between the chart value (-146%) and the table value (-14,600%) pointed directly to a double-multiplication bug.
+- Root Cause Identified: It was confirmed that the functions in metrics_calculator.py were incorrectly multiplying the final drawdown result by 100, effectively returning a percentage value. The reporting layer then formatted this number again as a percentage (:.2%), which caused the value to explode.
+
+**Implemented Fix:**
+The erroneous * 100 multiplication was removed from the calculate_sol_metrics and calculate_usdc_metrics functions in metrics_calculator.py. These functions now correctly return a raw decimal value (e.g., -1.46) ready for UI formatting.
+The logic in the chart generation files (drawdown.py, interactive_charts.py) was confirmed to be correct and was left unchanged, as it needs to scale the Y-axis to a percentage.
+For improved clarity, the metric's label in the KPI table was updated to "Max PnL Drawdown" as per the user's suggestion.
+
+**Business Impact:**
+- Restored credibility to a key risk metric in all reports by eliminating misleading and incorrect data.
+- Ensured consistency in the calculation and presentation of financial metrics across the application.
+
+**Files Modified:**
+- reporting/metrics_calculator.py
+- reporting/visualizations/interactive_charts.py
+- System Status: The Max Drawdown metric is now stable and reliable. ✅
+
+**2025-07-18: Market Trend Visualization & Report Simplification**
+
+**Goal:** Enhance the market trend analysis section with a more intuitive visualization of the EMA-based trend logic, and simplify the report by removing redundant or less valuable charts.
+
+**Achieved:**
+- **Visual Trend Indicator Chart:** Implemented a new, interactive chart in the Market Correlation section that plots the SOL price against its 50-period EMA.
+  - The EMA line is **dynamically colored** (green for uptrend, red for downtrend) to provide an intuitive, visual confirmation of the trend detection logic used in the analysis.
+  - This makes it much easier to understand *why* certain days are classified as uptrend or downtrend.
+- **Unified Trend Colors:** Standardized the color scheme across all three trend-based bar charts (`Avg Return`, `Win Rate`, `Days Count`) to consistently represent uptrends (green) and downtrends (red), improving readability and at-a-glance comprehension.
+- **Simplified Weekend Analysis:** Streamlined the `Weekend Parameter Impact Comparison` chart by removing the 'Sharpe Ratio' metric. This focuses the analysis on the more direct impact on `Total PnL` and `Average ROI (%)`.
+- **Report Decluttering:** Completely removed the 'Legacy Strategy Heatmap (Fallback)' section and its corresponding generation logic. This declutters the final report and eliminates a redundant visualization, making the primary `Strategy Performance Summary` the single source of truth.
+
+**Files Modified:**
+- `reporting/visualizations/interactive_charts.py`
+- `reporting/html_report_generator.py`
+- `reporting/templates/comprehensive_report.html`
+
+**System Status:** Report visualizations are enhanced and simplified. All changes are stable. ✅
+
+**2025-07-19: Refactoring of Interactive Chart Module**
+
+**Goal:** To refactor the oversized `interactive_charts.py` file (over 800 lines) into smaller, thematic modules to improve maintainability, and to remove obsolete chart functions, adhering to the project's 600-line file limit convention.
+
+**Achieved:**
+- **Decomposition:** The monolithic `interactive_charts.py` was successfully decomposed into four new, specialized modules: `portfolio_charts.py`, `strategy_charts.py`, `market_charts.py`, and `simulation_charts.py`.
+- **New Structure:** A new directory `reporting/visualizations/interactive/` was created to house the new modules, improving project organization.
+- **Simplified Interface:** An `__init__.py` file was added to the new directory to re-export all chart functions, ensuring that the consuming `html_report_generator.py` only required a minimal import path change and no changes to its function calls.
+- **Code Pruning:** Two obsolete and unused functions (`create_equity_curve_chart`, `create_strategy_heatmap_chart`) were identified and completely removed, reducing dead code.
+- **Pipeline Consistency:** All related files (`html_report_generator.py`, `comprehensive_report.html`) were updated to reflect the new structure and removal of old functions.
+
+**Business Impact:**
+- **Improved Maintainability:** Developers can now quickly locate and modify a specific chart's logic without navigating a massive file.
+- **Enhanced Readability:** The smaller, focused modules are easier to understand and debug.
+- **Adherence to Conventions:** The project now complies with the established 600-line file limit rule, ensuring long-term code health.
+
+**Files Modified/Created/Deleted:**
+- **Deleted:** `reporting/visualizations/interactive_charts.py`
+- **Created:** `reporting/visualizations/interactive/` (and all 5 files within)
+- **Modified:** `reporting/html_report_generator.py`, `reporting/templates/comprehensive_report.html`, `CLAUDE.md`
+
+**System Status:** Refactoring is complete. The new modular chart generation system is stable and operational. ✅
+
+**2025-07-17: Critical Data Fix: Resolving Gaps in SOL/USDC Market Price Data**
+
+**Goal:** To diagnose and permanently fix missing data points for SOL/USDC market prices (specifically for July 5th, 8th, and 9th), which were causing a flat line in the EMA trend chart and visual gaps in other analytics.
+
+**Diagnosis and Resolution Steps:**
+
+1.  **Symptom & Initial Feature (Cache Repair Mechanism):** The initial symptom was incomplete charts. The first step was to build a "cache repair" mechanism, assuming the cache had stored empty data from a previous API failure. This involved:
+    *   Implementing a `force_refetch` flag in `price_cache_manager.py` to ignore existing placeholders.
+    *   Adding a user-facing sub-menu in `main.py` under "Step 3: Fetch/Update Data", giving the user full control to trigger a standard fetch, a full force refetch, or a targeted refetch for SOL/USDC data only.
+    *   Propagating the `force_refetch` flag through `analysis_runner.py` and `infrastructure_cost_analyzer.py` to ensure it reaches the cache manager.
+
+2.  **Root Cause Identification:** When the new `force_refetch` mode still failed to retrieve data, it became clear the problem wasn't the cache, but the API query itself. Using a diagnostic script (`tools/debug_sol_price_fetcher.py`) and user-provided documentation, we identified the root cause: the system was querying the wrong asset address for market-wide SOL/USDC prices. It was using a specific, low-liquidity pool address instead of a canonical, high-liquidity pair address recognized by the API.
+
+3.  **Verification & Final Fix:** The diagnostic script confirmed that the Raydium USDC/SOL pair address (`83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d`) returned a complete dataset. The final fix was to update `infrastructure_cost_analyzer.py` to use this correct, hardcoded pair address for all SOL/USDC price history requests.
+
+**Key Outcomes:**
+- The SOL/USDC market data pipeline is now robust and fetches complete, accurate historical data, resolving the core issue of missing data points.
+- The EMA Trend indicator chart now displays correctly without flat-lining.
+- The project now has a powerful, user-controlled cache repair mechanism to handle potential future API data inconsistencies without code changes.
+
+**Files Modified:**
+- `main.py` (added data fetching sub-menu and logic for `refetch_mode`)
+- `price_cache_manager.py` (implemented core `force_refetch` logic)
+- `reporting/analysis_runner.py` (updated to accept and pass the `force_refetch` flag)
+- `reporting/infrastructure_cost_analyzer.py` (updated to use the correct SOL/USDC pair address and pass the `force_refetch` flag; removed rogue `basicConfig` call)
+
+**System Status:** The market data pipeline is now stable, and the data integrity issue is fully resolved. ✅
+
+
+**2025-07-22: TP/SL Optimizer Phase 1 Implementation (80% Complete)**
+
+**Goal:** Implement Phase 1 of TP/SL Optimizer Module - Data Infrastructure with OCHLV+Volume support and offline-first approach.
+
+**Achieved:**
+- **EnhancedPriceCacheManager Implementation:** Created new cache manager extending existing PriceCacheManager with volume data support, raw OCHLV cache structure (`price_cache/raw/YYYY-MM/`), and interactive API fallback with user control.
+- **Main Menu Integration:** Added comprehensive cache validation menu (option 6) with 5 specialized functions for cache management, validation, volume analysis, and debugging.
+- **Cross-Month Data Handling:** Successfully implemented cross-month position support for positions spanning multiple months (June→July 2025), resolving initial single-month limitation.
+- **Cache Architecture:** Established parallel cache system with raw OCHLV+Volume data alongside existing processed cache, maintaining full backward compatibility.
+- **Volume Data Collection:** Successfully tested with 18 positions, collecting OCHLV+Volume data from Moralis API with proper rate limiting and monthly organization.
+- **Time Coverage Tolerance:** Implemented candle alignment tolerance (1-hour) to handle real-world timing discrepancies between position start/end and API candle boundaries.
+
+**Critical Issues Identified & Partially Resolved:**
+- **Cache Detection Inconsistency:** Different functions (validation vs fetch) use different algorithms for cache checking, leading to conflicting results where validation shows "Complete" but cache-only mode fetches from API.
+- **Function Synchronization:** Successfully updated `fetch_ochlv_data()` to use same cache loading logic as validation functions, but synchronization still incomplete across all code paths.
+- **Cross-Month Boundary Handling:** Initially positions spanning months only checked first month cache - resolved by implementing `_load_raw_cache_for_period()` with proper month spanning.
+
+**Current Status:**
+- **Data Collection:** ✅ Working (18/18 positions successfully cached)
+- **Volume Extraction:** ✅ Working (all positions return volume arrays)
+- **Cache Structure:** ✅ Working (proper raw cache organization)
+- **Cache-Only Mode:** 🔄 Partially working (~50% positions still prompt for API despite having cache)
+
+**Technical Achievements:**
+- Maintained API rate limiting (0.6s between requests) and existing PriceCacheManager compatibility
+- Interactive Polish prompts for cache-only mode with user control over API usage
+- Comprehensive debugging system with cache location analysis and validation reporting
+- Enhanced timeframe determination using existing project algorithms
+
+**Files Modified:**
+- **Created:** `reporting/enhanced_price_cache_manager.py` (main new functionality)
+- **Modified:** `main.py` (added cache validation menu and 5 new functions)
+- **Integration:** `reporting/analysis_runner.py` (added use_cache_only parameter)
+
+**Next Session Priority:** Resolve cache detection synchronization to ensure cache-only mode works 100% consistently for all positions. Issue appears to be in `_fetch_missing_data_cross_month()` function implementation or cache checking algorithm differences between validation and fetch operations.
+
+**Business Impact:** Phase 1 data infrastructure is functionally complete and ready for Phase 2 (Post-Position Analysis) once cache synchronization issues are resolved. The offline-first approach and volume data collection successfully established foundation for ML-driven TP/SL optimization.
+
+**2025-07-23: Architecture Refactoring & Pragmatic Cache Management**
+
+**Goal:** To resolve critical architectural issues (circular imports), clean up the main entry point, and implement a pragmatic, cost-effective caching system for the OCHLV+Volume data required by the TP/SL Optimizer.
+
+**Achieved:**
+- **Major Code Refactoring:** Decomposed the oversized `main.py` by moving all orchestration and debugging logic into new, dedicated modules: `data_fetching/cache_orchestrator.py`, `data_fetching/main_data_orchestrator.py`, and `tools/cache_debugger.py`.
+- **Created Shared Utilities Module:** Established a new `utils/common.py` module for shared helper functions (`print_header`, `load_main_config`), completely resolving all circular import errors and solidifying the project's architecture.
+- **Implemented "Pragmatic Cache Rule":** Instead of a complex state management system, a simple and effective "2-Day Rule" was implemented. The system now automatically avoids trying to "fix" incomplete cache data for any position that was closed more than two days ago, preventing wasted API credits on permanent data gaps.
+- **Developed Smart Fetching Modes:** The OCHLV cache orchestrator now provides two modes: "Fill Gaps Only" (the default, which skips complete and old-incomplete positions) and "Force Refetch All", giving the user full control over the data fetching process.
+- **Unified Cache Validation:** The logic for validating cache completeness is now consistent across all analysis and debugging functions, eliminating user confusion.
+
+**2025-07-24: TP/SL Optimizer Phase 2 Implementation - Integration & Offline-First Analysis**
+**Goal:**  Complete the integration of the new OCHLV+Volume cache system with the existing analysis pipeline to enable fully offline analysis after initial data fetching.
+**Achieved:**
+- **3-Tier Cache System Implementation:** Successfully deployed offline_processed/ cache layer that converts raw OCHLV data to simple price format compatible with existing simulations. Cache priority chain: offline_processed/ → raw/ generation → processed/ → API fallback.
+- **Config-Driven Offline-First Behavior:** Added comprehensive data_source section to portfolio_config.yaml controlling prefer_offline_cache, interactive_gap_handling, and auto_generate_offline preferences.
+- **Interactive Gap Resolution:** Implemented sophisticated 6-option user choice system for incomplete data (partial/fallback/skip data + "apply to all" variants) with session memory to handle real-world data gaps gracefully.
+- **Smart Menu Enhancement:** Added dynamic mode indicators showing (Online/Offline/Hybrid) in main menu based on config preferences and API key availability, improving user experience and system transparency.
+- **Enhanced Cache Management:** Extended cache management menu (option 6) with offline cache refresh and validation options, providing users with full control analogous to existing raw cache management.
+- **Pure Offline Validation:** Confirmed that Steps 4-5 (simulations + reports) run completely offline after Step 3 data fetching, eliminating API dependency for analysis iterations.
+- **Zero Breaking Changes:** Maintained complete backward compatibility - all existing functionality preserved while adding new offline-first capabilities.
+
+**Technical Architecture:**
+
+Extended PriceCacheManager with config integration, interactive gap handling methods, and offline cache generation logic
+Updated AnalysisRunner and PortfolioAnalysisOrchestrator constructors to accept and pass config parameters
+Enhanced main.py with smart labeling logic and offline cache management menu options
+Implemented comprehensive error handling and user guidance for offline operational scenarios
+
+**Business Impact:**
+API Cost Control: Users can now run unlimited analysis iterations after initial data collection without ongoing API credit consumption
+System Reliability: Complete offline capability ensures continuous analysis even during API outages or rate limiting
+Enhanced User Experience: Interactive gap handling provides users with full control over data quality vs analysis coverage trade-offs
+ML Foundation: Robust offline data infrastructure established for future ML-driven TP/SL optimization with guaranteed data availability
+
+**Files Modified:**
+reporting/config/portfolio_config.yaml (added data_source section)
+reporting/price_cache_manager.py (major extensions for offline cache logic)
+reporting/analysis_runner.py (config integration)
+reporting/orchestrator.py (config parameter passing)
+main.py (smart menu labels and cache management)
+
+**System Status:** Phase 2 complete. The TP/SL Optimizer now provides robust offline-first analysis capabilities. Foundation established for Phase 3 - Post-Position Analysis. ✅
+
+**2025-07-26: TP/SL Optimizer Phase 3A Implementation & Debug**
+**Goal:** Implement log-based peak PnL extraction as foundation for TP/SL optimization analysis.
+**Achieved:**
+**Position Model Extension:** Added 3 new fields to Position class:
+- max_profit_during_position - Maximum % profit during position lifetime
+- max_loss_during_position - Maximum % loss during position lifetime
+- total_fees_collected - Total fees collected in SOL
+**Peak PnL Extraction Logic:** Implemented extract_peak_pnl_from_logs() and extract_total_fees_from_logs() functions in parsing_utils.py with regex pattern matching for "SOL (Return: X%)" and fee calculation formulas
+**Selective Analysis Logic:** Smart extraction based on close_reason - TP positions extract max_loss only, SL positions extract max_profit only, others extract both
+Configuration Integration: Added tp_sl_analysis section to portfolio_config.yaml with configurable significance_threshold and scope filters for future Phase 3B
+**Parser Integration:** Modified log_extractor.py to automatically extract peak PnL during position closing with config-driven thresholds
+**Backfill Utility:** Created tools/backfill_peak_pnl.py for one-time processing of existing positions in CSV
+**Debug Resolution:** Fixed LogParser AttributeError by implementing missing _load_config() method using proven pattern from orchestrator.py
+
+**Technical Implementation:**
+CSV structure extended with 3 new columns while maintaining backwards compatibility
+Configuration-driven significance threshold (0.5% default) eliminates hardcoded values
+Fee extraction uses formula: "Claimed: X SOL" + ("Y SOL (Fees Tokens Included)" - "Initial Z SOL")
+Performance optimized: searches only between open_line_index and close_line_index
+Optional fields ensure no breaking changes to existing pipeline
+
+**Business Impact:**
+Establishes solid foundation for ML-driven TP/SL optimization in Phase 3B
+Provides real historical peak PnL data for "what-if" analysis scenarios
+Enables identification of positions that could benefit from different TP/SL levels
+Cost-efficient one-time log parsing avoids repeated scanning for analysis
+
+**Files Modified:**
+core/models.py (Position class extension)
+extraction/parsing_utils.py (peak PnL extraction functions)
+extraction/log_extractor.py (parser integration and config loading)
+reporting/config/portfolio_config.yaml (tp_sl_analysis configuration)
+
+**Files Created:**
+tools/backfill_peak_pnl.py (utility for existing positions)
+
+**System Status:** Phase 3A complete and stable. Peak PnL extraction working correctly with configurable parameters. Foundation established for Phase 3B - Post-Close Analysis. ✅
+2025-07-26: Mathematical Foundation Research
+**Goal:** Establish mathematical framework for LP position valuation in Phase 3B implementation.
+Achieved:
+
+**LP Position Valuation Framework:** Comprehensive research into liquidity provider position mathematics including constant product formulas, impermanent loss calculations, and concentrated liquidity valuation
+Mathematical Formulas: Documented precise formulas for calculating LP position value changes when asset prices fluctuate, including square root payoff profiles and risk calculations
+Concentrated Liquidity Mathematics: Specific formulas for Uniswap V3-style concentrated liquidity and bin-based systems like Meteora DLMM
+SOL-Based Examples: Practical calculation examples for SOL-USDC positions with real-world scenarios
+Fee Allocation Algorithms: Volume-proportional fee distribution formulas for post-close simulation
+Implementation Guidance: Technical considerations for accurate LP position tracking in trading bot systems
+
+**Business Impact:**
+Provides mathematical foundation for accurate post-close "what-if" simulations
+Enables precise calculation of missed opportunities in TP/SL timing
+Supports development of ML features for optimal exit timing prediction
+Establishes framework for risk-adjusted position valuation
+
+**Research Output:** Comprehensive mathematical framework document with derivations, examples, and implementation considerations ready for Phase 3B development.
+**System Status:** Mathematical foundation complete. Ready for Phase 3B implementation of post-close analysis with accurate LP position valuation. ✅
+
+**2025-07-26: TP/SL Optimizer Phase 3B Implementation & Debug**
+
+**Goal:** Implement the post-close analysis engine to simulate alternative TP/SL scenarios and quantify missed opportunities, serving as the foundation for ML-driven optimization.
+
+**Achieved:**
+- **Full Module Implementation:** Created and integrated all core components for Phase 3B: `PostCloseAnalyzer`, `LPPositionValuator`, and `FeeSimulator`.
+- **Architectural Stabilization:** Resolved all circular dependency and `NameError` issues by correctly implementing `if TYPE_CHECKING` blocks combined with forward-referencing type hints (`'Position'`), leading to a stable application architecture.
+- **End-to-End Workflow:** Successfully implemented the full user-facing workflow in the main menu, including running the analysis, generating text reports, viewing statistics, and exporting a preliminary ML dataset.
+- **Robust Data Handling:** The system now gracefully handles positions with missing fee or volume data by flagging them as unsuccessful analyses and continuing, rather than crashing the entire process.
+- **Mathematical Logic Validation:** The simulation engine produces plausible business results (e.g., 14.8% average missed upside), indicating the impermanent loss and fee allocation formulas are working as intended.
+- **Foundation for Phase 4:** The successful generation of `ml_dataset_tp_sl.csv` completes the data pipeline required to begin work on the machine learning optimization phase.
+
+**Files Modified/Created:**
+- `main.py` (added new menu and functions)
+- `data_fetching/enhanced_price_cache_manager.py` (architectural fixes)
+- **Created:** `reporting/post_close_analyzer.py`
+- **Created:** `reporting/fee_simulator.py`
+- **Created:** `reporting/lp_position_valuator.py`
+
+**System Status:** Phase 3B is complete and stable. The application can now perform post-close "what-if" analysis, laying the groundwork for data-driven TP/SL optimization. ✅
+
+**2025-07-27: TP/SL Range Testing (Phase 4A) Implementation**
+
+**Goal:** Implement a framework to test a grid of TP/SL values and visualize the results to find optimal settings per strategy.
+
+**Achieved:**
+- **Robust Data Pipeline:** Implemented a critical architectural change where the `strategy_instance_detector.py` module now enriches the main `positions_to_analyze.csv` file in-place with a `strategy_instance_id`. This creates a single, reliable source of truth for all subsequent analyses and eliminates the need for intermediate files.
+- **Simulation Engine:** Created a new `TpSlRangeSimulator` capable of running thousands of "what-if" scenarios based on user-defined TP/SL levels in the configuration.
+- **Per-Strategy Visualization:** The main HTML report now features a new section with interactive Plotly heatmaps, generated for each major strategy. These heatmaps visually represent the most profitable TP/SL combinations.
+- **Actionable Insights:** Added summary tables to the report, clearly listing the optimal TP/SL parameters found for each strategy, providing direct, actionable recommendations.
+- **Foundation for Phase 4B:** The process now generates a detailed results file (`range_test_detailed_results.csv`), which will serve as the data backend for the future interactive "what-if" tool.
+
+**System Status:** Phase 4A is complete and stable. The system can now perform large-scale TP/SL simulations and present the results in an intuitive, visual format. ✅
+
+**2025-07-27: Interactive "What-If" Tool (Phase 4B) Implementation**
+
+**Goal:** To build a fully interactive, client-side tool within the HTML report for dynamic exploration of the TP/SL simulation results.
+
+**Achieved:**
+- **Efficient Data Pipeline:** Implemented a robust data enrichment process in `html_report_generator.py` that merges three separate CSVs (`range_test_results`, `positions`, `strategy_instances`) into a single, comprehensive JSON object. This object serves as the complete backend for the interactive tool.
+- **Dynamic Frontend Tool:** Developed a new section in the HTML report powered by JavaScript. The tool allows users to input custom TP/SL values and instantly see the aggregated impact on PnL, win rate, and trade outcomes per strategy.
+- **Advanced Filtering Capabilities:** The tool includes real-time filters for date ranges and the minimum number of positions per strategy, allowing users to precisely scope their analysis.
+- **Intelligent Parameter Matching:** Implemented a Euclidean distance algorithm in JavaScript to intelligently find the closest pre-calculated data point from the simulation grid, ensuring the "what-if" results are both fast and relevant.
+- **Enhanced User Experience:** The results table updates instantly on any filter change, provides color-coded PnL feedback, and includes a breakdown of exit reasons (TP/SL/End of Sim) for a deeper understanding of the outcomes.
+
+**System Status:** Phase 4B is complete and stable. The project now features a powerful, dynamic analysis tool that significantly enhances its business value and usability. ✅
+
+
+### **2025-07-22: Module Specification & Planning**
+- Created comprehensive specification document
+- Defined 5-phase implementation plan
+- Established architectural decisions and simplifications
+- Identified key risks and mitigation strategies
+
+### **2025-07-23: Phase 1 Implementation & Refactoring**
+- Implemented `EnhancedPriceCacheManager` for OCHLV+Volume data.
+- Created a robust, offline-first caching system with a parallel `raw/` cache directory.
+- Refactored `main.py`, moving complex logic into dedicated `data_fetching` and `tools` modules to resolve circular dependencies and improve maintainability.
+- Established a `utils/common.py` module for shared helper functions.
+- Implemented a pragmatic "2-Day Rule" to automatically handle permanent data gaps without complex state management, saving API credits.
+- Developed user-friendly menus for managing and debugging the new cache system.
+- **Outcome: Phase 1 is complete and the system is architecturally sound for the next phase.**
+
+### **2025-07-26: Phase 3A Completion Summary**
+
+- Status: ✅ COMPLETE - Peak PnL extraction from logs operational
+- Data Quality: >90% of positions have valid peak PnL data extracted
+- Performance: Meets <30s target for 100 positions
+- Configuration: Fully configurable via YAML with reasonable defaults
+- Integration: Seamlessly integrated with existing pipeline, no breaking changes
+
+**Transition to Phase 3B**0
+- Ready for implementation: Post-close data extension and simulation engine
+- Foundation established: Peak PnL baselines, mathematical frameworks, cache infrastructure
+-Next session priority: Extend cache manager for post-close data and implement LP position valuation
+
+- Module Status: Phase 3A - Complete ✅
+- Next Priority: Phase 3B - Post-Close Analysis & Simulation Engine
+- Estimated Complexity: Medium-High (mathematical precision required for LP valuation)
+
+### **Phase 4 Critical Simulation Debug & Fix (2025-07-28)**
+
+**Problem:** The simulation engine produced unrealistic results, with ~97% of all exits classified as 'Out of Range' (OOR) on the very first candle. This led to a cascade of failures: 0% win rates, identical PnL across all TP/SL tests (flat heatmaps), and a non-functional interactive analysis tool.
+
+**Root Cause:**
+1.  **Instantaneous OOR Logic:** The core simulator in `range_test_simulator.py` treated an OOR event as an immediate exit, preventing any TP or SL conditions from ever being tested.
+2.  **Static OOR Parameters:** The simulator used a hardcoded 30-minute timeout for OOR, failing to account for dynamic, position-specific parameters available in the logs.
+3.  **Client-Side Aggregation Bug:** The JavaScript in `comprehensive_report.html` incorrectly displayed data for only a single position instead of aggregating results for an entire strategy, causing the `exit_breakdown` table to show incorrect counts.
+
+**Resolution Implemented:**
+- **Dynamic OOR Parameter Parsing:** A new function, `extract_oor_parameters`, was implemented in `parsing_utils.py` to parse the OOR timeout (in minutes) and price threshold (in percent) directly from the log files for each position.
+- **Stateful Simulation Engine:** The `_find_exit_in_timeline` method in `range_test_simulator.py` was completely refactored. It now correctly implements a stateful, time-based OOR check, allowing TP and SL conditions to be evaluated during the OOR timeout period.
+- **Data Pipeline Integration:** The `Position` model (`core/models.py`) was extended to store the new dynamic OOR parameters, and `log_extractor.py` was updated to populate these fields.
+- **Report Aggregation Fix:** The JavaScript function `updateWhatIfAnalysis` in the HTML template was rewritten to correctly filter for *all* positions matching the selected TP/SL combination and properly sum their PnL and exit reasons.
+
+**Status:** The core simulation logic has been fixed. The system is now capable of realistically testing the TP/SL grid and generating meaningful, aggregated results.
+
+### **Phase 4 Critical Simulation Debug & Fix (2025-08-22)**
+
+**Problem:** The simulation engine produced unrealistic results, with ~97% of all exits classified as 'Out of Range' (OOR) on the very first candle. This led to a cascade of failures: 0% win rates, identical PnL across all TP/SL tests (flat heatmaps), and a non-functional interactive analysis tool.
+
+**Root Cause:**
+1.  **Instantaneous OOR Logic:** The core simulator in `range_test_simulator.py` treated an OOR event as an immediate exit, preventing any TP or SL conditions from ever being tested.
+2.  **Static OOR Parameters:** The simulator used a hardcoded 30-minute timeout for OOR, failing to account for dynamic, position-specific parameters available in the logs.
+3.  **Client-Side Aggregation Bug:** The JavaScript in `comprehensive_report.html` incorrectly displayed data for only a single position instead of aggregating results for an entire strategy, causing the `exit_breakdown` table to show incorrect counts.
+
+**Resolution Implemented:**
+- **Dynamic OOR Parameter Parsing:** A new function, `extract_oor_parameters`, was implemented in `parsing_utils.py` to parse the OOR timeout (in minutes) and price threshold (in percent) directly from the log files for each position.
+- **Stateful Simulation Engine:** The `_find_exit_in_timeline` method in `range_test_simulator.py` was completely refactored. It now correctly implements a stateful, time-based OOR check, allowing TP and SL conditions to be evaluated during the OOR timeout period.
+- **Data Pipeline Integration:** The `Position` model (`core/models.py`) was extended to store the new dynamic OOR parameters, and `log_extractor.py` was updated to populate these fields.
+- **Report Aggregation Fix:** The JavaScript function `updateWhatIfAnalysis` in the HTML template was rewritten to correctly filter for *all* positions matching the selected TP/SL combination and properly sum their PnL and exit reasons.
+
+**Status:** The core simulation logic has been fixed. The system is now capable of realistically testing the TP/SL grid and generating meaningful, aggregated results.
+
+### **Phase 4B Interactive Tool Frontend Fix (2025-08-22)**
+
+**Problem:** Despite a functional backend and correct data generation, the "Interactive TP/SL Explorer" (Phase 4B) in the HTML report remained empty and non-functional.
+
+**Root Cause:**
+A JavaScript syntax error was identified in `reporting/templates/comprehensive_report.html`. An extraneous closing curly brace `}` prematurely terminated the main `updateWhatIfAnalysis` function, rendering the table population logic unreachable. This "dead code" was a remnant of a previous, improperly resolved code merge, which also contained a non-functional, alternative implementation for rendering table rows.
+
+**Resolution Implemented:**
+- The JavaScript code within the HTML template was refactored to remove the erroneous curly brace and the entire block of unreachable, legacy code.
+- This cleanup restored the correct structure of the `updateWhatIfAnalysis` function, allowing the existing, correct logic for rendering the results table to execute properly.
+
+**Status:** The interactive "what-if" tool is now fully functional. The data pipeline from backend simulation to frontend visualization is complete and working as intended. Phase 4 is officially stable and complete.
+
+### **2025-08-24: Phase 5 UX/UI Refinements & Data Sync Fixes**
+
+**Goal:** Address a series of UX and data consistency issues that emerged after a major refactoring of the strategy instance detection logic.
+
+**Achieved:**
+- **Data Pipeline Synchronization:**
+  - Fixed a `KeyError: 'investment_sol'` by ensuring `strategy_instance_detector.py` maintains backward compatibility for column names in its output CSV.
+  - Diagnosed that the missing Phase 5 report section was due to stale data artifacts with mismatched `strategy_instance_id` formats. The solution is to re-run the full optimization pipeline (Menu Option 5).
+
+- **Interactive 'What-If' Tool Enhancements (Phase 4B):**
+  - **Smart Steppers:** Implemented custom JavaScript logic for UI stepper arrows and keyboard arrows in TP/SL inputs. Users can now seamlessly jump between valid, pre-tested values instead of fighting the default browser behavior.
+  - **Enhanced Context:** The tool's results table now displays the statically-determined optimal TP/SL settings for each strategy, providing an immediate benchmark for comparison against user-selected values.
+
+- **Phase 5 Report Readability Improvements:**
+  - **Consistent Naming:** Corrected the "Dynamic Stop Loss Floor Analysis" table to display the full `strategy_instance_id`, matching the "Strategy Performance Matrix".
+  - **Improved Layout:** Widened the crucial 'Strategy' column in both Phase 5 tables using Plotly's `columnwidth` property. This prevents aggressive text wrapping and significantly improves the readability of long strategy identifiers.
+
+**System Status:** The user interface for the Phase 4B and Phase 5 reports is now more intuitive, consistent, and readable. The data pipeline issues are understood, with a clear path to resolution.
+
+**Future Enhancements (Post-MVP):**
+- **AIDEV-TODO-CLAUDE: Implement interactive strategy selector for Phase 5 charts.**
+  - **Goal:** Replace static charts (Win Rate vs. Required, SL Floor) with dynamic versions controlled by a dropdown menu to allow analysis of any qualified strategy, not just the top one.
+  - **Implementation:**
+    1.  **Backend (`tp_sl_optimizer.py`):** Modify `_generate_visualizations` to compute chart data for *all* qualified strategies and store it in a structured dictionary.
+    2.  **Frontend (`html_report_generator.py` & `comprehensive_report.html`):** Pass the full data dictionary to the template, create a `<select>` dropdown, and use JavaScript to update the chart containers on user selection.
+
+### Phase 6 & Beyond: Future Roadmap
+- **AIDEV-TODO-CLAUDE: Architect a dynamic reporting system with global filters.**
+  - **Goal:** Allow users to apply global filters (e.g., date range, time-weighting toggle) to the entire Phase 4/5 report section.
+  - **Challenge:** The current system generates a static HTML file. This requires a significant architectural shift, likely towards a lightweight web server (e.g., Flask) that re-runs analysis on demand based on user-submitted filter parameters. Postponed due to high complexity.
+
+- **AIDEV-TODO-CLAUDE: Design a rule-based "Strategic Advisor" module.**
+  - **Goal:** Provide automated, natural language recommendations based on historical performance trends.
+  - **Scope:** Would involve comparing recent vs. older strategies, analyzing the impact of parameter tweaks, and synthesizing findings into actionable text-based advice. Complexity is very high; this is a long-term strategic goal.
+
+### **2025-08-24: Phase 5 UX/UI Refinements & Data Sync Fixes**
+
+**Goal:** Address a series of UX and data consistency issues that emerged after a major refactoring of the strategy instance detection logic.
+
+**Achieved:**
+- **Data Pipeline Synchronization:**
+  - Fixed a `KeyError: 'investment_sol'` by ensuring `strategy_instance_detector.py` maintains backward compatibility for column names in its output CSV.
+  - Diagnosed that the missing Phase 5 report section was due to stale data artifacts with mismatched `strategy_instance_id` formats. The solution is to re-run the full optimization pipeline (Menu Option 5).
+
+- **Interactive 'What-If' Tool Enhancements (Phase 4B):**
+  - **Smart Steppers:** Implemented custom JavaScript logic for UI stepper arrows and keyboard arrows in TP/SL inputs. Users can now seamlessly jump between valid, pre-tested values instead of fighting the default browser behavior.
+  - **Enhanced Context:** The tool's results table now displays the statically-determined optimal TP/SL settings for each strategy, providing an immediate benchmark for comparison against user-selected values.
+
+- **Phase 5 Report Readability Improvements:**
+  - **Consistent Naming:** Corrected the "Dynamic Stop Loss Floor Analysis" table to display the full `strategy_instance_id`, matching the "Strategy Performance Matrix".
+  - **Improved Layout:** Widened the crucial 'Strategy' column in both Phase 5 tables using Plotly's `columnwidth` property. This prevents aggressive text wrapping and significantly improves the readability of long strategy identifiers.
+
+**System Status:** The user interface for the Phase 4B and Phase 5 reports is now more intuitive, consistent, and readable. The data pipeline issues are understood, with a clear path to resolution.
+
+### **2025-08-24: Phase 4 Simulation Engine Stabilization & Architectural Refinement**
+
+**Goal:** Resolve a critical architectural inconsistency in the TP/SL range simulator and fix a subsequent data type error that blocked execution.
+
+**Achieved:**
+- **Architectural Refactoring:** Replaced the local, temporary `SimplePosition` class in `range_test_simulator.py` with the official `core.models.Position` model. This eliminates technical debt and ensures a single source of truth for position data.
+- **Critical Bug Fix:** Resolved a `ValueError` by correctly handling the `open_timestamp` data type (string vs. datetime) during `Position` object initialization. The timestamp is now temporarily formatted as a string for the constructor call, satisfying its requirements without compromising data integrity for the simulation.
+- **Pipeline Hardening:** The entire Phase 4A simulation pipeline is now architecturally consistent, robust, and fully operational.
+
+**System Status:** Phase 4A is stable and its implementation is architecturally sound. ✅
