@@ -50,6 +50,7 @@ class TpSlOptimizer:
         
         # Statistical significance threshold
         self.min_positions_for_optimization = self.optimization_config.get('min_positions_for_optimization', 30)
+        self.recommendation_significance_threshold = self.optimization_config.get('recommendation_significance_threshold', 0.1)
         
         logger.info(f"TP/SL Optimizer initialized with time weighting: {self.time_weighting_enabled}")
         
@@ -225,7 +226,6 @@ class TpSlOptimizer:
             # AIDEV-NOTE-CLAUDE: PnL-based win rate - a win is any exit with positive PnL
             # This correctly handles TP, OOR, and END scenarios based on actual profitability
             wins_weight = group[group['simulated_pnl_pct'] > 0]['weight'].sum()
-            total_weight = group['weight'].sum()
             
             weighted_win_rate = (wins_weight / total_weight * 100) if total_weight > 0 else 0
             
@@ -267,18 +267,17 @@ class TpSlOptimizer:
                         'tp_level': tp,
                         'sl_level': sl,
                         'historical_win_rate': 0.0,
-                        'required_win_rate': sl / (tp + sl),
+                        'required_win_rate': sl / (tp + sl) if (tp + sl) > 0 else 0,
                         'sample_size': 0,
                         'is_viable': False,
-                        'margin': -1.0
+                        'margin': -1.0,
+                        'tp_count': 0, 'sl_count': 0, 'end_count': 0
                     })
                     continue
                 
                 # AIDEV-NOTE-CLAUDE: PnL-based win rate - a win is any exit with positive PnL
                 # This correctly handles TP, OOR, and END scenarios based on actual profitability
                 
-                # First, we need to get the simulated results for this TP/SL combination
-                # from the detailed results that should be available in the strategy data
                 tp_sl_data = strategy_data[
                     (strategy_data['tp_level'] == tp) & 
                     (strategy_data['sl_level'] == sl)
@@ -296,13 +295,12 @@ class TpSlOptimizer:
                 historical_win_rate = wins_weight / total_weight
                 
                 # Calculate required win rate
-                required_win_rate = sl / (tp + sl)
+                required_win_rate = sl / (tp + sl) if (tp + sl) > 0 else 0
                 
                 # Check viability
                 is_viable = historical_win_rate > required_win_rate
                 margin = historical_win_rate - required_win_rate
                 
-                # Store all data for debugging
                 ev_analysis_results.append({
                     'tp_level': tp,
                     'sl_level': sl,
@@ -316,15 +314,12 @@ class TpSlOptimizer:
                     'end_count': len(sl_data[sl_data['exit_reason'] == 'END'])
                 })
         
-        # Convert to DataFrame for easier manipulation
         ev_df = pd.DataFrame(ev_analysis_results)
         
-        # Log debug information
         viable_count = ev_df['is_viable'].sum()
         logger.info(f"EV Analysis: {viable_count}/{len(ev_df)} TP/SL combinations are viable")
         
-        if viable_count == 0:
-            # Log why nothing is viable
+        if viable_count == 0 and not ev_df.empty:
             best_margin = ev_df.loc[ev_df['margin'].idxmax()]
             logger.warning(f"No viable SL floors found. Best margin was {best_margin['margin']:.3f} "
                         f"at TP={best_margin['tp_level']}%, SL={best_margin['sl_level']}% "
@@ -341,20 +336,16 @@ class TpSlOptimizer:
         """
         df = df.copy()
         
-        # Calculate days since position opened
-        current_date = pd.Timestamp.now()
-        df['days_since_open'] = (current_date - df['open_timestamp']).dt.days
+        current_date = pd.Timestamp.now(tz='UTC')
+        df['days_since_open'] = (current_date - df['open_timestamp'].dt.tz_localize('UTC')).dt.days
         
-        # Apply weighting formula
         def calculate_weight(days_since_open):
             if days_since_open <= self.last_n_days_full_weight:
                 return 1.0
             
-            # Calculate decay
             days_in_decay = days_since_open - self.last_n_days_full_weight
             weeks_in_decay = days_in_decay / 7.0
             
-            # Linear decay
             decay_rate = (1.0 - self.minimum_weight) / (self.decay_period_weeks)
             weight = 1.0 - (decay_rate * weeks_in_decay)
             
@@ -376,13 +367,10 @@ class TpSlOptimizer:
         """
         visualizations = {}
         
-        # 1. Strategy Performance Matrix
         matrix_fig = self._create_performance_matrix(optimization_results)
-        visualizations['performance_matrix'] = matrix_fig.to_html(div_id="performance_matrix")
+        visualizations['performance_matrix'] = matrix_fig.to_html(div_id="performance_matrix", full_html=False, include_plotlyjs=False)
         
-        # 2. Win Rate vs Required Win Rate Chart (for top strategy)
         if optimization_results:
-            # Get the strategy with highest optimal net impact
             best_strategy = max(optimization_results.items(), 
                               key=lambda x: x[1]['optimal_net_impact'])[0]
             
@@ -390,11 +378,10 @@ class TpSlOptimizer:
                 best_strategy, 
                 optimization_results[best_strategy]
             )
-            visualizations['win_rate_chart'] = win_rate_fig.to_html(div_id="win_rate_chart")
+            visualizations['win_rate_chart'] = win_rate_fig.to_html(div_id="win_rate_chart", full_html=False, include_plotlyjs=False)
             
-        # 3. Dynamic SL Floor Table
         sl_floor_fig = self._create_sl_floor_table(optimization_results)
-        visualizations['sl_floor_table'] = sl_floor_fig.to_html(div_id="sl_floor_table")
+        visualizations['sl_floor_table'] = sl_floor_fig.to_html(div_id="sl_floor_table", full_html=False, include_plotlyjs=False)
         
         return visualizations
         
@@ -402,17 +389,12 @@ class TpSlOptimizer:
         """Create interactive table showing net PnL impact for each strategy."""
         data = []
         
-        # AIDEV-TODO-CLAUDE: Significance threshold of 0.1 could be made configurable in the future
-        significance_threshold = 0.1
-        
         for strategy_id, results in optimization_results.items():
-            # Get strategy name components
             strategy_info = self.strategy_instances[
                 self.strategy_instances['strategy_instance_id'] == strategy_id
             ].iloc[0]
             
-            # Check if improvement meets significance threshold
-            if abs(results['optimal_net_impact']) > significance_threshold:
+            if abs(results['optimal_net_impact']) > self.recommendation_significance_threshold:
                 optimal_tp = f"{results['optimal_tp']}%"
                 optimal_sl = f"{results['optimal_sl']}%"
                 net_impact = f"{results['optimal_net_impact']:.2f}%"
@@ -434,7 +416,6 @@ class TpSlOptimizer:
             
         df = pd.DataFrame(data)
         
-        # Create color scale for Net Impact
         colors = []
         for impact_str in df['Net Impact']:
             if impact_str == "~0.00%":
@@ -443,30 +424,12 @@ class TpSlOptimizer:
                 impact_val = float(impact_str.strip('%'))
                 colors.append('red' if impact_val < 0 else 'green')
         
-        fig = go.Figure(data=[go.Table(
-            # AIDEV-NOTE-CLAUDE: Use columnwidth to give the first column 3x the relative width of others.
-            columnwidth=[3, 1, 1, 1, 1, 1, 1, 1],
-            header=dict(
-                values=list(df.columns),
-                fill_color='paleturquoise',
-                align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
-                font=dict(size=12, color='black')
-            ),
-            cells=dict(
-                values=[df[col] for col in df.columns],
-                fill_color=[['white']*len(df) if i != 5 
-                           else colors for i in range(len(df.columns))],
-                align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
-                font=dict(size=11)
-            )
-        )])
-        
-        fig.update_layout(
+        fig = self._create_plotly_table(
+            df=df,
             title="Strategy Performance Matrix - Net PnL Impact of Optimal TP/SL",
-            height=400 + len(data) * 30,
-            margin=dict(l=20, r=20, t=40, b=0)
+            column_widths=[3, 1, 1, 1, 1, 1, 1, 1],
+            cell_fills=[colors if df.columns[i] == 'Net Impact' else ['white'] * len(df) for i in range(len(df.columns))]
         )
-        
         return fig
         
     def _create_win_rate_chart(self, strategy_id: str, strategy_results: Dict) -> go.Figure:
@@ -475,223 +438,113 @@ class TpSlOptimizer:
         """
         ev_analysis_df = strategy_results['sl_floor_analysis']
         
-        # Prepare data
+        if ev_analysis_df.empty:
+            return go.Figure().update_layout(title=f"Win Rate Analysis for {strategy_id}<br><sub>No data available</sub>")
+
         tp_levels = sorted(ev_analysis_df['tp_level'].unique())
         sl_levels = sorted(ev_analysis_df['sl_level'].unique())
         
         fig = go.Figure()
-        
-        # Color palette for different TP levels
         colors = px.colors.qualitative.Set1
         
-        # Add lines for each TP level
         for i, tp in enumerate(tp_levels):
             color = colors[i % len(colors)]
             tp_data = ev_analysis_df[ev_analysis_df['tp_level'] == tp]
             
-            # Required win rate line (theoretical)
             fig.add_trace(go.Scatter(
-                x=tp_data['sl_level'],
-                y=tp_data['required_win_rate'] * 100,
-                mode='lines',
-                name=f'Required (TP={tp}%)',
-                line=dict(color=color, dash='dash', width=2),
-                legendgroup=f'tp{tp}'
+                x=tp_data['sl_level'], y=tp_data['required_win_rate'] * 100, mode='lines',
+                name=f'Required (TP={tp}%)', line=dict(color=color, dash='dash', width=2), legendgroup=f'tp{tp}'
             ))
             
-            # Historical win rate line (actual)
             fig.add_trace(go.Scatter(
-                x=tp_data['sl_level'],
-                y=tp_data['historical_win_rate'] * 100,
-                mode='lines+markers',
-                name=f'Historical (TP={tp}%)',
-                line=dict(color=color, width=3),
-                marker=dict(size=8),
-                legendgroup=f'tp{tp}',
+                x=tp_data['sl_level'], y=tp_data['historical_win_rate'] * 100, mode='lines+markers',
+                name=f'Historical (TP={tp}%)', line=dict(color=color, width=3), marker=dict(size=8), legendgroup=f'tp{tp}',
                 customdata=tp_data[['sample_size', 'tp_count', 'sl_count', 'end_count']],
-                hovertemplate=(
-                    'SL: %{x}%<br>' +
-                    'Win Rate: %{y:.1f}%<br>' +
-                    'Sample Size: %{customdata[0]}<br>' +
-                    'TP/SL/END: %{customdata[1]}/%{customdata[2]}/%{customdata[3]}<br>' +
-                    '<extra></extra>'
-                )
+                hovertemplate=('SL: %{x}%<br>Win Rate: %{y:.1f}%<br>Sample Size: %{customdata[0]}<br>' +
+                               'TP/SL/END: %{customdata[1]}/%{customdata[2]}/%{customdata[3]}<extra></extra>')
             ))
             
-        # Add viability zones if any exist
-        viable_zones = ev_analysis_df[ev_analysis_df['is_viable'] == True]
-        if not viable_zones.empty:
-            for tp in tp_levels:
-                tp_viable = viable_zones[viable_zones['tp_level'] == tp]
-                if not tp_viable.empty:
-                    deepest_viable_sl = tp_viable['sl_level'].max()
-                    
-                    fig.add_shape(
-                        type="rect",
-                        x0=deepest_viable_sl,
-                        x1=max(sl_levels),
-                        y0=0,
-                        y1=100,
-                        fillcolor="green",
-                        opacity=0.1,
-                        layer="below",
-                        line_width=0,
-                    )
-                    fig.add_annotation(
-                        x=deepest_viable_sl + 0.5,
-                        y=95,
-                        text=f"Viable zone<br>TP={tp}%",
-                        showarrow=False,
-                        font=dict(size=10)
-                    )
-        else:
-            # Add annotation explaining no viable zones
-            fig.add_annotation(
-                x=np.mean(sl_levels),
-                y=50,
-                text="No viable SL levels found<br>(Historical win rate < Required win rate for all combinations)",
-                showarrow=False,
-                font=dict(size=12, color="red"),
-                bgcolor="white",
-                bordercolor="red",
-                borderwidth=2
-            )
-        
-        # Add a reference line at 50% win rate
-        fig.add_hline(
-            y=50, 
-            line_dash="dot", 
-            line_color="gray",
-            annotation_text="50% Win Rate",
-            annotation_position="bottom right"
-        )
+        fig.add_hline(y=50, line_dash="dot", line_color="gray", annotation_text="50% Win Rate", annotation_position="bottom right")
         
         fig.update_layout(
             title=f"Win Rate Analysis - {strategy_id}<br><sub>Comparing Historical Performance vs Mathematical Requirements</sub>",
-            xaxis_title="Stop Loss Level (%)",
-            yaxis_title="Win Rate (%)",
-            yaxis=dict(range=[0, 100]),
-            hovermode='x unified',
-            height=600,
-            showlegend=True,
-            legend=dict(
-                groupclick="toggleitem",
-                tracegroupgap=10
-            )
+            xaxis_title="Stop Loss Level (%)", yaxis_title="Win Rate (%)", yaxis=dict(range=[0, 100]),
+            hovermode='x unified', height=600, showlegend=True, legend=dict(groupclick="toggleitem", tracegroupgap=10)
         )
-        
         return fig
         
     def _create_sl_floor_table(self, optimization_results: Dict) -> go.Figure:
         """Create summary table showing deepest viable SL for each TP level."""
         data = []
-        
         for strategy_id, results in optimization_results.items():
             ev_analysis_df = results['sl_floor_analysis']
-            
-            # Filter for viable combinations only
             viable_df = ev_analysis_df[ev_analysis_df['is_viable'] == True]
-            
             if not viable_df.empty:
-                # For each TP level, find the deepest viable SL
                 for tp in sorted(viable_df['tp_level'].unique()):
                     tp_viable = viable_df[viable_df['tp_level'] == tp]
                     deepest_row = tp_viable.loc[tp_viable['sl_level'].idxmax()]
-                    
                     data.append({
-                        'Strategy': strategy_id,
-                        'TP Level': f"{tp}%",
-                        'Deepest Viable SL': f"{deepest_row['sl_level']}%",
+                        'Strategy': strategy_id, 'TP Level': f"{tp}%", 'Deepest Viable SL': f"{deepest_row['sl_level']}%",
                         'Historical Win Rate': f"{deepest_row['historical_win_rate']*100:.1f}%",
                         'Required Win Rate': f"{deepest_row['required_win_rate']*100:.1f}%",
-                        'Safety Margin': f"{deepest_row['margin']*100:.1f}%",
-                        'Sample Size': int(deepest_row['sample_size'])
+                        'Safety Margin': f"{deepest_row['margin']*100:.1f}%", 'Sample Size': int(deepest_row['sample_size'])
                     })
         
         if not data:
-            # Create diagnostic table when no viable floors found
             diagnostic_data = []
-            
-            # Find the best (least negative) margins for diagnosis
             for strategy_id, results in optimization_results.items():
-                strategy_name = strategy_id.split('_')[0]
                 ev_df = results['sl_floor_analysis']
-                
-                # Get best margin for each TP
-                for tp in sorted(ev_df['tp_level'].unique()):
-                    tp_data = ev_df[ev_df['tp_level'] == tp]
-                    best_row = tp_data.loc[tp_data['margin'].idxmax()]
-                    
-                    diagnostic_data.append({
-                        'Strategy': strategy_name,
-                        'TP': f"{tp}%",
-                        'Best SL Tested': f"{best_row['sl_level']}%",
-                        'Historical WR': f"{best_row['historical_win_rate']*100:.1f}%",
-                        'Required WR': f"{best_row['required_win_rate']*100:.1f}%",
-                        'Gap': f"{best_row['margin']*100:.1f}%",
-                        'TP/SL/END': f"{int(best_row['tp_count'])}/{int(best_row['sl_count'])}/{int(best_row['end_count'])}"
-                    })
-            
-            if diagnostic_data:
-                diag_df = pd.DataFrame(diagnostic_data)
-                fig = go.Figure(data=[go.Table(
-                    # AIDEV-NOTE-CLAUDE: Use columnwidth to give the first column 3x the relative width of others.
-                    columnwidth=[3, 1, 1, 1, 1, 1, 1, 1],
-                    header=dict(
-                        values=list(df.columns),
-                        align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
-                        font=dict(size=12, color='black')
-                    ),
-                    cells=dict(
-                        values=[df[col] for col in df.columns],
-                        fill_color=[['white']*len(df) if i != 5 
-                                else colors for i in range(len(df.columns))],
-                        align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
-                        font=dict(size=11)
-                    )
-                )])
-                
-                fig.update_layout(
-                    title="Strategy Performance Matrix - Net PnL Impact of Optimal TP/SL",
-                    height=400 + len(data) * 30,
-                    margin=dict(l=20, r=20, t=40, b=0)
-                )
-            else:
-                fig = go.Figure(data=[go.Table(
-                    header=dict(values=["Message"]),
-                    cells=dict(values=[["No data available for SL floor analysis"]])
-                )])
-        else:
-            df = pd.DataFrame(data)
-            
-            # Color code safety margin
-            margins = [float(x.strip('%')) for x in df['Safety Margin']]
-            colors = ['red' if x < 5 else 'yellow' if x < 10 else 'green' for x in margins]
-            
-            fig = go.Figure(data=[go.Table(
-                # AIDEV-NOTE-CLAUDE: Use columnwidth to give the first column 3x the relative width of others.
-                columnwidth=[3, 1, 1, 1, 1, 1, 1],
-                header=dict(
-                    values=list(df.columns),
-                    fill_color='lightblue',
-                    align=['left', 'center', 'center', 'center', 'center', 'center', 'center'],
-                    font=dict(size=12, color='black')
-                ),
-                cells=dict(
-                    values=[df[col] for col in df.columns],
-                    fill_color=[['white']*len(df) if i != 5 
-                            else colors for i in range(len(df.columns))],
-                    align=['left', 'center', 'center', 'center', 'center', 'center', 'center'],
-                    font=dict(size=11)
-                )
-            )])
-            
-            fig.update_layout(
-                title="Dynamic SL Floor Analysis - Deepest Viable Stop Loss by Take Profit Level",
-                height=max(400, 100 + len(data) * 25),
-                margin=dict(l=20, r=20, t=40, b=0)
-            )
+                if not ev_df.empty:
+                    for tp in sorted(ev_df['tp_level'].unique()):
+                        tp_data = ev_df[ev_df['tp_level'] == tp]
+                        if not tp_data.empty:
+                            best_row = tp_data.loc[tp_data['margin'].idxmax()]
+                            diagnostic_data.append({
+                                'Strategy': strategy_id, 'TP': f"{tp}%", 'Best SL Tested': f"{best_row['sl_level']}%",
+                                'Historical WR': f"{best_row['historical_win_rate']*100:.1f}%",
+                                'Required WR': f"{best_row['required_win_rate']*100:.1f}%",
+                                'Gap': f"{best_row['margin']*100:.1f}%",
+                                'TP/SL/END': f"{int(best_row['tp_count'])}/{int(best_row['sl_count'])}/{int(best_row['end_count'])}"
+                            })
+            if not diagnostic_data:
+                return self._create_plotly_table(pd.DataFrame([{"Message": "No data available for SL floor analysis"}]), "Dynamic SL Floor Analysis")
+
+            diag_df = pd.DataFrame(diagnostic_data)
+            return self._create_plotly_table(diag_df, "Dynamic SL Floor Analysis - Diagnostic (No Viable Floors Found)", [2, 1, 1, 1, 1, 1, 1])
         
+        df = pd.DataFrame(data)
+        margins = [float(x.strip('%')) for x in df['Safety Margin']]
+        colors = ['red' if x < 5 else 'yellow' if x < 10 else 'green' for x in margins]
+        cell_fills = [colors if df.columns[i] == 'Safety Margin' else ['white'] * len(df) for i in range(len(df.columns))]
+        
+        return self._create_plotly_table(df, "Dynamic SL Floor Analysis - Deepest Viable Stop Loss", [3, 1, 1, 1, 1, 1, 1], cell_fills)
+
+    def _create_plotly_table(self, df: pd.DataFrame, title: str, column_widths: Optional[List[int]] = None, cell_fills: Optional[List[List[str]]] = None) -> go.Figure:
+        """Helper function to generate a Plotly table Figure."""
+        if df.empty:
+            return go.Figure().update_layout(title=f"{title}<br><sub>No data to display</sub>")
+
+        fig = go.Figure(data=[go.Table(
+            columnwidth=column_widths,
+            header=dict(
+                values=list(df.columns),
+                fill_color='paleturquoise',
+                align=['left'] + ['center'] * (len(df.columns) - 1),
+                font=dict(size=12, color='black')
+            ),
+            cells=dict(
+                values=[df[col] for col in df.columns],
+                fill_color=cell_fills or ['white'] * len(df.columns),
+                align=['left'] + ['center'] * (len(df.columns) - 1),
+                font=dict(size=11)
+            )
+        )])
+        
+        fig.update_layout(
+            title=title,
+            height=max(400, 100 + len(df) * 30),
+            margin=dict(l=20, r=20, t=50, b=20)
+        )
         return fig
         
     def _generate_summary(self, optimization_results: Dict, successfully_analyzed: int) -> Dict[str, Any]:
@@ -702,16 +555,12 @@ class TpSlOptimizer:
         improvements = []
         changes_recommended = 0
         
-        # AIDEV-TODO-CLAUDE: Significance threshold of 0.1 could be made configurable in the future
-        significance_threshold = 0.1
-        
         for strategy_id, results in optimization_results.items():
             strategy_info = self.strategy_instances[
                 self.strategy_instances['strategy_instance_id'] == strategy_id
             ].iloc[0]
             
-            # Check if change is recommended (meets significance threshold)
-            if abs(results['optimal_net_impact']) > significance_threshold and \
+            if abs(results['optimal_net_impact']) > self.recommendation_significance_threshold and \
                (results['optimal_tp'] != strategy_info['takeProfit'] or 
                 results['optimal_sl'] != strategy_info['stopLoss']):
                 changes_recommended += 1
@@ -745,16 +594,12 @@ class TpSlOptimizer:
             
         recommendations = []
         
-        # AIDEV-TODO-CLAUDE: Significance threshold of 0.1 could be made configurable in the future
-        significance_threshold = 0.1
-        
         for strategy_id, strategy_results in results['optimization_results'].items():
             strategy_info = self.strategy_instances[
                 self.strategy_instances['strategy_instance_id'] == strategy_id
             ].iloc[0]
             
-            # Only export if improvement meets significance threshold
-            if abs(strategy_results['optimal_net_impact']) > significance_threshold:
+            if abs(strategy_results['optimal_net_impact']) > self.recommendation_significance_threshold:
                 recommendations.append({
                     'strategy_instance_id': strategy_id,
                     'strategy': strategy_info['strategy'],
@@ -798,13 +643,12 @@ def run_tp_sl_optimization():
         results = optimizer.run_optimization()
         
         if results['status'] == 'SUCCESS':
-            # Export recommendations
             optimizer.export_recommendations(results)
             
         return results
         
     except Exception as e:
-        logger.error(f"TP/SL optimization failed: {e}")
+        logger.error(f"TP/SL optimization failed: {e}", exc_info=True)
         return {
             'status': 'ERROR',
             'error': str(e)

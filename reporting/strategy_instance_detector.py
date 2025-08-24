@@ -20,11 +20,10 @@ class StrategyInstanceDetector:
     A new instance is created if the same parameter set is used after a 4-day gap.
     """
     
-    def __init__(self, investment_tolerance: float = 0.005):
+    def __init__(self):
         """
-        Initialize detector. investment_tolerance is kept for legacy compatibility but is unused.
+        Initialize detector.
         """
-        self.investment_tolerance = investment_tolerance
         self.strategy_instances: Dict[str, Dict[str, Any]] = {}
         self.position_to_instance: Dict[str, str] = {}
         
@@ -234,10 +233,10 @@ class StrategyInstanceDetector:
             logger.error(f"Error exporting strategy instances: {e}")
             return False
 
-def run_instance_detection(input_csv: str = "positions_to_analyze.csv", output_csv: str = "strategy_instances.csv", investment_tolerance: float = 0.005) -> bool:
+def run_instance_detection(input_csv: str = "positions_to_analyze.csv", output_csv: str = "strategy_instances.csv") -> bool:
     """Run complete strategy instance detection process."""
     logger.info("Starting strategy instance detection...")
-    detector = StrategyInstanceDetector(investment_tolerance=investment_tolerance)
+    detector = StrategyInstanceDetector()
     updated_df, instances = detector.detect_instances(input_csv)
     
     if updated_df.empty:

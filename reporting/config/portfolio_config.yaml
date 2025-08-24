@@ -127,3 +127,16 @@ optimization_engine:
     last_n_days_full_weight: 7
     decay_period_weeks: 4
     minimum_weight: 0.5
+
+  # PHASE 5: TP/SL Optimization Engine
+optimization_engine:
+  enable: true
+  min_positions_for_optimization: 3 # Min positions for a strategy to be analyzed
+  recommendation_significance_threshold: 0.1 # Minimal % PnL change to treat the recommendation as significant
+
+  # Time decay settings for weighting recent performance
+  time_weighting:
+    enable: true
+    last_n_days_full_weight: 7
+    decay_period_weeks: 4
+    minimum_weight: 0.5

@@ -176,33 +176,6 @@ def cache_analyzer_menu():
         else:
             print("Invalid choice, please try again.")
 
-def tp_sl_analysis_menu():
-    """
-    TP/SL Analysis submenu.
-    """
-    while True:
-        print("\n" + "="*70)
-        print("--- Post-Close 'What-If' Analysis (Legacy Phase 3B) ---")
-        print("="*70)
-        print("1. Run post-close analysis for recent positions")
-        print("2. Generate TP/SL optimization report")
-        print("3. View analysis results and statistics")
-        print("4. Export ML dataset for Phase 4")
-        print("5. Back to main menu")
-        
-        choice = input("\nSelect option (1-5): ").strip()
-        
-        if choice == "1":
-            run_post_close_analysis()
-        elif choice == "2":
-            generate_tp_sl_report()
-        elif choice == "3":
-            view_analysis_results()
-        elif choice == "4":
-            export_ml_dataset()
-        elif choice == "5":
-            break
-
 def tp_sl_range_testing_menu():
     """
     TP/SL Range Testing submenu for Phase 4A.
@@ -373,45 +346,6 @@ def run_tp_sl_optimization_engine():
     except Exception as e:
         logger.error(f"Optimization engine failed: {e}")
         print(f"❌ Failed to run optimization: {e}")
-
-def run_post_close_analysis():
-    """
-    Run post-close analysis with user feedback.
-    """
-    try:
-        from reporting.post_close_analyzer import PostCloseAnalyzer
-        from reporting.data_loader import load_and_prepare_positions
-        
-        analyzer = PostCloseAnalyzer()
-        positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
-        
-        print(f"\nLoaded {len(positions_df)} positions for analysis...")
-        
-        # Apply filters and show results
-        filtered_df = analyzer.apply_scope_filters(positions_df)
-        print(f"After applying filters: {len(filtered_df)} positions selected")
-        
-        if filtered_df.empty:
-            print("No positions meet analysis criteria. Check configuration filters.")
-            return
-            
-        # Run analysis with progress
-        results = analyzer.run_bulk_analysis(filtered_df)
-        
-        print(f"\n✅ Analysis complete!")
-        print(f"  Successful: {results['successful_analyses']}/{results['total_positions']}")
-        print(f"  Missed opportunities identified: {results['positions_with_missed_upside']}")
-        print(f"  Average missed upside: {results['avg_missed_upside_pct']:.1f}%")
-        
-        # Save results for later viewing
-        import json
-        with open("reporting/output/tp_sl_analysis_results.json", "w") as f:
-            json.dump(results, f, indent=2, default=str)
-        print("\nResults saved to reporting/output/tp_sl_analysis_results.json")
-        
-    except Exception as e:
-        logger.error(f"Post-close analysis failed: {e}")
-        print(f"❌ Analysis failed: {e}")
 
 def generate_tp_sl_report():
     """
@@ -595,11 +529,10 @@ def main_menu():
         print("-"*70)
         print("--- ADVANCED ANALYSIS & TOOLS ---")
         print("6. TP/SL Range Testing & Optimization Submenu (Phase 4 & 5)")
-        print("7. Post-Close 'What-If' Analysis (Legacy Phase 3B)")
-        print("8. Cache Management & Debugging")
+        print("7. Cache Management & Debugging")
         print("0. Exit")
         
-        choice = input("Select an option (0-8): ")
+        choice = input("Select an option (0-7): ")
 
         if choice == '1':
             run_data_preparation_pipeline()
@@ -614,8 +547,6 @@ def main_menu():
         elif choice == '6':
             tp_sl_range_testing_menu()
         elif choice == '7':
-            tp_sl_analysis_menu()
-        elif choice == '8':
             cache_analyzer_menu()
         elif choice == '0':
             print("Exiting application...")
