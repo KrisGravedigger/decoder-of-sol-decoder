@@ -135,6 +135,7 @@ This phase is divided into two parts:
         - Dynamic filtering by date range and minimum positions per strategy.
         - Smart TP/SL matching using Euclidean distance.
         - Real-time updates of a comprehensive results table.
+        - Sensible default values (6% TP, 10% SL) to provide users with an immediate, useful starting point for analysis.
 
 ---
 #### **Phase 4A: Static Reporting & Per-Strategy Analysis** ✅ **COMPLETE**
@@ -173,6 +174,9 @@ Input: The enriched positions_to_analyze.csv (from Step 0).
 Core Logic:
 For each position, it will reuse the logic from PostCloseAnalyzer to generate a post-close value timeline once.
 It will then iterate through the configured TP/SL grid. For each pair, it will scan the timeline to find the simulated exit point (TP, SL, or end of simulation).
+
+**Simulation Performance Optimization:** To reduce computational overhead, the simulation engine includes a performance optimization layer. It intelligently skips "pointless" simulations where the outcome is predictable. For example, if a position's actual close reason was 'TP' at 8%, the engine will not simulate a lower TP of 6%, as the outcome would be identical. Similarly, for 'OOR' closes, it avoids testing deeper Stop Loss levels that would not have been triggered anyway. This undocumented feature significantly speeds up the range testing process without affecting the accuracy of the results.
+
 Outputs:
 range_test_detailed_results.csv: A large file with results for every combination (position_id, strategy_instance_id, tp_level, sl_level, simulated_pnl). This will be the foundation for Phase 4B.
 range_test_aggregated.csv: Aggregated results, grouped by strategy_instance_id, tp_level, and sl_level.
@@ -286,6 +290,8 @@ optimization_engine:
 - Resolved all circular dependency issues, stabilizing the application's architecture.
 - Implemented robust, graceful handling of incomplete data (e.g., missing fees/volume).
 - Created a complete, end-to-end user workflow from analysis execution to report generation.
+- **Ensured architectural integrity** by refactoring the simulation engine to use the official `Position` data model, eliminating a critical source of technical debt and potential data desynchronization bugs.
+- **Hardened the simulation pipeline** by resolving data type conflicts during position object creation, ensuring robust and reliable execution of the entire Phase 4 analysis.
 
 **Ready for Next Phase:**
 - All TP/SL range testing functionality is complete and operational
@@ -580,3 +586,33 @@ A JavaScript syntax error was identified in `reporting/templates/comprehensive_r
 - **AIDEV-TODO-CLAUDE: Design a rule-based "Strategic Advisor" module.**
   - **Goal:** Provide automated, natural language recommendations based on historical performance trends.
   - **Scope:** Would involve comparing recent vs. older strategies, analyzing the impact of parameter tweaks, and synthesizing findings into actionable text-based advice. Complexity is very high; this is a long-term strategic goal.
+
+### **2025-08-24: Phase 5 UX/UI Refinements & Data Sync Fixes**
+
+**Goal:** Address a series of UX and data consistency issues that emerged after a major refactoring of the strategy instance detection logic.
+
+**Achieved:**
+- **Data Pipeline Synchronization:**
+  - Fixed a `KeyError: 'investment_sol'` by ensuring `strategy_instance_detector.py` maintains backward compatibility for column names in its output CSV.
+  - Diagnosed that the missing Phase 5 report section was due to stale data artifacts with mismatched `strategy_instance_id` formats. The solution is to re-run the full optimization pipeline (Menu Option 5).
+
+- **Interactive 'What-If' Tool Enhancements (Phase 4B):**
+  - **Smart Steppers:** Implemented custom JavaScript logic for UI stepper arrows and keyboard arrows in TP/SL inputs. Users can now seamlessly jump between valid, pre-tested values instead of fighting the default browser behavior.
+  - **Enhanced Context:** The tool's results table now displays the statically-determined optimal TP/SL settings for each strategy, providing an immediate benchmark for comparison against user-selected values.
+
+- **Phase 5 Report Readability Improvements:**
+  - **Consistent Naming:** Corrected the "Dynamic Stop Loss Floor Analysis" table to display the full `strategy_instance_id`, matching the "Strategy Performance Matrix".
+  - **Improved Layout:** Widened the crucial 'Strategy' column in both Phase 5 tables using Plotly's `columnwidth` property. This prevents aggressive text wrapping and significantly improves the readability of long strategy identifiers.
+
+**System Status:** The user interface for the Phase 4B and Phase 5 reports is now more intuitive, consistent, and readable. The data pipeline issues are understood, with a clear path to resolution.
+
+### **2025-08-24: Phase 4 Simulation Engine Stabilization & Architectural Refinement**
+
+**Goal:** Resolve a critical architectural inconsistency in the TP/SL range simulator and fix a subsequent data type error that blocked execution.
+
+**Achieved:**
+- **Architectural Refactoring:** Replaced the local, temporary `SimplePosition` class in `range_test_simulator.py` with the official `core.models.Position` model. This eliminates technical debt and ensures a single source of truth for position data.
+- **Critical Bug Fix:** Resolved a `ValueError` by correctly handling the `open_timestamp` data type (string vs. datetime) during `Position` object initialization. The timestamp is now temporarily formatted as a string for the constructor call, satisfying its requirements without compromising data integrity for the simulation.
+- **Pipeline Hardening:** The entire Phase 4A simulation pipeline is now architecturally consistent, robust, and fully operational.
+
+**System Status:** Phase 4A is stable and its implementation is architecturally sound. ✅

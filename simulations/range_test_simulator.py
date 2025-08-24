@@ -14,6 +14,7 @@ import json  # AIDEV-DEBUG
 
 from reporting.post_close_analyzer import PostCloseAnalyzer
 from reporting.data_loader import load_and_prepare_positions
+from core.models import Position  # ZMIANA: Import oficjalnego modelu
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class TpSlRangeSimulator:
             'aggregated_results': aggregated_df
         }
         
-    def _get_position_timeline(self, position: Any) -> List[Dict]:
+    def _get_position_timeline(self, position: Position) -> List[Dict]:
         """
         Get a COMPLETE historical timeline for a position, combining the actual
         in-position period with the post-close simulation period.
@@ -144,7 +145,7 @@ class TpSlRangeSimulator:
             logger.error(f"Failed to get complete timeline for position {position.position_id}: {e}", exc_info=True)
             return []
 
-    def _find_exit_in_timeline(self, position: Any, timeline: List[Dict], tp_level: float, sl_level: float) -> Dict[str, Any]:
+    def _find_exit_in_timeline(self, position: Position, timeline: List[Dict], tp_level: float, sl_level: float) -> Dict[str, Any]:
         """
         Finds the simulated exit point and calculates the resulting PnL,
         correctly handling a dynamic OOR (Out of Range) timeout and price threshold.
@@ -206,7 +207,7 @@ class TpSlRangeSimulator:
             'days_to_exit': days_to_exit,
         }
 
-    def _simulate_single_combination(self, position: Any, timeline: List[Dict], 
+    def _simulate_single_combination(self, position: Position, timeline: List[Dict], 
                                 tp_level: float, sl_level: float, 
                                 strategy_instance_id: str) -> Dict[str, Any]:
         """
@@ -337,32 +338,45 @@ class TpSlRangeSimulator:
         
         return aggregated
         
-    def _row_to_position(self, row: pd.Series) -> Any:
+    def _row_to_position(self, row: pd.Series) -> Position:
         """
-        Convert DataFrame row to position-like object.
+        Convert DataFrame row to a Position object for simulation.
         
         Args:
-            row: DataFrame row
+            row: DataFrame row containing position data.
             
         Returns:
-            Position-like object
+            A populated Position object.
         """
-        class SimplePosition:
-            pass
-            
-        position = SimplePosition()
+        # CHANGE: Removed SimplePosition class and now using the official Position model.
+        # We correctly initialize the object using its constructor.
+        # CRITICAL FIX: The Position constructor expects a string in MM/DD-HH:MM:SS format.
+        # We convert the Timestamp back to this format ONLY for initialization purposes.
+        position = Position(
+            open_timestamp=row['open_timestamp'].strftime('%m/%d-%H:%M:%S'),
+            bot_version=row.get('bot_version', 'unknown'),
+            open_line_index=int(row.get('open_line_index', -1)), # Ensure it's an integer
+            wallet_id=row.get('wallet_id', 'unknown_wallet'),
+            source_file=row.get('source_file', 'unknown_file')
+        )
         
-        # Map columns
+        # CHANGE: Mapping attributes from the DataFrame row to the Position object.
         position.position_id = row['position_id']
         position.pool_address = row['pool_address']
-        # AIDEV-TPSL-CLAUDE: CRITICAL FIX - Ensure timestamps are datetime objects.
-        # DataFrame can sometimes hold them as strings or pd.Timestamp, causing downstream errors.
+        
+        # AIDEV-TPSL-CLAUDE: CRITICAL FIX - Ensure timestamps are datetime objects for simulation.
+        # The Position model may store them as strings, but the simulation engine requires datetime.
         position.open_timestamp = pd.to_datetime(row['open_timestamp'])
         position.close_timestamp = pd.to_datetime(row['close_timestamp'])
+        
         position.initial_investment = row['investment_sol']
         position.final_pnl = row['pnl_sol']
         position.close_reason = row['close_reason']
         position.actual_strategy = row['strategy_raw']
+        
+        # Populate TP/SL and other relevant fields for simulation
+        position.take_profit = row.get('takeProfit')
+        position.stop_loss = row.get('stopLoss')
         position.total_fees_collected = row.get('total_fees_collected', 0.0)
         position.min_bin_price = row.get('min_bin_price')
         position.max_bin_price = row.get('max_bin_price')
