@@ -209,6 +209,7 @@
             
             <script>
                 const detailedSimulationData = {{ enriched_simulation_json | safe }};
+                const optimalSettingsMap = JSON.parse('{{ optimal_settings_json | safe }}'); // DODAJ TĘ LINIĘ
                 const testedTpLevels = JSON.parse('{{ tested_tp_levels_json | safe }}');
                 const testedSlLevels = JSON.parse('{{ tested_sl_levels_json | safe }}');
                 
@@ -282,7 +283,10 @@
                     }
                     results.forEach(res => {
                         const exitBreakdown = `TP: <span class="positive">${res.exitCounts['TP']||0}</span>, SL: <span class="negative">${res.exitCounts['SL']||0}</span>, OOR: ${res.exitCounts['OOR']||0}, END: ${res.exitCounts['END']||0}`;
-                        tbody.innerHTML += `<tr><td>${res.strategyId}<br><small>Using: TP ${res.actualTP}%, SL ${res.actualSL}%</small></td><td>${res.positionCount}</td><td class="${res.totalPnL >= 0 ? 'positive' : 'negative'}">${res.totalPnL.toFixed(3)}</td><td class="${res.avgPnL >= 0 ? 'positive' : 'negative'}">${res.avgPnL.toFixed(3)}</td><td>${exitBreakdown}</td></tr>`;
+                        const optimal = optimalSettingsMap[res.strategyId] || { tp_level: 'N/A', sl_level: 'N/A' };
+                        const usingText = `Simulated: TP ${res.actualTP}% SL ${res.actualSL}%`;
+                        const optimalText = ` | Optimal: TP ${optimal.tp_level}% SL ${optimal.sl_level}%`;
+                        tbody.innerHTML += `<tr><td>${res.strategyId}<br><small>${usingText}${optimalText}</small></td><td>${res.positionCount}</td><td class="${res.totalPnL >= 0 ? 'positive' : 'negative'}">${res.totalPnL.toFixed(3)}</td><td class="${res.avgPnL >= 0 ? 'positive' : 'negative'}">${res.avgPnL.toFixed(3)}</td><td>${exitBreakdown}</td></tr>`;
                     });
                 }
                 

@@ -444,17 +444,19 @@ class TpSlOptimizer:
                 colors.append('red' if impact_val < 0 else 'green')
         
         fig = go.Figure(data=[go.Table(
+            # AIDEV-NOTE-CLAUDE: Use columnwidth to give the first column 3x the relative width of others.
+            columnwidth=[3, 1, 1, 1, 1, 1, 1, 1],
             header=dict(
                 values=list(df.columns),
                 fill_color='paleturquoise',
-                align='left',
+                align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
                 font=dict(size=12, color='black')
             ),
             cells=dict(
                 values=[df[col] for col in df.columns],
                 fill_color=[['white']*len(df) if i != 5 
                            else colors for i in range(len(df.columns))],
-                align='left',
+                align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
                 font=dict(size=11)
             )
         )])
@@ -462,7 +464,7 @@ class TpSlOptimizer:
         fig.update_layout(
             title="Strategy Performance Matrix - Net PnL Impact of Optimal TP/SL",
             height=400 + len(data) * 30,
-            margin=dict(l=0, r=0, t=40, b=0)
+            margin=dict(l=20, r=20, t=40, b=0)
         )
         
         return fig
@@ -585,7 +587,6 @@ class TpSlOptimizer:
         data = []
         
         for strategy_id, results in optimization_results.items():
-            strategy_name = strategy_id.split('_')[0]  # Short name
             ev_analysis_df = results['sl_floor_analysis']
             
             # Filter for viable combinations only
@@ -598,7 +599,7 @@ class TpSlOptimizer:
                     deepest_row = tp_viable.loc[tp_viable['sl_level'].idxmax()]
                     
                     data.append({
-                        'Strategy': strategy_name,
+                        'Strategy': strategy_id,
                         'TP Level': f"{tp}%",
                         'Deepest Viable SL': f"{deepest_row['sl_level']}%",
                         'Historical Win Rate': f"{deepest_row['historical_win_rate']*100:.1f}%",
@@ -634,24 +635,26 @@ class TpSlOptimizer:
             if diagnostic_data:
                 diag_df = pd.DataFrame(diagnostic_data)
                 fig = go.Figure(data=[go.Table(
+                    # AIDEV-NOTE-CLAUDE: Use columnwidth to give the first column 3x the relative width of others.
+                    columnwidth=[3, 1, 1, 1, 1, 1, 1, 1],
                     header=dict(
-                        values=["Diagnostic: Why No Viable SL Found"] + list(diag_df.columns),
-                        fill_color='salmon',
-                        align='left',
-                        font=dict(size=12, color='white')
+                        values=list(df.columns),
+                        align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
+                        font=dict(size=12, color='black')
                     ),
                     cells=dict(
-                        values=[["Historical win rates are below mathematical requirements"]] + 
-                            [diag_df[col] for col in diag_df.columns],
-                        fill_color='mistyrose',
-                        align='left',
+                        values=[df[col] for col in df.columns],
+                        fill_color=[['white']*len(df) if i != 5 
+                                else colors for i in range(len(df.columns))],
+                        align=['left', 'center', 'center', 'center', 'center', 'center', 'center', 'center'],
                         font=dict(size=11)
                     )
                 )])
+                
                 fig.update_layout(
-                    title="SL Floor Analysis - Diagnostic View (No Viable Floors Found)",
-                    height=max(400, 100 + len(diagnostic_data) * 25),
-                    margin=dict(l=0, r=0, t=40, b=0)
+                    title="Strategy Performance Matrix - Net PnL Impact of Optimal TP/SL",
+                    height=400 + len(data) * 30,
+                    margin=dict(l=20, r=20, t=40, b=0)
                 )
             else:
                 fig = go.Figure(data=[go.Table(
@@ -666,17 +669,19 @@ class TpSlOptimizer:
             colors = ['red' if x < 5 else 'yellow' if x < 10 else 'green' for x in margins]
             
             fig = go.Figure(data=[go.Table(
+                # AIDEV-NOTE-CLAUDE: Use columnwidth to give the first column 3x the relative width of others.
+                columnwidth=[3, 1, 1, 1, 1, 1, 1],
                 header=dict(
                     values=list(df.columns),
                     fill_color='lightblue',
-                    align='left',
+                    align=['left', 'center', 'center', 'center', 'center', 'center', 'center'],
                     font=dict(size=12, color='black')
                 ),
                 cells=dict(
                     values=[df[col] for col in df.columns],
                     fill_color=[['white']*len(df) if i != 5 
                             else colors for i in range(len(df.columns))],
-                    align='left',
+                    align=['left', 'center', 'center', 'center', 'center', 'center', 'center'],
                     font=dict(size=11)
                 )
             )])
@@ -684,7 +689,7 @@ class TpSlOptimizer:
             fig.update_layout(
                 title="Dynamic SL Floor Analysis - Deepest Viable Stop Loss by Take Profit Level",
                 height=max(400, 100 + len(data) * 25),
-                margin=dict(l=0, r=0, t=40, b=0)
+                margin=dict(l=20, r=20, t=40, b=0)
             )
         
         return fig

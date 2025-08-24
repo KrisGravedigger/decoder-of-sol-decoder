@@ -545,3 +545,22 @@ A JavaScript syntax error was identified in `reporting/templates/comprehensive_r
 - This cleanup restored the correct structure of the `updateWhatIfAnalysis` function, allowing the existing, correct logic for rendering the results table to execute properly.
 
 **Status:** The interactive "what-if" tool is now fully functional. The data pipeline from backend simulation to frontend visualization is complete and working as intended. Phase 4 is officially stable and complete.
+
+### **2025-08-24: Phase 5 UX/UI Refinements & Data Sync Fixes**
+
+**Goal:** Address a series of UX and data consistency issues that emerged after a major refactoring of the strategy instance detection logic.
+
+**Achieved:**
+- **Data Pipeline Synchronization:**
+  - Fixed a `KeyError: 'investment_sol'` by ensuring `strategy_instance_detector.py` maintains backward compatibility for column names in its output CSV.
+  - Diagnosed that the missing Phase 5 report section was due to stale data artifacts with mismatched `strategy_instance_id` formats. The solution is to re-run the full optimization pipeline (Menu Option 5).
+
+- **Interactive 'What-If' Tool Enhancements (Phase 4B):**
+  - **Smart Steppers:** Implemented custom JavaScript logic for UI stepper arrows and keyboard arrows in TP/SL inputs. Users can now seamlessly jump between valid, pre-tested values instead of fighting the default browser behavior.
+  - **Enhanced Context:** The tool's results table now displays the statically-determined optimal TP/SL settings for each strategy, providing an immediate benchmark for comparison against user-selected values.
+
+- **Phase 5 Report Readability Improvements:**
+  - **Consistent Naming:** Corrected the "Dynamic Stop Loss Floor Analysis" table to display the full `strategy_instance_id`, matching the "Strategy Performance Matrix".
+  - **Improved Layout:** Widened the crucial 'Strategy' column in both Phase 5 tables using Plotly's `columnwidth` property. This prevents aggressive text wrapping and significantly improves the readability of long strategy identifiers.
+
+**System Status:** The user interface for the Phase 4B and Phase 5 reports is now more intuitive, consistent, and readable. The data pipeline issues are understood, with a clear path to resolution.

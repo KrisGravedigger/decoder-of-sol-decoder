@@ -150,6 +150,16 @@ class HTMLReportGenerator:
         formatted_weekend_data = self._format_weekend_data(weekend_analysis)
         best_sim_strategy = self._get_best_sim_strategy(strategy_simulations)
         enriched_simulation_json = self._prepare_enriched_simulation_data()
+        # AIDEV-NOTE-CLAUDE: Create a map of optimal settings for the interactive tool
+        optimal_settings_map = {}
+        try:
+            if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                metric = self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
+                optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')[metric].idxmax()]
+                optimal_settings_map = optimal_df.set_index('strategy_instance_id')[['tp_level', 'sl_level']].to_dict('index')
+        except Exception as e:
+            logger.warning(f"Could not generate optimal settings map for interactive tool: {e}")
 
         # Pass tested TP/SL levels to the template for JS logic
         tested_tp_levels = self.config.get('range_testing', {}).get('tp_levels', [])
@@ -166,6 +176,7 @@ class HTMLReportGenerator:
             'config': self.config,
             'plotly_js': pyo.get_plotlyjs(),
             'enriched_simulation_json': enriched_simulation_json,
+            'optimal_settings_json': json.dumps(optimal_settings_map),
             'tested_tp_levels_json': json.dumps(sorted(tested_tp_levels)),
             'tested_sl_levels_json': json.dumps(sorted(tested_sl_levels))
         }
