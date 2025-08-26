@@ -43,24 +43,13 @@ def _parse_custom_timestamp(ts_str: str) -> Optional[datetime]:
 
 
 def clean_ansi(text: str) -> str:
-    """Remove ANSI escape sequences, emoji, and other problematic Unicode characters."""
+    """Remove ANSI escape sequences."""
     if not text:
         return text
     
-    # Remove ANSI escape sequences
-    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
-    
-    # Remove emoji and other problematic Unicode characters
-    text = re.sub(r'[\U0001F600-\U0001F64F]', '', text)  # Emoticons
-    text = re.sub(r'[\U0001F300-\U0001F5FF]', '', text)  # Symbols & pictographs
-    text = re.sub(r'[\U0001F680-\U0001F6FF]', '', text)  # Transport & map symbols
-    text = re.sub(r'[\U0001F1E0-\U0001F1FF]', '', text)  # Flags (iOS)
-    text = re.sub(r'[\U00002600-\U000027BF]', '', text)  # Miscellaneous symbols
-    text = re.sub(r'[\U0001f900-\U0001f9ff]', '', text)  # Supplemental Symbols and Pictographs
-    text = re.sub(r'[\U00002700-\U000027bf]', '', text)  # Dingbats
-    text = re.sub(r'[\u200b-\u200d\ufeff]', '', text)  # Zero-width spaces and BOM
-    
-    return text.strip()
+    # Remove ANSI escape sequences, leaving all other characters (including Unicode) intact.
+    ansi_escape_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+    return ansi_escape_pattern.sub('', text).strip()
 
 
 def find_context_value(patterns: List[str], lines: List[str], start_index: int, lookback: int) -> Optional[str]:
@@ -96,7 +85,8 @@ def normalize_token_pair(text: Optional[str]) -> Optional[str]:
     """
     if not text: 
         return None
-    match = re.search(r'([\w\s().-]+-SOL)', clean_ansi(text))
+    # Support Unicode characters including emoji and Chinese characters
+    match = re.search(r'([^|]+-SOL)', clean_ansi(text))
     return match.group(1).strip() if match else None
 
 
@@ -163,11 +153,11 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
         A dictionary containing all parsed position details, or None if parsing fails.
     """
     cleaned_line = clean_ansi(line)
-
+      
     open_pattern = re.compile(
-        r'v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2}).*'
-        r'(?P<strategy_type>bidask|spot|spot-onesided):\s*\d+\s*\|\s*OPENED\s*'
-        r'(?P<token_pair>[\w\s().-]+-SOL)'
+        r'v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2})\s*\[LOG\]\s*'
+        r'(?P<strategy_type>bidask|spot|spot-onesided):\s*(?:null|\d+)\s*\|\s*OPENED\s*'
+        r'(?P<token_pair>.*?-SOL)(?=\s*\(Symbol:|\s+\||$)'
     )
     
     match = open_pattern.search(cleaned_line)
@@ -177,8 +167,11 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
         return None
 
     details = match.groupdict()
+    
+    # Clean up token_pair - remove extra whitespace and normalize
+    details['token_pair'] = details['token_pair'].strip()
 
-    step_size_match = re.search(r'STEP SIZE:\s*(WIDE|SIXTYNINE|MEDIUM|NARROW)', cleaned_line, re.IGNORECASE)
+    step_size_match = re.search(r'STEP SIZE:\s*(WIDE|sixtyNine|SIXTYNINE|MEDIUM|NARROW)', cleaned_line, re.IGNORECASE)
     step_size = step_size_match.group(1).upper() if step_size_match else "UNKNOWN"
     
     base_strategy = "Spot (1-Sided)" if "spot" in details['strategy_type'].lower() else "Bid-Ask (1-Sided)"
@@ -197,6 +190,7 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
     details['wallet_address'] = wallet_match.group(1) if wallet_match else None
 
     pool_address = None
+
     for i in range(line_index, max(-1, line_index - 60), -1):
         context_line = clean_ansi(all_lines[i])
         pool_match = re.search(r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', context_line)
@@ -205,7 +199,7 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
             if debug_enabled:
                 logger.debug(f"Found pool address '{pool_address}' at line {i + 1} for open event at line {line_index + 1}.")
             break
-    
+
     details['pool_address'] = pool_address
 
     if debug_enabled:
@@ -551,3 +545,44 @@ def extract_oor_parameters(log_lines: List[str], start_line: int, end_line: int)
     
     # Return a dictionary with None values if no matching line is found
     return {'timeout_minutes': None, 'threshold_pct': None}
+
+def parse_position_from_pool_creation_line(line: str, line_index: int, all_lines: List[str], debug_enabled: bool = False) -> Optional[Dict[str, Any]]:
+    """
+    Parses position details from the "Opened a new pool for..." log format.
+    This format does NOT contain TP/SL or investment amount in the line itself.
+    """
+    cleaned_line = clean_ansi(line)
+
+    open_pattern = re.compile(
+        r'v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2})\s*\[LOG\]\s*'
+        r'Opened a new pool for\s*(?P<token_pair>.+?)\s*\(Symbol:'
+    )
+    
+    match = open_pattern.search(cleaned_line)
+    if not match:
+        if debug_enabled:
+            logger.debug(f"Line {line_index + 1} did not match the 'Opened a new pool' pattern.")
+        return None
+
+    details = match.groupdict()
+    
+    # Normalize token_pair to always end with -SOL
+    token_pair_raw = details['token_pair'].strip()
+    if not token_pair_raw.endswith('-SOL'):
+        details['token_pair'] = f"{token_pair_raw}-SOL"
+
+    # This format lacks strategy, TP, SL, and investment details in the line.
+    # We set defaults and can enhance later if context provides more info.
+    details['actual_strategy'] = "Spot (1-Sided) UNKNOWN" # Assume Spot, mark step_size as UNKNOWN
+    details['take_profit'] = 0.0
+    details['stop_loss'] = 0.0
+    details['initial_investment'] = None # This data is not available in this log line
+    details['wallet_address'] = None
+
+    pool_match = re.search(r'app\.meteora\.ag/dlmm/([a-zA-Z0-9]+)', cleaned_line)
+    details['pool_address'] = pool_match.group(1) if pool_match else None
+
+    if debug_enabled:
+        logger.debug(f"Parsed details from 'new pool' line {line_index + 1}: {details}")
+
+    return details

@@ -542,6 +542,29 @@ Future Roadmap:
 
 ## Recent Milestones (Last 10 Major Updates)
 
+**2025-08-25: Critical Log Parser Debugging & Regex Pattern Fix**
+
+Major Parser Issue Resolved: Fixed critical regex patterns causing 0 position detection in SOL Decoder v0.13.36 logs
+Root Cause Analysis: Bot format changed to bidask: null | OPENED instead of expected bidask: 123 | OPENED, plus [LOG] prefix requirement
+Silent Failure Detection Fix: Modified success confirmation patterns to accept OPENED line itself as validation, reducing false negatives from 94.4% to 0%
+Emoji Close Pattern Support: Updated close event regex to handle 🟨Closed TOKEN-SOL format with emoji prefixes
+Parsing Success Rate: Improved from 0/18 positions to 18/18 positions detected, with 8 positions above 0.01 SOL threshold
+Cross-File Position Tracking: Successfully handling position opens/closes across multiple log files with superseded logic
+Data Quality Improvement: From 0 usable positions to 55/63 expected positions (87% capture rate) in August 1-20 period
+
+**Identified Remaining Issues:**
+
+Missing 8 Positions: 8/63 expected positions not captured, requires diagnostic analysis
+Peak PnL Scaling Error: max_profit_during_position and max_loss_during_position values ~10x too high
+Strategy End Date Complexity: Need to remove strategy end dates from reports to simplify presentation
+
+**Technical Implementation:**
+
+Updated Regex Pattern: v(?P<version>[\d.]+)-(?P<timestamp>\d{2}/\d{2}-\d{2}:\d{2}:\d{2})\s*\[LOG\]\s*(?P<strategy_type>bidask|spot|spot-onesided):\s*(?:null|\d+)\s*\|\s*OPENED\s*(?P<token_pair>[\w\s().-]+-SOL)
+Enhanced Success Patterns: Added OPENED line validation and Checking open positions on meteora as success indicators
+Improved Close Detection: Closed\s+([A-Za-z0-9\s\-_()]+-SOL)\s+\(Symbol: pattern for emoji-prefixed messages
+CSV Field Handling: Fixed strategy_instance_id field conflicts in data export
+
 **2025-07-26: TP/SL Optimizer Phase 3A & 3B Complete**
 - **Peak PnL Extraction:** Enhanced Position model with max_profit/max_loss fields parsed from logs
 - **Post-Close Analysis Engine:** "What-if" simulation with LP position valuation and fee allocation

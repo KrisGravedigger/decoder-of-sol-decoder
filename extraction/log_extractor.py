@@ -30,12 +30,16 @@ FAILED_POSITION_PATTERNS = [
 
 # AIDEV-NOTE-GEMINI: Added success patterns to prevent "silent failures" from being treated as successful.
 SUCCESS_CONFIRMATION_PATTERNS = [
-    # Pattern 1: Catches summary lines like "bidask: 12345 | OPENED..." or "spot: 12345 | OPENED..."
-    r'(bidask|spot|spot-onesided):\s*\d+',
-    # Pattern 2: Catches explicit pool creation logs like "Opened a new pool for..."
+    # AIDEV-NOTE-CLAUDE: Updated for this bot's format - mainly look for the OPENED line itself
+    # Pattern 1: Accept the OPENED line as success confirmation
+    r'bidask:\s*(?:null|\d+)\s*\|\s*OPENED',
+    r'spot:\s*(?:null|\d+)\s*\|\s*OPENED',
+    # Pattern 2: Explicit pool creation logs  
     r'Opened a new pool for',
-    # Pattern 3: A generic fallback for future formats
+    # Pattern 3: Generic fallback
     r'Position successfully created',
+    # Pattern 4: Checking open positions (indicates successful continuation)
+    r'Checking open positions on meteora',
 ]
 # AIDEV-NOTE-CLAUDE: This ensures project root is on the path for module resolution
 # This is a robust way to handle imports in a nested structure.
@@ -63,6 +67,7 @@ from extraction.parsing_utils import (
     _parse_custom_timestamp,
     clean_ansi, find_context_value, normalize_token_pair,
     extract_close_timestamp, parse_position_from_open_line,
+    parse_position_from_pool_creation_line,
     parse_final_pnl_with_line_info,
     extract_peak_pnl_from_logs, extract_total_fees_from_logs,
     extract_dlmm_range
@@ -318,10 +323,11 @@ class LogParser:
         token_pair = normalize_token_pair(details.get('token_pair'))
         if not token_pair:
             return
-
-        if self._check_for_failed_position(index, token_pair):
+        
+        failed_check = self._check_for_failed_position(index, token_pair)
+        if failed_check:
             return
-
+              
         if token_pair in self.active_positions:
             old_position = self.active_positions[token_pair]
             old_position.close_reason = "Superseded"
@@ -329,7 +335,7 @@ class LogParser:
             old_position.close_line_index = index
             # AIDEV-NOTE-CLAUDE: Positions closed as Superseded have no known PnL at this point.
             # This should be left as None, which is the default.
-            self.finalized_positions.append(old_position)
+            self.finalized_positions.append(old_position)            
             logger.warning(
                 f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
                 f"was superseded by a new one at line {index + 1}. Closing the old one."
@@ -359,7 +365,7 @@ class LogParser:
         pos.max_bin_price = max_price
         
         self.active_positions[token_pair] = pos
-        
+                
         self.strategy_diagnostic.detect_missing_step_size(
             pos.actual_strategy, index, pos.initial_investment
         )
@@ -371,29 +377,93 @@ class LogParser:
                 f"File: {source_file}, Line: {index + 1}"
             )
 
+    def _process_open_event_from_pool_creation(self, line_content: str, index: int):
+        """
+        Processes a position opening event from the 'Opened a new pool for...' format.
+        """
+        details = parse_position_from_pool_creation_line(
+            line_content, index, self.all_lines, 
+            debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG")
+        )
+
+        if not details:
+            return
+
+        token_pair = normalize_token_pair(details.get('token_pair'))
+        if not token_pair:
+            return
+
+        # Reuse existing logic for handling superseded positions
+        if token_pair in self.active_positions:
+            old_position = self.active_positions[token_pair]
+            old_position.close_reason = "Superseded"
+            old_position.close_timestamp = details['timestamp']
+            old_position.close_line_index = index
+            self.finalized_positions.append(old_position)
+            logger.warning(
+                f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
+                f"was superseded by a new 'new pool' one at line {index + 1}. Closing the old one."
+            )
+        
+        folder_wallet_id, source_file = self._get_file_info_for_line(index)
+        
+        pos = Position(
+            details['timestamp'], details['version'], index,
+            wallet_id=details.get('wallet_address', folder_wallet_id), 
+            source_file=source_file
+        )
+        
+        pos.token_pair = token_pair
+        pos.pool_address = details.get('pool_address')
+        pos.actual_strategy = details.get('actual_strategy', 'UNKNOWN')
+        pos.take_profit = details.get('take_profit', 0.0)
+        pos.stop_loss = details.get('stop_loss', 0.0)
+        pos.initial_investment = details.get('initial_investment')
+        
+        self.active_positions[token_pair] = pos
+
+        if DETAILED_POSITION_LOGGING:
+            logger.info(
+                f"Opened position (from new pool log): {pos.position_id} ({pos.token_pair}) | "
+                f"File: {source_file}, Line: {index + 1}"
+            )
+
     def _process_close_event_without_timestamp(self, index: int):
         """
-        Process a position closing event that doesn't have a timestamp in the line.
-        This is triggered by a definitive 'withdrew liquidity' message. It then looks
-        backwards to find the associated pair and check for critical failure patterns.
+        Process a position closing event. Now smarter: first checks the trigger line for the
+        token pair, then falls back to searching backwards.
         
         Args:
             index: Line index in log where the close was confirmed.
         """
         closed_pair = None
-        # AIDEV-NOTE-GEMINI: Increased lookback from 50 to 150. The pair name can be many lines before the final close confirmation.
-        for i in range(index, max(-1, index - 150), -1):
-            line = clean_ansi(self.all_lines[i])
-            # Primary, more specific pattern, robust against leading characters (e.g., emoji)
-            direct_close_match = re.search(r'\W*Closed\s+([A-Za-z0-9\s\-_()]+-SOL)', line, re.IGNORECASE)
-            if direct_close_match:
-                closed_pair = direct_close_match.group(1).strip()
-                break
-            # Fallback for the older "Removing..." pattern
-            remove_match = re.search(r'Removing positions in\s+([A-Za-z0-9\s\-_()]+\-SOL)', line)
-            if remove_match:
-                closed_pair = remove_match.group(1).strip()
-                break
+        trigger_line = clean_ansi(self.all_lines[index])
+        
+        # New, smarter method: Check the trigger line itself first. This handles "🦎-SOL" perfectly.
+        direct_match = re.search(r'Closed\s+(.+?-SOL)\s*\(Symbol:', trigger_line, re.IGNORECASE)
+        if direct_match:
+            closed_pair = direct_match.group(1).strip()
+        else:
+            # Fallback to the old method: search backwards for other formats
+            for i in range(index, max(-1, index - 150), -1):
+                line = clean_ansi(self.all_lines[i])
+                # Pattern for lines like: 🟨Closed TOKEN-SOL (Symbol: SYMBOL)
+                emoji_close_match = re.search(r'Closed\s+([A-Za-z0-9\s\-_()]+-SOL)\s+\(Symbol:', line, re.IGNORECASE)
+                if emoji_close_match:
+                    closed_pair = emoji_close_match.group(1).strip()
+                    break
+                
+                # Pattern for lines like: Closed TOKEN-SOL
+                direct_close_match_fallback = re.search(r'Closed\s+([A-Za-z0-9\s\-_()]+-SOL)', line, re.IGNORECASE)
+                if direct_close_match_fallback:
+                    closed_pair = direct_close_match_fallback.group(1).strip()
+                    break
+                    
+                # Legacy pattern
+                remove_match = re.search(r'Removing positions in\s+([A-Za-z0-9\s\-_()]+\-SOL)', line)
+                if remove_match:
+                    closed_pair = remove_match.group(1).strip()
+                    break
 
         if not closed_pair:
             logger.warning(f"Could not identify a closed pair for event at line {index+1}. This may indicate a parsing issue and the position might be skipped.")
@@ -406,10 +476,8 @@ class LogParser:
 
         pos = matching_position
 
-        # AIDEV-NOTE-CLAUDE: THE ACTUAL FIX. The critical failure message can appear AFTER the trigger line.
-        # We must scan BOTH backwards and forwards from the "withdrew liquidity" trigger.
         context_lookback = 150
-        context_lookforward = 50  # Scan 50 lines ahead of the trigger.
+        context_lookforward = 50
         start_scan = max(pos.open_line_index, index - context_lookback)
         end_scan = min(len(self.all_lines), index + context_lookforward + 1)
         context_slice = self.all_lines[start_scan : end_scan]
@@ -421,15 +489,12 @@ class LogParser:
                         f"CRITICAL FAILURE DETECTED: Discarding position {pos.position_id} ({pos.token_pair}) "
                         f"due to pattern '{reason}' found near close event at line {index + 1}."
                     )
-                    # Remove from active positions and do not add to finalized list.
                     del self.active_positions[closed_pair]
-                    return # Stop all further processing for this corrupted position.
+                    return
 
         if TARGETED_DEBUG_ENABLED:
-            pass # Specific debug output is handled in extract_peak_pnl_from_logs
+            pass 
 
-        
-        # If no critical failures were found, proceed with normal closing logic.
         pos.close_timestamp = extract_close_timestamp(
             self.all_lines, 
             index, 
@@ -447,46 +512,35 @@ class LogParser:
         
         self.debug_analyzer.process_close_event(pos, index)
         
-        # PHASE 3A: Extract peak PnL and fees
         if pos.close_reason != "active_at_log_end":
             significance_threshold = self.config.get('tp_sl_analysis', {}).get('significance_threshold', 0.01)
-            
-            # For targeted debugging, pass the file path and position ID
             peak_pnl_debug_path = DEBUG_TRACE_FILE if (TARGETED_DEBUG_ENABLED and pos.position_id in DEBUG_TARGET_IDS) else None
 
-            # Smart extraction based on close reason
             if pos.close_reason == 'TP':
-                # We already know max profit (final PnL), but still extract max_loss
                 peak_pnl_data = extract_peak_pnl_from_logs(
                     self.all_lines, pos.open_line_index, index, significance_threshold,
                     debug_file_path=peak_pnl_debug_path,
                     position_id=pos.position_id
                 )
                 pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
-                
-                # Calculate max profit from final PnL
                 if pos.final_pnl is not None and pos.final_pnl > 0 and pos.initial_investment:
                     pos.max_profit_during_position = round((pos.final_pnl / pos.initial_investment) * 100, 2)
                 else:
                     pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
                     
             elif pos.close_reason == 'SL':
-                # We already know max loss (final PnL), but still extract max_profit
                 peak_pnl_data = extract_peak_pnl_from_logs(
                     self.all_lines, pos.open_line_index, index, significance_threshold,
                     debug_file_path=peak_pnl_debug_path,
                     position_id=pos.position_id
                 )
                 pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
-                
-                # Calculate max loss from final PnL
                 if pos.final_pnl is not None and pos.final_pnl < 0 and pos.initial_investment:
                     pos.max_loss_during_position = round((pos.final_pnl / pos.initial_investment) * 100, 2)
                 else:
                     pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
                     
-            else:  # 'LV', 'OOR', 'other'
-                # Extract both max profit and max loss
+            else:
                 peak_pnl_data = extract_peak_pnl_from_logs(
                     self.all_lines, pos.open_line_index, index, significance_threshold,
                     debug_file_path=peak_pnl_debug_path,
@@ -495,7 +549,6 @@ class LogParser:
                 pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
                 pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
             
-            # Extract total fees (same for all close reasons)
             pos.total_fees_collected = extract_total_fees_from_logs(
                 self.all_lines, pos.open_line_index, index,
                 debug_file_path=DEBUG_TRACE_FILE if TARGETED_DEBUG_ENABLED else None
@@ -598,6 +651,10 @@ class LogParser:
         for i, line_content in enumerate(self.all_lines):
             if "| OPENED " in line_content:
                 self._process_open_event(line_content, i)
+            # --- NEW LOGIC TO CATCH 'LIZARD' STYLE POSITIONS ---
+            elif "Opened a new pool for" in line_content and "-SOL" in line_content:
+                self._process_open_event_from_pool_creation(line_content, i)
+            # ----------------------------------------------------
             elif "position and withdrew liquidity" in line_content:
                 self._process_close_event_without_timestamp(i)
 
@@ -629,8 +686,21 @@ class LogParser:
         skipped_superseded = 0
 
         for pos in self.finalized_positions:
+            # TEMPORARY DIAGNOSTIC: Track special tokens through validation
+            is_special = ("LIZARD" in pos.token_pair.upper() if pos.token_pair else False) or \
+                        ("🦎" in pos.token_pair if pos.token_pair else False) or \
+                        ("旺柴" in pos.token_pair if pos.token_pair else False)
+            
+            if is_special:
+                print(f"\n>>> VALIDATION DIAGNOSTIC: {pos.token_pair} ({pos.position_id})")
+                print(f"    Close reason: {pos.close_reason}")
+                if pos.close_reason != "active_at_log_end" and pos.final_pnl is not None:
+                    print(f"    PnL: {pos.final_pnl} (threshold: {MIN_PNL_THRESHOLD})")
+                
             # Filter 0: Superseded positions are not needed for analysis
             if pos.close_reason == "Superseded":
+                if is_special:
+                    print("    >>> FILTERED OUT: Superseded")
                 skipped_superseded += 1
                 continue
 
@@ -659,6 +729,8 @@ class LogParser:
             
             # Filter 3: Low PnL for closed positions
             if pos.close_reason != 'active_at_log_end' and pos.final_pnl is not None and abs(pos.final_pnl) < MIN_PNL_THRESHOLD:
+                if is_special:
+                    print(f"    >>> FILTERED OUT: Low PnL ({pos.final_pnl} < {MIN_PNL_THRESHOLD})")
                 skipped_low_pnl += 1
                 continue
             
@@ -680,6 +752,7 @@ class LogParser:
         1. An explicit failure message is found.
         2. NO explicit success confirmation is found within the window.
         """
+        
         # AIDEV-NOTE-GEMINI: Increased window to 150 to catch delayed messages.
         search_window = 150
         search_end = min(len(self.all_lines), start_index + search_window)
@@ -702,12 +775,24 @@ class LogParser:
                         success_found = True
                         break # Success found, no need to check other success patterns for this line
         
+        # AIDEV-NOTE-CLAUDE: Modified logic - if we find the OPENED line itself, assume success
+        # This bot format logs "bidask: null | OPENED" which should be treated as success
+        if not success_found:
+            # Check if any line in the window contains the OPENED pattern for this token pair
+            for i in range(start_index, search_end):
+                line = clean_ansi(self.all_lines[i])
+                if f"OPENED {token_pair}" in line:
+                    success_found = True
+                    if DETAILED_POSITION_LOGGING:
+                        logger.debug(f"SUCCESS (OPENED line): Found OPENED pattern for {token_pair} at line {i + 1}.")
+                    break
+        
         # After checking the whole window, decide the outcome
         if not success_found:
             if DETAILED_POSITION_LOGGING:
                 logger.warning(f"FAILED (Silent): No success confirmation found for {token_pair} opened at line {start_index + 1} within {search_window} lines.")
             return True # No success confirmation means it's a silent failure
-
+        
         # If we get here, it means success was found and no failure was found.
         if DETAILED_POSITION_LOGGING:
             logger.debug(f"SUCCESS: Position creation for {token_pair} at line {start_index + 1} confirmed successfully.")
