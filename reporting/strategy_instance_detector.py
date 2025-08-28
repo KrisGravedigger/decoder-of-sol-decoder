@@ -29,9 +29,8 @@ class StrategyInstanceDetector:
         
     def _generate_strategy_id(self, strategy: str, tp: float, sl: float, first_use_date: datetime, last_use_date: Optional[datetime] = None) -> str:
         """
-        Generate unique strategy instance ID.
-        If last_use_date is None, generates a temporary ID.
-        Format: {strategy}_TP{tp}_SL{sl}_{YYYY-MM-DD}_{YYYY-MM-DD}_{hash}
+        Generate unique strategy instance ID without end dates.
+        Format: {strategy}_TP{tp}_SL{sl}_{YYYY-MM-DD}_{hash}
         """
         # AIDEV-NOTE-GEMINI: Added NaN check to prevent crashes.
         if pd.isna(tp):
@@ -47,13 +46,8 @@ class StrategyInstanceDetector:
         strategy_base = f"{strategy}_TP{tp_formatted}_SL{sl_formatted}"
         start_date_str = first_use_date.strftime('%Y-%m-%d')
         
-        if last_use_date:
-            # Final format
-            end_date_str = last_use_date.strftime('%Y-%m-%d')
-            strategy_id_base = f"{strategy_base}_{start_date_str}_{end_date_str}"
-        else:
-            # Temporary format
-            strategy_id_base = f"{strategy_base}_{start_date_str}"
+        # AIDEV-NOTE-CLAUDE: Simplified format without end dates for cleaner presentation
+        strategy_id_base = f"{strategy_base}_{start_date_str}"
 
         hash_suffix = hashlib.md5(strategy_id_base.encode()).hexdigest()[:6]
         return f"{strategy_id_base}_{hash_suffix}"
@@ -165,12 +159,12 @@ class StrategyInstanceDetector:
         final_instances = {}
         temp_to_final_id_map = {}
         for temp_id, instance_data in self.strategy_instances.items():
+            # AIDEV-NOTE-CLAUDE: Simplified ID generation without last_use_date
             final_id = self._generate_strategy_id(
                 strategy=instance_data['parameters']['strategy'],
                 tp=instance_data['parameters']['takeProfit'],
                 sl=instance_data['parameters']['stopLoss'],
-                first_use_date=instance_data['first_use_date'],
-                last_use_date=instance_data['last_use_date']
+                first_use_date=instance_data['first_use_date']
             )
             temp_to_final_id_map[temp_id] = final_id
             final_instances[final_id] = instance_data

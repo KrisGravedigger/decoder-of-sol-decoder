@@ -50,7 +50,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 DEBUG_ENABLED = False                    # Master switch for all debug features
 DEBUG_LEVEL = "DEBUG"                   # "DEBUG" for detailed logs, "INFO" for standard logs
 CONTEXT_EXPORT_ENABLED = True          # Enable/disable context export completely
-DETAILED_POSITION_LOGGING = True       # Enable/disable detailed position event logging
+DETAILED_POSITION_LOGGING = False       # Enable/disable detailed position event logging
 
 # === TARGETED DEBUGGING FOR SPECIFIC POSITIONS ===
 TARGETED_DEBUG_ENABLED = False
@@ -523,10 +523,7 @@ class LogParser:
                     position_id=pos.position_id
                 )
                 pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
-                if pos.final_pnl is not None and pos.final_pnl > 0 and pos.initial_investment:
-                    pos.max_profit_during_position = round((pos.final_pnl / pos.initial_investment) * 100, 2)
-                else:
-                    pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
+                pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
                     
             elif pos.close_reason == 'SL':
                 peak_pnl_data = extract_peak_pnl_from_logs(
@@ -535,10 +532,7 @@ class LogParser:
                     position_id=pos.position_id
                 )
                 pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
-                if pos.final_pnl is not None and pos.final_pnl < 0 and pos.initial_investment:
-                    pos.max_loss_during_position = round((pos.final_pnl / pos.initial_investment) * 100, 2)
-                else:
-                    pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
+                pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
                     
             else:
                 peak_pnl_data = extract_peak_pnl_from_logs(
@@ -548,7 +542,7 @@ class LogParser:
                 )
                 pos.max_profit_during_position = peak_pnl_data.get('max_profit_pct')
                 pos.max_loss_during_position = peak_pnl_data.get('max_loss_pct')
-            
+                                           
             pos.total_fees_collected = extract_total_fees_from_logs(
                 self.all_lines, pos.open_line_index, index,
                 debug_file_path=DEBUG_TRACE_FILE if TARGETED_DEBUG_ENABLED else None
