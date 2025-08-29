@@ -627,3 +627,44 @@ CSV Field Handling: Fixed strategy_instance_id field conflicts in data export
 - **Cache API Failure Handling:** Proper distinction between API failures (retry tomorrow) vs verified empty periods (cache forever)
 
 **System Status:** TP/SL Optimization Module complete through Phase 4. Foundation established for Phase 5 ML-driven recommendations. All major objectives achieved. ✅
+
+**2025-08-28: Peak PnL Analysis Debugging & Code Cleanup**
+Issue Resolution - Peak PnL Values Investigation:
+
+**Initial Problem:** Peak PnL fields (max_profit_during_position, max_loss_during_position) showing values ~10x too high (e.g., -5.13 for 9% SL positions)
+- Debugging Process: Implemented targeted debugging with TARGETED_DEBUG_ENABLED for position pos_08-18-07-32-07_2663390
+- Root Cause Discovery: Values were mathematically correct - misunderstanding of units. Peak PnL shows percentages (-5.13%), not SOL amounts (-5.13 SOL)
+- Validation: Debug trace confirmed regex correctly extracted -5.13% from log line: PnL: -0.46183 SOL (Return: -5.13%)
+- Business Logic Confirmation: Position lost 5.13% at peak, then recovered to +6.03% profit at TP close - this is expected LP behavior
+
+**Strategy Instance ID Simplification:**
+
+- Implementation: Modified _generate_strategy_id() in strategy_instance_detector.py to remove last_use_date from ID format
+- Result: Cleaner strategy IDs: Bid-Ask_TP6_SL9_2025-08-14_5c005f (vs previous with end dates)
+- Data Preservation: last_use_date remains in CSV export, only removed from ID generation
+
+**Debug Infrastructure Cleanup:**
+
+- Targeted Debug Disabled: Set TARGETED_DEBUG_ENABLED = False and DETAILED_POSITION_LOGGING = False
+- Log Noise Reduction: Moved validation diagnostics and superseded position warnings to DEBUG-only mode
+- Enhanced Error Messages: Improved "Could not identify closed pair" warnings with file, timestamp, and content preview
+- File Cleanup: Removed peak_pnl_debug.txt debug output file
+
+**Incomplete - Skipped Positions Logging:**
+
+- Requirement: Create skipped_positions.txt with validation errors including file names and timestamps
+- Challenge: Positions with validation errors may not reach main validation loop in run() function
+- Status: Needs further investigation into where validation errors are actually detected and filtered
+
+**Technical Details:**
+
+- Peak PnL Regex Pattern: SOL\s*\(Return:\s*([+-]?\d+\.?\d*)\s*%\) works correctly
+- Function Location: extract_peak_pnl_from_logs() in extraction/parsing_utils.py
+- Validation Location: Main validation loop in LogParser.run() around line 430
+- Debug Files Generated: 18,239 samples processed for single position showing expected volatility range
+
+**Code Quality Improvements:**
+
+- Logging Standardization: Consistent DEBUG-level logging for non-critical diagnostics
+- Error Message Enhancement: Added file context and timestamps to parsing error messages
+- Debug Flag Consolidation: Centralized debug controls in log_extractor.py header constants

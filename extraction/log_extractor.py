@@ -48,7 +48,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 # === MAIN DEBUG CONFIGURATION ===
 # AIDEV-NOTE-CLAUDE: Master debug controls - these override settings in debug_analyzer.py
 DEBUG_ENABLED = False                    # Master switch for all debug features
-DEBUG_LEVEL = "DEBUG"                   # "DEBUG" for detailed logs, "INFO" for standard logs
+DEBUG_LEVEL = "INFO"                   # "DEBUG" for detailed logs, "INFO" for standard logs
 CONTEXT_EXPORT_ENABLED = True          # Enable/disable context export completely
 DETAILED_POSITION_LOGGING = False       # Enable/disable detailed position event logging
 
@@ -336,10 +336,11 @@ class LogParser:
             # AIDEV-NOTE-CLAUDE: Positions closed as Superseded have no known PnL at this point.
             # This should be left as None, which is the default.
             self.finalized_positions.append(old_position)            
-            logger.warning(
-                f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
-                f"was superseded by a new one at line {index + 1}. Closing the old one."
-            )
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                logger.debug(
+                    f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
+                    f"was superseded by a new one at line {index + 1}. Closing the old one."
+                )
         
         folder_wallet_id, source_file = self._get_file_info_for_line(index)
         
@@ -400,10 +401,11 @@ class LogParser:
             old_position.close_timestamp = details['timestamp']
             old_position.close_line_index = index
             self.finalized_positions.append(old_position)
-            logger.warning(
-                f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
-                f"was superseded by a new 'new pool' one at line {index + 1}. Closing the old one."
-            )
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                logger.debug(
+                    f"Position for {token_pair} (opened at line {old_position.open_line_index + 1}) "
+                    f"was superseded by a new 'new pool' one at line {index + 1}. Closing the old one."
+                )
         
         folder_wallet_id, source_file = self._get_file_info_for_line(index)
         
@@ -466,7 +468,18 @@ class LogParser:
                     break
 
         if not closed_pair:
-            logger.warning(f"Could not identify a closed pair for event at line {index+1}. This may indicate a parsing issue and the position might be skipped.")
+            wallet_id, source_file = self._get_file_info_for_line(index)
+            line_content = clean_ansi(self.all_lines[index])
+            # Extract timestamp from line if available
+            timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line_content)
+            timestamp_str = timestamp_match.group(1) if timestamp_match else "unknown"
+            
+            logger.warning(
+                f"Could not identify closed pair for close event | "
+                f"File: {source_file} | Line: {index+1} | "
+                f"Timestamp: {timestamp_str} | "
+                f"Content: {line_content[:100]}{'...' if len(line_content) > 100 else ''}"
+            )
             return
         
         matching_position = self.active_positions.get(closed_pair)
@@ -680,21 +693,26 @@ class LogParser:
         skipped_superseded = 0
 
         for pos in self.finalized_positions:
-            # TEMPORARY DIAGNOSTIC: Track special tokens through validation
-            is_special = ("LIZARD" in pos.token_pair.upper() if pos.token_pair else False) or \
-                        ("🦎" in pos.token_pair if pos.token_pair else False) or \
-                        ("旺柴" in pos.token_pair if pos.token_pair else False)
-            
-            if is_special:
-                print(f"\n>>> VALIDATION DIAGNOSTIC: {pos.token_pair} ({pos.position_id})")
-                print(f"    Close reason: {pos.close_reason}")
-                if pos.close_reason != "active_at_log_end" and pos.final_pnl is not None:
-                    print(f"    PnL: {pos.final_pnl} (threshold: {MIN_PNL_THRESHOLD})")
+            # AIDEV-NOTE-CLAUDE: Validation diagnostic moved to debug-only mode
+            if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                is_special = ("LIZARD" in pos.token_pair.upper() if pos.token_pair else False) or \
+                            ("🦎" in pos.token_pair if pos.token_pair else False) or \
+                            ("旺柴" in pos.token_pair if pos.token_pair else False)
+                
+                if is_special:
+                    logger.debug(f"VALIDATION DIAGNOSTIC: {pos.token_pair} ({pos.position_id})")
+                    logger.debug(f"    Close reason: {pos.close_reason}")
+                    if pos.close_reason != "active_at_log_end" and pos.final_pnl is not None:
+                        logger.debug(f"    PnL: {pos.final_pnl} (threshold: {MIN_PNL_THRESHOLD})")
                 
             # Filter 0: Superseded positions are not needed for analysis
             if pos.close_reason == "Superseded":
-                if is_special:
-                    print("    >>> FILTERED OUT: Superseded")
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                    is_special = ("LIZARD" in pos.token_pair.upper() if pos.token_pair else False) or \
+                                ("🦎" in pos.token_pair if pos.token_pair else False) or \
+                                ("旺柴" in pos.token_pair if pos.token_pair else False)
+                    if is_special:
+                        logger.debug("    >>> FILTERED OUT: Superseded")
                 skipped_superseded += 1
                 continue
 
@@ -721,10 +739,13 @@ class LogParser:
                     logger.warning(f"Could not parse timestamps for position {pos.position_id} during validation: {e}. Skipping.")
                     continue
             
-            # Filter 3: Low PnL for closed positions
             if pos.close_reason != 'active_at_log_end' and pos.final_pnl is not None and abs(pos.final_pnl) < MIN_PNL_THRESHOLD:
-                if is_special:
-                    print(f"    >>> FILTERED OUT: Low PnL ({pos.final_pnl} < {MIN_PNL_THRESHOLD})")
+                if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                    is_special = ("LIZARD" in pos.token_pair.upper() if pos.token_pair else False) or \
+                                ("🦎" in pos.token_pair if pos.token_pair else False) or \
+                                ("旺柴" in pos.token_pair if pos.token_pair else False)
+                    if is_special:
+                        logger.debug(f"    >>> FILTERED OUT: Low PnL ({pos.final_pnl} < {MIN_PNL_THRESHOLD})")
                 skipped_low_pnl += 1
                 continue
             
