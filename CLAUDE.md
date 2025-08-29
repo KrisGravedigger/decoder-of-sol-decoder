@@ -668,3 +668,10 @@ Issue Resolution - Peak PnL Values Investigation:
 - Logging Standardization: Consistent DEBUG-level logging for non-critical diagnostics
 - Error Message Enhancement: Added file context and timestamps to parsing error messages
 - Debug Flag Consolidation: Centralized debug controls in log_extractor.py header constants
+
+**2025-08-29: CSV Structure Compatibility Fix**
+- **Issue Resolved:** Fixed "dict contains fields not in fieldnames: 'strategy_instance_id'" error during position extraction
+- **Root Cause:** New positions from log_extractor.py lacked strategy_instance_id field present in existing CSV files
+- **Solution:** Added default empty strategy_instance_id field to Position.to_csv_row() method in core/models.py
+- **Business Impact:** Restored ability to append new positions to existing CSV files without structural conflicts
+- **Technical Implementation:** Single-line addition ensures CSV field consistency across extraction pipeline

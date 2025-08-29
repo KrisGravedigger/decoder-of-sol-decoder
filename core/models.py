@@ -36,6 +36,10 @@ class Position:
         self.take_profit: Optional[float] = None
         self.stop_loss: Optional[float] = None
         
+        # HUMAN-DEV-NOTE: placeholder for future strategy classification
+        # Strategy instance tracking
+        self.strategy_instance_id = ""
+        
         # PHASE 3A: Peak PnL tracking from logs
         self.max_profit_during_position: Optional[float] = None  # Maximum % profit during lifetime
         self.max_loss_during_position: Optional[float] = None    # Maximum % loss during lifetime  
@@ -132,5 +136,6 @@ class Position:
             "bot_version": self.bot_version,
             "retry_count": self.retry_count,
             "open_line_index": self.open_line_index,
-            "close_line_index": self.close_line_index
+            "close_line_index": self.close_line_index,
+            "strategy_instance_id": ""
         }
