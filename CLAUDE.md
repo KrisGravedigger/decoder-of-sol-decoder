@@ -675,3 +675,12 @@ Issue Resolution - Peak PnL Values Investigation:
 - **Solution:** Added default empty strategy_instance_id field to Position.to_csv_row() method in core/models.py
 - **Business Impact:** Restored ability to append new positions to existing CSV files without structural conflicts
 - **Technical Implementation:** Single-line addition ensures CSV field consistency across extraction pipeline
+
+**2025-08-29: Strategy Ranking System Optimization**
+- **Issue Identified:** Strategy ranking algorithm used flawed weighting system with duplicate metrics and problematic normalization
+- **Root Cause:** avg_pnl_percent (40%) + pnl_per_sol_invested*100 (10%) = effective duplication; worst_position normalization artificially boosted strategies with smaller losses
+- **Business Impact:** High-performance strategies (4.05% avg_pnl) ranked below lower-performance ones (1.6% avg_pnl) due to outlier penalties
+- **Solution Implemented:** Redesigned weighting system focusing on core business metrics: 65% avg_pnl_percent, 30% win_rate, 5% position_count bonus
+- **Small Sample Handling:** Replaced harsh exclusion filter with progressive penalty system (-5 for single position, -2 for two positions)
+- **Result:** Strategy ranking now properly prioritizes profitability and consistency over statistical outliers
+- **Technical Implementation:** Modified `_calculate_weighted_score()` in `strategy_instance_detector.py` with simplified, business-focused algorithm

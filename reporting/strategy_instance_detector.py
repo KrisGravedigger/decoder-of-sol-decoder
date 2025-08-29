@@ -3,6 +3,7 @@ import logging
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime, timedelta
 import hashlib
+import math
 
 # AIDEV-NOTE-CLAUDE: Core module for grouping positions into strategy instances
 # Business logic: group by strategy+tp+sl with a 4-day time gap rule
@@ -89,10 +90,45 @@ class StrategyInstanceDetector:
         }
     
     def _calculate_weighted_score(self, metrics: Dict[str, float]) -> float:
-        """Calculate weighted performance score for ranking."""
-        weights = { 'avg_pnl_percent': 0.40, 'win_rate': 0.40, 'pnl_per_sol_invested': 0.10, 'best_position': 0.05, 'worst_position': 0.05 }
-        normalized_worst = max(0, 100 + metrics.get('worst_position', -100))
-        score = ( metrics.get('avg_pnl_percent', 0) * weights['avg_pnl_percent'] + metrics.get('win_rate', 0) * weights['win_rate'] + metrics.get('pnl_per_sol_invested', 0) * 100 * weights['pnl_per_sol_invested'] + metrics.get('best_position', 0) * weights['best_position'] + normalized_worst * weights['worst_position'] )
+        """
+        Calculate improved weighted performance score for ranking.
+        Focus on core business metrics: profitability and consistency.
+        Small sample penalty instead of complete exclusion.
+        """
+        analyzed_count = metrics.get('analyzed_position_count', 0)
+        
+        # Exclude only completely invalid data
+        if analyzed_count == 0:
+            return -999
+        
+        # Core metrics
+        avg_pnl = metrics.get('avg_pnl_percent', 0)
+        win_rate = metrics.get('win_rate', 0)
+        position_count = metrics.get('position_count', 0)
+        
+        # Small sample penalty (progressive)
+        if analyzed_count == 1:
+            sample_penalty = -10  # Significant penalty for single position
+        elif analyzed_count == 2:
+            sample_penalty = -5   # Moderate penalty for two positions
+        else:
+            sample_penalty = 0    # No penalty for 3+ positions
+        
+        # Position count bonus (logarithmic scaling for larger samples)
+        import math
+        if position_count >= 3:
+            position_bonus = math.log(position_count) * 1.5
+        else:
+            position_bonus = 0
+        
+        # Main scoring formula
+        score = (
+            avg_pnl * 0.65 +           # 65% - primary profitability metric
+            win_rate * 0.30 +          # 30% - consistency metric  
+            position_bonus * 0.05      # 5% - statistical reliability bonus
+            + sample_penalty           # Penalty for small samples
+        )
+        
         return score
     
     def detect_instances(self, csv_file_path: str) -> Tuple[pd.DataFrame, Dict[str, Dict[str, Any]]]:
