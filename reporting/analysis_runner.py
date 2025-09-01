@@ -24,33 +24,36 @@ class AnalysisRunner:
     """
 
     # AIDEV-NOTE-GEMINI: Constructor updated to accept force_refetch.
-    def __init__(self, api_key: Optional[str] = None, force_refetch: bool = False, use_cache_only: bool = False, config: Optional[Dict] = None):
+    def __init__(self, api_key: Optional[str] = None, force_refetch: bool = False, use_cache_only: bool = False, config: Optional[Dict] = None, price_cache_manager: Optional[Any] = None):
         """
         Initialize analysis runner.
-
         Args:
-            api_key (Optional[str]): Moralis API key for the PriceCacheManager.
+            api_key (Optional[str]): Moralis API key.
             force_refetch (bool): If True, forces re-fetching of cached data.
-            use_cache_only (bool): If True, operates in cache-only mode for TP/SL optimization.
+            use_cache_only (bool): If True, operates without making API calls.
             config (Optional[Dict]): Configuration dictionary.
+            price_cache_manager (Optional[Any]): An instance of a cache manager. If None, one will be created.
         """
         self.api_key = api_key
         self.force_refetch = force_refetch
         self.use_cache_only = use_cache_only
-        self.config = config or {}
+        self.config = config or {} # `load_main_config()` is slow, avoid calling it if config is provided
         
-        # AIDEV-VOLUME-CLAUDE: Use enhanced cache manager when use_cache_only is True
-        if use_cache_only:
-            from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
-            self.cache_manager = EnhancedPriceCacheManager()
+        # AIDEV-NOTE-CLAUDE: Centralized logic to always use the new EnhancedPriceCacheManager.
+        # It is injected if provided, otherwise created here. This ensures consistency.
+        if price_cache_manager:
+            self.cache_manager = price_cache_manager
         else:
-            self.cache_manager = PriceCacheManager(config=config)
-        if not api_key:
-            logger.warning("AnalysisRunner initialized in CACHE-ONLY mode.")
+            from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+            if not self.config:
+                from utils.common import load_main_config
+                self.config = load_main_config()
+            self.cache_manager = EnhancedPriceCacheManager(config=self.config, api_key=self.api_key)
+
+        if not api_key or use_cache_only:
+            logger.info("AnalysisRunner initialized in CACHE-ONLY mode.")
         if force_refetch:
             logger.info("AnalysisRunner initialized in FORCE-REFETCH mode.")
-        if use_cache_only:
-            logger.info("AnalysisRunner initialized in ENHANCED CACHE-ONLY mode for TP/SL optimization.")
 
 
     def _get_timeframe_for_duration(self, start_dt: datetime, end_dt: datetime) -> str:

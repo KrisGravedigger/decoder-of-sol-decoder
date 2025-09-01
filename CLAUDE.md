@@ -684,3 +684,17 @@ Issue Resolution - Peak PnL Values Investigation:
 - **Small Sample Handling:** Replaced harsh exclusion filter with progressive penalty system (-5 for single position, -2 for two positions)
 - **Result:** Strategy ranking now properly prioritizes profitability and consistency over statistical outliers
 - **Technical Implementation:** Modified `_calculate_weighted_score()` in `strategy_instance_detector.py` with simplified, business-focused algorithm
+
+**2025-09-01: Resolved Critical Price Cache Infinite Loop & Hardened API Logic**
+
+**Issue Resolution:** Successfully diagnosed and fixed a critical, multi-layered bug causing an infinite re-fetch loop in the price cache system, which led to excessive API credit consumption. The problem was elusive, requiring a deep debugging process that ruled out several incorrect hypotheses.
+
+-   **Root Cause Discovery:** The core issue was identified after direct API testing (`api_checker.py`) confirmed that the Moralis API omits data points for time intervals without any trading activity. Our validation logic misinterpreted these "silent gaps" as missing data, triggering a perpetual and futile re-fetch cycle.
+
+-   **"Tombstone" Logic Implementation:** The primary solution was to introduce "tombstone" placeholders. When the system verifies that the API has no data for a specific interval, it now writes a special marker to the cache. This tells the validation logic to treat the gap as "checked and confirmed empty," effectively breaking the loop.
+
+-   **API Workaround Reinstated:** The investigation revealed that a previous refactoring had accidentally removed a critical workaround for a Moralis API bug (requests with `fromDate == toDate` causing a `400 Bad Request`). This workaround was restored and centralized in the core API fetching function, eliminating a major source of errors during gap-filling.
+
+-   **Enhanced Resilience:** Improved the `circuit breaker` mechanism with more descriptive logging for critical API errors (e.g., exhausted credits), making the system's behavior more transparent during large-scale data fetching operations.
+
+**Outcome:** The price cache is now fully stable, efficient, and resilient. It correctly handles all known API edge cases, completely eliminating the infinite loop and ensuring the integrity of offline data. The entire data fetching pipeline is now production-ready.

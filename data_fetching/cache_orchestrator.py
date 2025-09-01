@@ -77,11 +77,23 @@ def fetch_enhanced_cache_data(mode: Literal['fill_gaps', 'force_refetch']):
                     continue
 
             try:
-                # Fetch OCHLV data for this position
-                ochlv_data = enhanced_cache.fetch_ochlv_data(
+                # AIDEV-NOTE-CLAUDE: Fetch data for an extended period to support post-close analysis.
+                # Load config to get the required simulation buffer.
+                from utils.common import load_main_config
+                config = load_main_config()
+                max_sim_days = config.get('range_testing', {}).get('max_simulation_days', 7)
+                
+                start_dt = row.get('open_timestamp')
+                close_dt = row.get('close_timestamp')
+                required_end_dt = close_dt + timedelta(days=max_sim_days)
+
+                # Fetch OCHLV data for this position using the extended timeframe.
+                # The correct method is get_price_data, not the non-existent fetch_ochlv_data.
+                ochlv_data = enhanced_cache.get_price_data(
                     pool_address=row.get('pool_address'),
-                    start_dt=row.get('open_timestamp'),
-                    end_dt=row.get('close_timestamp'),
+                    start_dt=start_dt,
+                    end_dt=required_end_dt, # Use the extended end date here
+                    timeframe=enhanced_cache._determine_timeframe_from_duration(start_dt, required_end_dt),
                     use_cache_only=False,
                     force_refetch=(mode == 'force_refetch')
                 )

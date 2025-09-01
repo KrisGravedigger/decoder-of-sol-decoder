@@ -125,6 +125,17 @@ def run_full_pipeline(api_key: Optional[str]):
     from data_fetching.main_data_orchestrator import run_all_data_fetching
     print_header("Step 3: Data Fetching for Simulations & Reports")
     run_all_data_fetching(api_key, refetch_mode='none')
+
+    # --- NEW: Automatically refresh processed cache after fetching ---
+    print("\n--- Auto-refreshing Offline Processed Cache ---")
+    try:
+        from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+        config = load_main_config()
+        cache_manager = EnhancedPriceCacheManager(config=config)
+        cache_manager.refresh_offline_processed_cache()
+    except Exception as e:
+        logger.error(f"Failed to auto-refresh offline cache: {e}", exc_info=True)
+        print(f"⚠️ [WARNING] Could not auto-refresh offline cache. Try manually (Menu 7, Option 5). Error: {e}")
     
     # Step 4 (Offline)
     print_header("Step 4: Running Base Simulations")
@@ -163,14 +174,34 @@ def cache_analyzer_menu():
             cache_debugger_menu()
         elif choice == '5':
             # Refresh offline processed cache
+            from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
             config = load_main_config()
-            cache_manager = PriceCacheManager(config=config)
-            cache_manager.refresh_offline_cache()
+            cache_manager = EnhancedPriceCacheManager(config=config)
+            cache_manager.refresh_offline_processed_cache()
         elif choice == '6':
-            # Validate offline cache completeness
-            config = load_main_config()
-            cache_manager = PriceCacheManager(config=config)
-            cache_manager.validate_offline_cache_completeness()
+            # Validate offline cache completeness using the new manager logic
+            from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+            from reporting.data_loader import load_and_prepare_positions
+            print("\nValidating cache completeness for all positions...")
+            positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.0)
+            if positions_df.empty:
+                print("No positions to validate.")
+                continue
+
+            cache_manager = EnhancedPriceCacheManager()
+            complete_count = 0
+            
+            class SimplePos:
+                def __init__(self, row):
+                    self.pool_address = row['pool_address']
+                    self.open_timestamp = row['open_timestamp']
+                    self.close_timestamp = row['close_timestamp']
+
+            for _, row in positions_df.iterrows():
+                if cache_manager.validate_cache_completeness(SimplePos(row))['is_complete']:
+                    complete_count += 1
+            total = len(positions_df)
+            print(f"\nValidation Summary: {complete_count}/{total} ({complete_count/total*100:.1f}%) positions have complete cache.")
         elif choice == '7':
             break
         else:
@@ -477,6 +508,17 @@ def run_full_optimization_pipeline(api_key: Optional[str]):
     print_header("2. Data Fetching for Simulations & Reports")
     from data_fetching.main_data_orchestrator import run_all_data_fetching
     run_all_data_fetching(api_key, refetch_mode='none')
+
+    # --- NEW: Automatically refresh processed cache after fetching ---
+    print("\n--- Auto-refreshing Offline Processed Cache ---")
+    try:
+        from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+        config = load_main_config()
+        cache_manager = EnhancedPriceCacheManager(config=config)
+        cache_manager.refresh_offline_processed_cache()
+    except Exception as e:
+        logger.error(f"Failed to auto-refresh offline cache: {e}", exc_info=True)
+        print(f"⚠️ [WARNING] Could not auto-refresh offline cache. Try manually (Menu 7, Option 5). Error: {e}")
     
     # 3. Base Simulation (Part of original Step 4)
     print_header("3. Running Base Spot vs. Bid-Ask Simulations")

@@ -50,7 +50,23 @@ def run_all_data_fetching(api_key: Optional[str], refetch_mode: Literal['none', 
         print(f"\n[Part 1/2] Populating cache for position simulations...")
         force_position_refetch = (refetch_mode == 'all')
         
-        online_runner = AnalysisRunner(api_key=api_key, force_refetch=force_position_refetch)
+        from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+        
+        config = load_main_config()
+        # Ensure the runner uses the new, unified cache manager
+        enhanced_cache_manager = EnhancedPriceCacheManager(config=config, api_key=api_key)
+        from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
+        config = load_main_config()
+        
+        # Create a single, unified cache manager instance for this run
+        enhanced_cache_manager = EnhancedPriceCacheManager(config=config, api_key=api_key)
+        
+        online_runner = AnalysisRunner(
+            api_key=api_key, 
+            force_refetch=force_position_refetch,
+            config=config,
+            price_cache_manager=enhanced_cache_manager
+        )
         
         for idx, row in positions_df.iterrows():
             progress_idx = positions_df.index.get_loc(idx) + 1

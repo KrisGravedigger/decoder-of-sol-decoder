@@ -1,368 +1,488 @@
 """
-Enhanced Price Cache Manager with Volume Data Support - TP/SL Optimizer Phase 1
+Enhanced Price Cache Manager - The Single Source of Truth for Price Data
 
-Extends the existing PriceCacheManager to support OCHLV+Volume data collection
-with a consistent, offline-first approach.
+This class is the SOLE orchestrator for all price cache operations. It replaces the
+legacy PriceCacheManager and provides backward-compatible methods while using a
+modern, robust, and structured caching mechanism.
 """
 
 import os
 import json
 import requests
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 import logging
-from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.models import Position
 
-# AIDEV-VOLUME-CLAUDE: Import base class to extend
 from reporting.price_cache_manager import PriceCacheManager
 
 logger = logging.getLogger(__name__)
+CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD = 5
 
 class EnhancedPriceCacheManager(PriceCacheManager):
     """
-    Enhanced cache manager with volume data support for TP/SL optimization.
-    
-    Maintains full backward compatibility while adding:
-    - Raw OCHLV+Volume data caching
-    - Consistent and predictable offline-first operation
-    - Volume data retrieval for position analysis
-    - Cache completeness validation that is synchronized with fetch logic
+    The primary cache manager for all price data.
+    - Manages raw OCHLV+Volume cache in a structured /raw/YYYY-MM/ directory.
+    - Manages processed {ts, close} cache in a structured /offline_processed/YYYY-MM/ directory.
+    - Provides data to both new and legacy modules, ensuring backward compatibility.
     """
-    
-    def __init__(self, cache_dir: str = "price_cache"):
-        super().__init__(cache_dir)
-        self.raw_cache_dir = os.path.join(cache_dir, "raw")
-        os.makedirs(self.raw_cache_dir, exist_ok=True)
-        
-    def fetch_ochlv_data(self, pool_address: str, start_dt: datetime, end_dt: datetime, 
-                        use_cache_only: bool = False, force_refetch: bool = False) -> List[Dict]:
-        """
-        Fetch OCHLV+Volume data with an offline-first approach.
-        """
-        timeframe = self._determine_timeframe_from_duration(start_dt, end_dt)
-        
-        cached_data = self._load_raw_cache_for_period(pool_address, start_dt, end_dt, timeframe)
-        
-        is_sufficient = self._is_cache_data_sufficient(cached_data, start_dt, end_dt, timeframe)
-        
-        if is_sufficient and not force_refetch:
-            logger.debug(f"Using sufficient cache for {pool_address}")
-            all_data = cached_data
-        else:
-            if use_cache_only:
-                logger.warning(f"Cache-only mode: Data for {pool_address} is insufficient/missing. Returning partial data.")
-                all_data = cached_data
-            else:
-                logger.info(f"Cache insufficient or force_refetch=True for {pool_address}. Fetching from API.")
-                all_data = self._fetch_and_merge_data_cross_month(pool_address, start_dt, end_dt, timeframe)
-            
-        return self._filter_ochlv_data_by_range(all_data, start_dt, end_dt)
-    
-    def _fetch_and_merge_data_cross_month(self, pool_address: str, start_dt: datetime, 
-                                          end_dt: datetime, timeframe: str) -> List[Dict]:
-        """
-        Fetches OCHLV data from the API for the given period and merges it with existing cache.
-        """
-        monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
-        
-        # We start with what's in the cache for the entire period
-        all_data = self._load_raw_cache_for_period(pool_address, start_dt, end_dt, timeframe)
-        
-        for month_start, month_end in monthly_periods:
-            api_data = self._fetch_ochlv_from_api(pool_address, month_start, month_end, timeframe)
-            if api_data:
-                all_data = self._merge_and_save_raw_cache(all_data, api_data, pool_address, month_start)
-        
-        return all_data
 
-    def get_volume_for_position(self, position: 'Position') -> List[float]:
+    def __init__(self, config: Optional[Dict] = None, api_key: Optional[str] = None):
+        # AIDEV-NOTE-CLAUDE: We pass a hardcoded dir to super() as this class now controls all paths.
+        super().__init__(cache_dir="price_cache", config=config)
+        self.api_key = api_key or os.getenv("MORALIS_API_KEY")
+        self.raw_cache_dir = os.path.join(self.cache_dir, "raw")
+        # AIDEV-NOTE-CLAUDE: offline_processed_cache_dir is the new standard, replacing offline_cache_dir
+        self.offline_processed_cache_dir = os.path.join(self.cache_dir, "offline_processed")
+        os.makedirs(self.raw_cache_dir, exist_ok=True)
+        os.makedirs(self.offline_processed_cache_dir, exist_ok=True)
+
+    def get_price_data(self, pool_address: str, start_dt: datetime, end_dt: datetime,
+                         timeframe: str, api_key: Optional[str] = None,
+                         force_refetch: bool = False, **kwargs) -> List[Dict]:
         """
-        Get volume data for a specific position from the cache.
+        [PRIMARY METHOD] Get price data with smart caching and guaranteed continuous output.
+        This is the modern replacement for the legacy get_price_data method.
         """
-        try:
-            pool_address = getattr(position, 'pool_address', None)
-            open_timestamp = getattr(position, 'open_timestamp', None) 
-            close_timestamp = getattr(position, 'close_timestamp', None)
+        if api_key: self.api_key = api_key
+
+        interval_seconds = self._get_interval_seconds(timeframe)
+        aligned_start_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds))
+        aligned_end_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds))
+
+        # 1. Try to load from the clean, processed cache first.
+        all_data = self._load_monthly_cache_files(self.offline_processed_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
+        
+        # 2. Find gaps in the processed cache
+        gaps = self._find_data_gaps(all_data, aligned_start_dt, aligned_end_dt, force_refetch, interval_seconds)
+
+        if gaps:
+            # 3. If gaps exist, try to fill them using the raw OCHLV cache
+            raw_ochlv_data = self._load_monthly_cache_files(self.raw_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
             
-            if not all([pool_address, open_timestamp, close_timestamp]):
-                return []
-                
-            if isinstance(open_timestamp, str):
-                from reporting.data_loader import _parse_custom_timestamp
-                open_timestamp = _parse_custom_timestamp(open_timestamp)
-            if isinstance(close_timestamp, str):
-                from reporting.data_loader import _parse_custom_timestamp  
-                close_timestamp = _parse_custom_timestamp(close_timestamp)
-                
-            ochlv_data = self.fetch_ochlv_data(
-                pool_address, open_timestamp, close_timestamp, use_cache_only=True
-            )
-            return [point.get('volume', 0.0) for point in ochlv_data]
-            
-        except Exception as e:
-            logger.error(f"Failed to get volume for position: {e}")
-            return []
+            # 4. Find gaps in the raw OCHLV cache
+            raw_gaps = self._find_data_gaps(raw_ochlv_data, aligned_start_dt, aligned_end_dt, force_refetch, interval_seconds)
+
+            # 5. If raw cache also has gaps, fetch from API
+            if raw_gaps and not kwargs.get('use_cache_only'):
+                new_ochlv_data = self._fetch_and_fill_gaps_from_api(pool_address, raw_gaps, timeframe)
+                if new_ochlv_data:
+                    # Save new raw data and merge it
+                    raw_ochlv_data = self._merge_and_save_data(self.raw_cache_dir, pool_address, raw_ochlv_data, new_ochlv_data)
+                    # IMPORTANT: After fetching, we must refresh the processed cache to reflect new data
+                    self.refresh_offline_processed_cache_for_pool(pool_address)
+                    # Reload the processed cache to get the most up-to-date data
+                    all_data = self._load_monthly_cache_files(self.offline_processed_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
+
+        # 6. Final processing: align, forward-fill, and filter
+        timestamp_map = self._map_to_candle_boundaries(all_data, interval_seconds)
+        final_data = self._conservative_forward_fill(timestamp_map, interval_seconds, aligned_start_dt, aligned_end_dt)
+        self._log_placeholder_warnings(final_data, pool_address, timeframe)
+        
+        return self._filter_data_by_range(final_data, start_dt, end_dt)
     
-    def validate_cache_completeness(self, position: 'Position') -> Dict[str, bool]:
+    def refresh_offline_processed_cache(self):
         """
-        Validate cache completeness for a position using the same logic as the fetcher.
+        Converts all raw OCHLV data into the simple {timestamp, close} format.
+        """
+        print("\nRefreshing offline processed cache from raw OCHLV data...")
+        processed_count = 0
+        if not os.path.exists(self.raw_cache_dir):
+            print("Raw cache directory does not exist. Nothing to process.")
+            return
+
+        for month_dir in sorted(os.listdir(self.raw_cache_dir)):
+            full_month_path = os.path.join(self.raw_cache_dir, month_dir)
+            if os.path.isdir(full_month_path):
+                for filename in os.listdir(full_month_path):
+                    if filename.endswith('.json'):
+                        pool_address = filename.replace('.json', '')
+                        if self.refresh_offline_processed_cache_for_pool(pool_address):
+                            processed_count += 1
+        print(f"✅ Processed {processed_count} raw cache files into the offline cache.")
+
+    def refresh_offline_processed_cache_for_pool(self, pool_address: str) -> bool:
+        """Refreshes the processed cache for a single pool."""
+        try:
+            # Load all raw data for the pool across all months
+            raw_data = self._load_monthly_cache_files(self.raw_cache_dir, pool_address, datetime(2023,1,1), datetime.now())
+            if not raw_data: return False
+            
+            processed_data = [{'timestamp': d['timestamp'], 'close': d['close']} for d in raw_data if 'timestamp' in d and 'close' in d]
+            
+            # Save to processed cache, splitting by month
+            self._merge_and_save_data(self.offline_processed_cache_dir, pool_address, [], processed_data)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to process raw cache for {pool_address}: {e}")
+            return False
+
+    # --- Helper methods moved and adapted from legacy manager ---
+
+    def validate_cache_completeness(self, position: 'Position') -> Dict[str, Any]:
+        """
+        [PRIMARY VALIDATION METHOD] Checks if the raw cache contains complete OCHLV+Volume data
+        for a position's required simulation timeframe (including post-close period).
+
+        Args:
+            position (Position): A position-like object with pool_address, open_timestamp,
+                                 and close_timestamp attributes.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing validation results:
+                            - 'is_complete' (bool)
+                            - 'has_price_data' (bool)
+                            - 'has_volume_data' (bool)
         """
         try:
-            pool_address = getattr(position, 'pool_address', None)
-            open_timestamp = getattr(position, 'open_timestamp', None)
-            close_timestamp = getattr(position, 'close_timestamp', None)
-            
-            if not all([pool_address, open_timestamp, close_timestamp]):
-                return {'has_price_data': False, 'has_volume_data': False, 'is_complete': False}
-                
-            if isinstance(open_timestamp, str):
-                from reporting.data_loader import _parse_custom_timestamp
-                open_timestamp = _parse_custom_timestamp(open_timestamp)
-            if isinstance(close_timestamp, str):
-                from reporting.data_loader import _parse_custom_timestamp
-                close_timestamp = _parse_custom_timestamp(close_timestamp)
-                
-            timeframe = self._determine_timeframe_from_duration(open_timestamp, close_timestamp)
-            cached_data = self._load_raw_cache_for_period(pool_address, open_timestamp, close_timestamp, timeframe)
-            
-            is_sufficient = self._is_cache_data_sufficient(cached_data, open_timestamp, close_timestamp, timeframe)
-            has_volume = any(p.get('volume', 0.0) > 0 for p in cached_data) if cached_data else False
-            
-            return {
-                'has_price_data': is_sufficient,
-                'has_volume_data': has_volume,
-                'is_complete': is_sufficient and has_volume
+            # 1. Determine the full required time range for simulation
+            if not self.config: # Lazy load config if not provided
+                from utils.common import load_main_config
+                self.config = load_main_config()
+
+            max_sim_days = self.config.get('range_testing', {}).get('max_simulation_days', 7)
+            start_dt = position.open_timestamp
+            end_dt = position.close_timestamp + timedelta(days=max_sim_days)
+
+            # 2. Determine timeframe and load all relevant raw data
+            timeframe = self._determine_timeframe_from_duration(start_dt, end_dt)
+            interval_seconds = self._get_interval_seconds(timeframe)
+            raw_data = self._load_monthly_cache_files(self.raw_cache_dir, position.pool_address, start_dt, end_dt)
+
+            if not raw_data:
+                return {'is_complete': False, 'has_price_data': False, 'has_volume_data': False}
+
+            # 3. Check for price data completeness (gap detection), now aware of tombstones
+            # We now check if a timestamp is either present with data or marked as a tombstone.
+            covered_timestamps = {
+                self._align_timestamp_to_boundary(d['timestamp'], interval_seconds) 
+                for d in raw_data
             }
             
+            current_ts = self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds)
+            end_ts = self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds)
+            
+            has_gaps = False
+            while current_ts <= end_ts:
+                if current_ts not in covered_timestamps:
+                    has_gaps = True
+                    break
+                current_ts += interval_seconds
+            
+            has_price_data = not has_gaps
+
+            # 4. Check for volume data availability
+            has_volume_data = any(d.get('volume', 0) > 0 for d in raw_data)
+
+            # 5. Determine overall completeness
+            is_complete = has_price_data and has_volume_data
+
+            return {'is_complete': is_complete, 'has_price_data': has_price_data, 'has_volume_data': has_volume_data}
+        
         except Exception as e:
-            logger.error(f"Cache validation failed: {e}")
-            return {'has_price_data': False, 'has_volume_data': False, 'is_complete': False}
-    
-    def _determine_timeframe_from_duration(self, start_dt: datetime, end_dt: datetime) -> str:
-        duration_hours = (end_dt - start_dt).total_seconds() / 3600
-        if duration_hours <= 4: return "10min"
-        if duration_hours <= 12: return "30min" 
-        if duration_hours <= 72: return "1h"
-        return "4h"
-    
-    def _load_raw_cache_for_period(self, pool_address: str, start_dt: datetime, 
-                                  end_dt: datetime, timeframe: str) -> List[Dict]:
+            logger.error(f"Cache validation failed for pool {position.pool_address}: {e}", exc_info=True)
+            return {'is_complete': False, 'has_price_data': False, 'has_volume_data': False}
+
+    def _fetch_and_fill_gaps_from_api(self, pool_address: str, gaps: List[Tuple[datetime, datetime]], timeframe: str) -> List[Dict]:
         """
-        Load raw cache data for a specific period, handling cross-month spans.
+        Fetches data from API for gaps and creates 'tombstone' placeholders for intervals
+        where the API confirms no data exists. This prevents infinite re-fetching loops.
         """
+        if not self.api_key:
+            logger.warning(f"Gaps found for {pool_address} but no API key. Cannot fetch.")
+            return []
+
+        all_new_data = []
+        interval_seconds = self._get_interval_seconds(timeframe)
+
+        for gap_start, gap_end in gaps:
+            logger.info(f"Processing gap for {pool_address} from {gap_start} to {gap_end}")
+            
+            # Fetch data from API for the entire gap period
+            api_data = self._fetch_ochlv_from_api(pool_address, gap_start, gap_end, timeframe)
+            all_new_data.extend(api_data)
+            
+            # --- AIDEV-NOTE-CLAUDE: START OF TOMBSTONE LOGIC ---
+            # Create a set of timestamps for which the API actually returned data
+            returned_timestamps = {self._align_timestamp_to_boundary(p['timestamp'], interval_seconds) for p in api_data}
+            
+            # Iterate through all expected timestamps in the gap
+            current_ts = self._align_timestamp_to_boundary(int(gap_start.timestamp()), interval_seconds)
+            end_ts = self._align_timestamp_to_boundary(int(gap_end.timestamp()), interval_seconds)
+            
+            while current_ts <= end_ts:
+                # If the API did not return data for this specific timestamp, create a tombstone
+                if current_ts not in returned_timestamps:
+                    tombstone = {
+                        'timestamp': current_ts,
+                        'open': -1, 'high': -1, 'low': -1, 'close': -1,
+                        'volume': -1, 'is_tombstone': True
+                    }
+                    all_new_data.append(tombstone)
+                current_ts += interval_seconds
+            # --- END OF TOMBSTONE LOGIC ---
+            
+            time.sleep(0.6) # API rate limit
+
+        return all_new_data
+
+    def _load_monthly_cache_files(self, base_dir: str, pool_address: str, start_dt: datetime, end_dt: datetime) -> List[Dict]:
+        """Loads all relevant monthly cache files for a given period from the new structure."""
         monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
-        all_cached_data = []
-        for month_start_period, _ in monthly_periods:
-            month_str = month_start_period.strftime('%Y-%m')
-            month_dir = os.path.join(self.raw_cache_dir, month_str)
-            cache_file = os.path.join(month_dir, f"{pool_address}.json")
+        all_data = []
+        for month_start, _ in monthly_periods:
+            month_str = month_start.strftime('%Y-%m')
+            cache_file = os.path.join(base_dir, month_str, f"{pool_address}.json")
             if os.path.exists(cache_file):
                 try:
                     with open(cache_file, 'r') as f:
                         data = json.load(f)
-                    all_cached_data.extend(data)
+                        all_data.extend(data if isinstance(data, list) else [])
                 except Exception as e:
-                    logger.error(f"Failed to load raw cache {cache_file}: {e}")
+                    logger.error(f"Failed to load cache file {cache_file}: {e}")
         
-        unique_points = {self._parse_timestamp_to_unix(p['timestamp']): p for p in all_cached_data if isinstance(p, dict) and 'timestamp' in p}
-        return sorted(unique_points.values(), key=lambda x: self._parse_timestamp_to_unix(x['timestamp']))
+        unique_points = {d['timestamp']: d for d in all_data if isinstance(d, dict) and 'timestamp' in d}
+        return sorted(unique_points.values(), key=lambda x: x['timestamp'])
 
-    def _is_cache_data_sufficient(self, cached_data: List[Dict], start_dt: datetime, 
-                                 end_dt: datetime, timeframe: str) -> bool:
+    def _find_data_gaps(self, existing_data: List[Dict], start_dt: datetime, end_dt: datetime, force_refetch: bool, interval_seconds: int) -> List[Tuple[datetime, datetime]]:
+        """Finds time gaps in a list of data points, more robustly."""
+        if force_refetch: return [(start_dt, end_dt)]
+        if not existing_data: return [(start_dt, end_dt)]
+
+        gaps = []
+        # Timestamps of existing data points
+        existing_timestamps = {p['timestamp'] for p in existing_data}
+        
+        # Iterate through expected timestamps and find missing ones
+        current_ts = self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds)
+        end_ts = self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds)
+        
+        while current_ts <= end_ts:
+            if current_ts not in existing_timestamps:
+                gap_start_ts = current_ts
+                # Find the end of this gap
+                while current_ts <= end_ts and current_ts not in existing_timestamps:
+                    current_ts += interval_seconds
+                gap_end_ts = current_ts - interval_seconds
+                gaps.append((datetime.fromtimestamp(gap_start_ts, tz=timezone.utc), datetime.fromtimestamp(gap_end_ts, tz=timezone.utc)))
+            else:
+                current_ts += interval_seconds
+        
+        return gaps
+
+    def _merge_and_save_data(self, base_dir: str, pool_address: str, existing_data: List[Dict], new_data: List[Dict]) -> List[Dict]:
         """
-        Check if cached data is sufficient, using robust quantity and time-span checks.
+        Merges new data with existing data already on disk and saves to the correct monthly files.
+        This function is now safe against data loss by always reading the full monthly cache before writing.
         """
-        if not cached_data: return False
+        # AIDEV-NOTE-CLAUDE: This logic was completely rewritten to prevent data loss.
+        # The previous version was overwriting monthly cache files with partial data.
         
-        # 1. Quantity Check
-        expected_points = self._calculate_expected_data_points(start_dt, end_dt, timeframe)
-        actual_points = len(cached_data)
-        quantity_sufficient = (actual_points / expected_points if expected_points > 0 else 0) >= 0.80
+        all_incoming_data = existing_data + new_data
+        
+        # Group all incoming points by month
+        monthly_updates = {}
+        for point in all_incoming_data:
+            if not isinstance(point, dict) or 'timestamp' not in point: continue
+            month_str = datetime.fromtimestamp(point['timestamp'], tz=timezone.utc).strftime('%Y-%m')
+            if month_str not in monthly_updates: monthly_updates[month_str] = {}
+            monthly_updates[month_str][point['timestamp']] = point
 
-        # 2. Time Span Check (More robust than start/end point check)
-        request_span_seconds = (end_dt - start_dt).total_seconds()
-        
-        data_timestamps = [self._parse_timestamp_to_unix(p['timestamp']) for p in cached_data]
-        data_start_ts = min(data_timestamps)
-        data_end_ts = max(data_timestamps)
-        data_span_seconds = data_end_ts - data_start_ts
-        
-        # The data should cover at least 80% of the requested time duration
-        timespan_sufficient = (data_span_seconds / request_span_seconds if request_span_seconds > 0 else 0) >= 0.80
-        
-        is_sufficient = quantity_sufficient and timespan_sufficient
+        # Process each month that has updates
+        for month_str, new_points_map in monthly_updates.items():
+            month_dir = os.path.join(base_dir, month_str)
+            os.makedirs(month_dir, exist_ok=True)
+            cache_file = os.path.join(month_dir, f"{pool_address}.json")
 
-        deep_debug_logger = logging.getLogger('DEEP_DEBUG')
-        if deep_debug_logger.isEnabledFor(logging.DEBUG):
-            deep_debug_logger.debug(f"Cache sufficiency check for {start_dt} to {end_dt}:")
-            deep_debug_logger.debug(f"  Quantity sufficient: {quantity_sufficient} ({actual_points}/{expected_points} points)")
-            deep_debug_logger.debug(f"  Time span sufficient: {timespan_sufficient} ({data_span_seconds/3600:.1f}h / {request_span_seconds/3600:.1f}h covered)")
-            deep_debug_logger.debug(f"  Final result: {'sufficient' if is_sufficient else 'insufficient'}")
+            # 1. Read the complete existing data for this month from the file
+            full_month_data_map = {}
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, 'r') as f:
+                        disk_data = json.load(f)
+                        if isinstance(disk_data, list):
+                            for point in disk_data:
+                                if isinstance(point, dict) and 'timestamp' in point:
+                                    full_month_data_map[point['timestamp']] = point
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"Could not read existing cache file {cache_file}, it will be overwritten. Error: {e}")
+
+            # 2. Merge by overwriting existing points with new ones
+            full_month_data_map.update(new_points_map)
+
+            # 3. Save the complete, merged data back to the file
+            sorted_points = sorted(full_month_data_map.values(), key=lambda x: x['timestamp'])
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump(sorted_points, f, indent=2)
+            except Exception as e:
+                logger.error(f"Failed to save cache file {cache_file}: {e}")
+
+        # Return a fully merged and sorted list of all incoming data points for in-memory use
+        final_merged = {p['timestamp']: p for p in all_incoming_data if isinstance(p, dict) and 'timestamp' in p}
+        return sorted(final_merged.values(), key=lambda x: x['timestamp'])
+
+    def _conservative_forward_fill(self, data_map: Dict[int, float], interval_seconds: int, start_dt: datetime, end_dt: datetime) -> List[Dict]:
+        """Performs a robust forward-fill on the data map to guarantee a continuous series."""
+        filled_data = []
+        last_valid_price = None
+        
+        # Find the first available price to start filling
+        sorted_keys = sorted(data_map.keys())
+        if sorted_keys:
+            first_available_ts = sorted_keys[0]
+            if first_available_ts <= int(start_dt.timestamp()):
+                last_valid_price = data_map[first_available_ts]
+
+        current_ts = self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds)
+        end_ts = self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds)
+
+        while current_ts <= end_ts:
+            price = data_map.get(current_ts)
+            if price is not None and price > 0:
+                last_valid_price = price
             
-        return is_sufficient
+            if last_valid_price is not None:
+                filled_data.append({
+                    'timestamp': current_ts,
+                    'close': last_valid_price,
+                    'is_forward_filled': (price is None or price <= 0)
+                })
+            current_ts += interval_seconds
+        return filled_data
 
-    def _calculate_expected_data_points(self, start_dt: datetime, end_dt: datetime, timeframe: str) -> int:
-        duration_seconds = (end_dt - start_dt).total_seconds()
-        interval_seconds = self._get_interval_seconds(timeframe)
-        return max(1, int(duration_seconds / interval_seconds))
+    # --- Unchanged helper methods ---
     
-    def _fetch_ochlv_from_api(self, pool_address: str, start_dt: datetime, 
-                             end_dt: datetime, timeframe: str) -> List[Dict]:
-        """
-        Fetch OCHLV+Volume data from Moralis API.
-        """
-        api_key = os.getenv("MORALIS_API_KEY")
-        if not api_key:
-            logger.error("MORALIS_API_KEY not found. Cannot fetch OCHLV data.")
-            return []
-            
-        url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{pool_address}/ohlcv"
-        headers = {"accept": "application/json", "X-API-Key": api_key}
-        params = {
-            "timeframe": timeframe,
-            "fromDate": start_dt.strftime('%Y-%m-%d'),
-            "toDate": (end_dt + timedelta(days=1)).strftime('%Y-%m-%d'),
-            "currency": "usd"
-        }
-        
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=20)
-            response.raise_for_status()
-            data = response.json()
-            api_result = data.get('result', []) if isinstance(data, dict) else data
-            
-            processed_data = []
-            if isinstance(api_result, list):
-                for point in api_result:
-                    try:
-                        processed_data.append({
-                            'timestamp': self._parse_timestamp_to_unix(point.get('timestamp')),
-                            'open': float(point.get('open', 0)),
-                            'close': float(point.get('close', 0)),
-                            'high': float(point.get('high', 0)),
-                            'low': float(point.get('low', 0)),
-                            'volume': float(point.get('volume', 0))
-                        })
-                    except (ValueError, TypeError, KeyError) as e:
-                        logger.warning(f"Skipping invalid API data point: {point}. Error: {e}")
-            
-            logger.info(f"Fetched {len(processed_data)} OCHLV points from API for {pool_address}")
-            time.sleep(0.6)
-            return processed_data
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"API request failed for {pool_address}: {e}")
-            return []
+    def _get_interval_seconds(self, timeframe: str) -> int:
+        return {"10min": 600, "30min": 1800, "1h": 3600, "4h": 14400, "1d": 86400}.get(timeframe, 3600)
+
+    def _align_timestamp_to_boundary(self, timestamp: int, interval_seconds: int) -> int:
+        return (timestamp // interval_seconds) * interval_seconds
+
+    def _map_to_candle_boundaries(self, data: List[Dict], interval_seconds: int) -> Dict[int, float]:
+        timestamp_map = {}
+        for point in data:
+            aligned_ts = self._align_timestamp_to_boundary(point['timestamp'], interval_seconds)
+            current_price = point.get('close', 0.0)
+            if current_price > 0: timestamp_map[aligned_ts] = current_price
+        return timestamp_map
+
+    def _log_placeholder_warnings(self, filled_data: List[Dict], pool_address: str, timeframe: str):
+        if not filled_data: return
+        consecutive_fills = 0
+        for point in filled_data:
+            if point.get('is_forward_filled'): consecutive_fills += 1
+            else:
+                if consecutive_fills >= CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD:
+                    logger.warning(f"SIGNIFICANT DATA GAP: Filled a gap of {consecutive_fills} points for {pool_address} ({timeframe}).")
+                consecutive_fills = 0
+        if consecutive_fills >= CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD:
+            logger.warning(f"SIGNIFICANT DATA GAP: Filled a gap of {consecutive_fills} points for {pool_address} ({timeframe}) at the end of the range.")
     
-    def _merge_and_save_raw_cache(self, existing_data: List[Dict], new_data: List[Dict], 
-                                 pool_address: str, month_start: datetime) -> List[Dict]:
-        """
-        Merge new data with existing data and save to the corresponding monthly raw cache file.
-        """
-        merged_map = {self._parse_timestamp_to_unix(p['timestamp']): p for p in existing_data}
-        merged_map.update({self._parse_timestamp_to_unix(p['timestamp']): p for p in new_data})
-        
-        merged_data = sorted(list(merged_map.values()), key=lambda x: self._parse_timestamp_to_unix(x['timestamp']))
-        
-        month_str = month_start.strftime('%Y-%m')
-        month_dir = os.path.join(self.raw_cache_dir, month_str)
-        os.makedirs(month_dir, exist_ok=True)
-        cache_file = os.path.join(month_dir, f"{pool_address}.json")
-        
-        try:
-            with open(cache_file, 'w') as f:
-                json.dump(merged_data, f, indent=2)
-            logger.info(f"Saved/Updated {len(merged_data)} points to raw cache: {os.path.basename(cache_file)}")
-        except Exception as e:
-            logger.error(f"Failed to save raw cache {cache_file}: {e}")
-        return merged_data
-    
-    def _filter_ochlv_data_by_range(self, data: List[Dict], start_dt: datetime, end_dt: datetime) -> List[Dict]:
+    def _split_into_monthly_periods(self, start_dt: datetime, end_dt: datetime) -> List[Tuple[datetime, datetime]]:
+        periods = []
+        current = start_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        while current <= end_dt:
+            next_month_start = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+            periods.append((current, next_month_start - timedelta(seconds=1)))
+            current = next_month_start
+        return periods
+
+    def _filter_data_by_range(self, data: List[Dict], start_dt: datetime, end_dt: datetime) -> List[Dict]:
         start_ts = int(start_dt.timestamp())
         end_ts = int(end_dt.timestamp())
-        
-        filtered = [p for p in data if start_ts <= self._parse_timestamp_to_unix(p.get('timestamp')) <= end_ts]
-        return sorted(filtered, key=lambda x: self._parse_timestamp_to_unix(x['timestamp']))
-    
-    def _parse_timestamp_to_unix(self, timestamp: Any) -> int:
-        if isinstance(timestamp, (int, float)): return int(timestamp)
-        if isinstance(timestamp, str):
-            try:
-                if 'T' in timestamp:
-                    return int(datetime.fromisoformat(timestamp.replace('Z', '+00:00')).timestamp())
-                return int(float(timestamp))
-            except (ValueError, TypeError): return 0
-        return 0
-    
-    def fetch_post_close_data(self, position: 'Position', extension_hours: Optional[int] = None) -> List[Dict]:
-        """
-        Fetch price data after position close for simulation.
-        
-        Args:
-            position: Position object with close_timestamp
-            extension_hours: Override default (1x position duration, 2h min, 48h max)
-            
-        Returns:
-            List of OCHLV+Volume data for post-close period
-        """
-        # Calculate extension period
-        position_duration = position.close_timestamp - position.open_timestamp
-        default_extension = position_duration * self.config.get('tp_sl_analysis', {}).get('post_close_multiplier', 1.0)
-        
-        # Apply min/max bounds
-        min_hours = self.config.get('tp_sl_analysis', {}).get('min_post_close_hours', 2)
-        max_hours = self.config.get('tp_sl_analysis', {}).get('max_post_close_hours', 48)
-        
-        if extension_hours is None:
-            extension_hours = max(min_hours, min(max_hours, default_extension.total_seconds() / 3600))
-        
-        # Define post-close period
-        start_dt = position.close_timestamp
-        end_dt = position.close_timestamp + timedelta(hours=extension_hours)
-        
-        # Fetch using existing method
-        return self.fetch_ochlv_data(
-            position.pool_address, start_dt, end_dt, 
-            use_cache_only=False, force_refetch=False
-        )
+        return sorted([p for p in data if start_ts <= p.get('timestamp', 0) <= end_ts], key=lambda x: x['timestamp'])
 
-    def extend_cache_with_post_close(self, position: 'Position', post_close_data: List[Dict]) -> bool:
-        """
-        Extend existing offline_processed cache files with post-close data.
-        Strategy: Append to existing monthly cache files rather than separate storage.
+    def _determine_timeframe_from_duration(self, start_dt: datetime, end_dt: datetime) -> str:
+        duration_hours = (end_dt - start_dt).total_seconds() / 3600
+        if duration_hours <= 24: return "10min"
+        if duration_hours <= 72: return "30min"
+        return "1h"
         
-        Returns:
-            True if successful, False otherwise
+    def _fetch_ochlv_from_api(self, pool_address: str, start_dt: datetime, end_dt: datetime, timeframe: str) -> List[Dict]:
         """
-        try:
-            # Determine which monthly files need updating
-            start_dt = position.close_timestamp
-            end_dt = datetime.fromtimestamp(post_close_data[-1]['timestamp']) if post_close_data else start_dt
-            
-            monthly_periods = self._split_into_monthly_periods(start_dt, end_dt)
-            
-            for month_start, _ in monthly_periods:
-                month_str = month_start.strftime('%Y-%m')
-                
-                # Update both raw and offline_processed caches
-                for cache_type in ['raw', 'offline_processed']:
-                    cache_dir = os.path.join(self.cache_dir, cache_type, month_str)
-                    cache_file = os.path.join(cache_dir, f"{position.pool_address}.json")
+        Fetches OCHLV data from Moralis API, with robust error handling, pagination, a circuit breaker,
+        and a critical workaround for the fromDate == toDate bug.
+        """
+        if not self.api_key:
+            return []
+
+        # --- CIRCUIT BREAKER ---
+        if not hasattr(self, '_api_circuit_breaker_open'): self._api_circuit_breaker_open = False
+        if self._api_circuit_breaker_open:
+            logger.warning(f"API circuit breaker is open. Skipping request for {pool_address}.")
+            return []
+
+        url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{pool_address}/ohlcv"
+        headers = {"accept": "application/json", "X-API-Key": self.api_key}
+        
+        # --- AIDEV-NOTE-CLAUDE: CRITICAL MORALIS API WORKAROUND ---
+        # The API returns 400 Bad Request if fromDate == toDate.
+        # This logic ensures we always request at least a one-day range.
+        from_date_str = start_dt.strftime('%Y-%m-%d')
+        to_date_str = end_dt.strftime('%Y-%m-%d')
+        
+        if from_date_str == to_date_str:
+            api_end_dt = end_dt + timedelta(days=1)
+            to_date_str = api_end_dt.strftime('%Y-%m-%d')
+            logger.info(f"Applying Moralis single-day workaround for {from_date_str}.")
+        # --- END WORKAROUND ---
+
+        params = {
+            "timeframe": timeframe,
+            "fromDate": from_date_str,
+            "toDate": to_date_str,
+            "limit": 500
+        }
+        
+        all_results = []
+        page_count = 0
+        while True:
+            page_count += 1
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                if response.status_code in [401, 403, 429]:  # Unauthorized, Forbidden, Too Many Requests
+                    error_reason = "Unknown"
+                    if response.status_code == 401: error_reason = "Unauthorized (Invalid API Key?)"
+                    if response.status_code == 403: error_reason = "Forbidden (Permission Denied)"
+                    if response.status_code == 429: error_reason = "Too Many Requests (API credits likely exhausted)"
                     
-                    if cache_type == 'offline_processed':
-                        # Convert OCHLV to simple price format
-                        simple_data = [{'timestamp': d['timestamp'], 'close': d['close']} for d in post_close_data]
-                        self._merge_and_save_raw_cache([], simple_data, position.pool_address, month_start)
-                    else:
-                        # Save raw OCHLV data
-                        self._merge_and_save_raw_cache([], post_close_data, position.pool_address, month_start)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to extend cache with post-close data: {e}")
-            return False
+                    logger.error(f"CRITICAL API ERROR ({response.status_code} - {error_reason}) for {pool_address}. Opening circuit breaker.")
+                    self._api_circuit_breaker_open = True
+                    return []  # Stop immediately
+                response.raise_for_status()
+                data = response.json()
+                api_result = data.get('result', [])
+                if isinstance(api_result, list): all_results.extend(api_result)
+                cursor = data.get('cursor')
+                if cursor:
+                    params['cursor'] = cursor
+                    time.sleep(0.3)
+                else:
+                    break
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"API HTTPError (likely 400 Bad Request) for {pool_address} with params {params}. The pair may not be supported. Error: {e}")
+                return []
+            except requests.exceptions.RequestException as e:
+                logger.error(f"API RequestException for {pool_address}. Returning partial data if any. Error: {e}")
+                break
+
+        processed_data = []
+        for point in all_results:
+            try:
+                processed_data.append({
+                    'timestamp': int(datetime.fromisoformat(point['timestamp'].replace('Z', '+00:00')).timestamp()),
+                    'open': float(point.get('open', 0)), 'close': float(point.get('close', 0)),
+                    'high': float(point.get('high', 0)), 'low': float(point.get('low', 0)),
+                    'volume': float(point.get('volume', 0))
+                })
+            except (ValueError, TypeError, KeyError): pass
+        
+        unique_points = {d['timestamp']: d for d in processed_data}
+        final_data = sorted(unique_points.values(), key=lambda x: x['timestamp'])
+
+        logger.info(f"Fetched {len(final_data)} total unique OCHLV points in {page_count} page(s) for {pool_address} from {params['fromDate']} to {params['toDate']}")
+        return final_data

@@ -17,6 +17,12 @@ from extraction.parsing_utils import _parse_custom_timestamp
 
 logger = logging.getLogger(__name__)
 
+# --- GLOBAL DEBUGGING FILTER ---
+# AIDEV-NOTE-CLAUDE: Set a pool address to process ONLY that pair across the ENTIRE application.
+# Set to None to disable the filter and process all positions.
+# DEBUG_TARGET_POOL_ADDRESS = "37GaodabZCeV8Mu3wyiJ46y8tBa5wsbKbpv5ZcYxMXsX"  # unstable coin-SOL
+DEBUG_TARGET_POOL_ADDRESS = None
+# --- END GLOBAL DEBUGGING FILTER ---
 
 def load_and_prepare_positions(file_path: str, min_threshold: float) -> pd.DataFrame:
     """
@@ -31,6 +37,21 @@ def load_and_prepare_positions(file_path: str, min_threshold: float) -> pd.DataF
     except FileNotFoundError:
         logger.error(f"Positions file not found: {file_path}")
         raise
+
+    # --- APPLY GLOBAL DEBUGGING FILTER ---
+    if DEBUG_TARGET_POOL_ADDRESS:
+        logger.warning("="*80)
+        logger.warning(f"!!! GLOBAL DEBUG FILTER ACTIVE: Processing ONLY for pool: {DEBUG_TARGET_POOL_ADDRESS}")
+        logger.warning("="*80)
+        
+        original_count = len(positions_df)
+        positions_df = positions_df[positions_df['pool_address'] == DEBUG_TARGET_POOL_ADDRESS].copy()
+        
+        if positions_df.empty:
+            logger.warning(f"No positions found for the specified pool address '{DEBUG_TARGET_POOL_ADDRESS}'.")
+        else:
+            logger.info(f"Filtered from {original_count} total positions to {len(positions_df)} for the target pool.")
+    # --- END APPLY GLOBAL DEBUGGING FILTER ---
 
     # AIDEV-NOTE-GEMINI: Standardized column name validation
     required_csv_columns = ['pnl_sol', 'strategy_raw', 'investment_sol']
@@ -78,11 +99,8 @@ def load_and_prepare_positions(file_path: str, min_threshold: float) -> pd.DataF
                     f"timestamps in '{col}'. This is expected for active positions."
                 )
 
-    # Apply minimum threshold filter
-    initial_count = len(positions_df)
-    positions_df = positions_df[abs(positions_df['pnl_sol']) >= min_threshold].copy()
-    if filtered_count := len(positions_df) < initial_count:
-        logger.info(f"Filtered {initial_count - filtered_count} positions below {min_threshold} SOL threshold")
+    # PnL filtering already applied during extraction - skip here
+    logger.info(f"Data preparation complete. No additional PnL filtering applied (already done during extraction).")
 
     if not positions_df.empty:
         logger.info(f"Data preparation complete. Returning {len(positions_df)} valid positions.")

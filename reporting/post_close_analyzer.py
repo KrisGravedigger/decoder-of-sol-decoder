@@ -86,10 +86,13 @@ class PostCloseAnalyzer:
             
             # Step 3: Fetch post-close data
             post_close_data = self.cache_manager.fetch_post_close_data(position, extension_hours)
-            
+
             if not post_close_data:
+                logger.warning(f"Position {position.position_id} excluded: No post-close data available")
                 result['limitations'] = ['No post-close data available']
                 return result
+                
+            logger.debug(f"Position {position.position_id}: Found {len(post_close_data)} post-close data points")
                 
             result['post_close_data_points'] = len(post_close_data)
             
@@ -173,10 +176,7 @@ class PostCloseAnalyzer:
         if duration < min_duration_hours:
             return False
             
-        # Check minimum value
-        min_value_sol = scope_filters.get('min_position_value_sol', 0.1)
-        if position.initial_investment < min_value_sol:
-            return False
+        # Position value filtering already done during extraction - skip here
             
         # Check date filter if enabled
         if scope_filters.get('enable_date_filter', False):
@@ -431,6 +431,7 @@ class PostCloseAnalyzer:
             Filtered DataFrame
         """
         filtered_df = positions_df.copy()
+        logger.info(f"Scope filtering: Starting with {len(filtered_df)} positions")
         scope_filters = self.config.get('tp_sl_analysis', {}).get('scope_filters', {})
         
         # Apply close reason filter
@@ -447,10 +448,6 @@ class PostCloseAnalyzer:
         duration_hours = (filtered_df['close_timestamp'] - filtered_df['open_timestamp']).dt.total_seconds() / 3600
         filtered_df = filtered_df[duration_hours >= min_duration_hours]
         
-        # Apply minimum value filter
-        min_value_sol = scope_filters.get('min_position_value_sol', 0.1)
-        filtered_df = filtered_df[filtered_df['investment_sol'] >= min_value_sol]
-        
         # Apply date filters if enabled
         if scope_filters.get('enable_date_filter', False):
             # Date from filter
@@ -464,12 +461,11 @@ class PostCloseAnalyzer:
             if last_n_days:
                 cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=last_n_days)
                 filtered_df = filtered_df[filtered_df['close_timestamp'] >= cutoff_date]
-                
-        # Additional filter: require enough post-close time for analysis
-        min_days_post_close = 7
-        days_since_close = (pd.Timestamp.now() - filtered_df['close_timestamp']).dt.total_seconds() / 86400
-        filtered_df = filtered_df[days_since_close >= min_days_post_close]
+
+        # Note: Removed min_value_sol and min_days_post_close filters as unnecessary
+        # Position value filtering already done during extraction, and post-close time restriction removed per business requirements
         
+        logger.info(f"Scope filtering: Ended with {len(filtered_df)} positions")
         return filtered_df
         
     def _row_to_position(self, row: pd.Series) -> Any:

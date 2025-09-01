@@ -55,7 +55,13 @@ class TpSlRangeSimulator:
         total_simulations = len(positions_df) * len(self.tp_levels) * len(self.sl_levels)
         
         logger.info(f"Starting range simulation: {len(positions_df)} positions × {len(self.tp_levels)} TP × {len(self.sl_levels)} SL = {total_simulations} simulations")
-        
+        # AIDEV-TODO-CLAUDE: Diagnostic logging for strategy instance counts
+        strategy_counts = positions_df['strategy_instance_id'].value_counts()
+        logger.info(f"Input strategy counts for TP/SL analysis:")
+        for strategy_id, count in strategy_counts.head(10).items():
+            logger.info(f"  {strategy_id}: {count} positions")
+
+
         # Process each position
         with tqdm(total=len(positions_df), desc="Processing positions") as pbar:
             for idx, row in positions_df.iterrows():
@@ -65,7 +71,8 @@ class TpSlRangeSimulator:
                 timeline = self._get_position_timeline(position)
                 
                 if not timeline:
-                    logger.warning(f"No timeline data for position {position.position_id}")
+                    logger.error(f"DIAGNOSTIC: Position {position.position_id} EXCLUDED from strategy {row['strategy_instance_id']}")
+                    logger.error(f"  - This reduces strategy position count in TP/SL analysis")
                     pbar.update(1)
                     continue
                     
@@ -112,7 +119,10 @@ class TpSlRangeSimulator:
 
             combined_price_data = in_position_data + post_close_data
             if not combined_price_data:
-                logger.warning(f"No price data available for position {position.position_id}")
+                logger.error(f"DIAGNOSTIC: Position {position.position_id} excluded from TP/SL analysis - No price data available")
+                logger.error(f"  - Strategy: {position.actual_strategy}")
+                logger.error(f"  - Pool: {position.pool_address}")
+                logger.error(f"  - Open: {position.open_timestamp}, Close: {position.close_timestamp}")
                 return []
             
             unique_points = {p['timestamp']: p for p in combined_price_data}
