@@ -44,40 +44,35 @@ class EnhancedPriceCacheManager(PriceCacheManager):
                          timeframe: str, api_key: Optional[str] = None,
                          force_refetch: bool = False, **kwargs) -> List[Dict]:
         """
-        [PRIMARY METHOD] Get price data with smart caching and guaranteed continuous output.
-        This is the modern replacement for the legacy get_price_data method.
+        [PRIMARY METHOD V3] Get price data with smart, efficient caching and guaranteed continuous output.
         """
         if api_key: self.api_key = api_key
 
         interval_seconds = self._get_interval_seconds(timeframe)
-        aligned_start_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds))
-        aligned_end_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds))
+        aligned_start_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds), tz=timezone.utc)
+        aligned_end_dt = datetime.fromtimestamp(self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds), tz=timezone.utc)
 
-        # 1. Try to load from the clean, processed cache first.
-        all_data = self._load_monthly_cache_files(self.offline_processed_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
+        # 1. ALWAYS go to the raw cache first as the single source of truth.
+        raw_ochlv_data = self._load_monthly_cache_files(self.raw_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
         
-        # 2. Find gaps in the processed cache
-        gaps = self._find_data_gaps(all_data, aligned_start_dt, aligned_end_dt, force_refetch, interval_seconds)
+        # 2. Find all gaps in the raw OCHLV cache.
+        raw_gaps = self._find_data_gaps(raw_ochlv_data, aligned_start_dt, aligned_end_dt, force_refetch, interval_seconds)
 
-        if gaps:
-            # 3. If gaps exist, try to fill them using the raw OCHLV cache
-            raw_ochlv_data = self._load_monthly_cache_files(self.raw_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
+        # 3. If the raw cache has gaps, fetch from the API to fill them.
+        if raw_gaps and not kwargs.get('use_cache_only'):
+            # --- AIDEV-FIX: MERGE GAPS FOR EFFICIENCY ---
+            merged_gaps = self._merge_gaps(raw_gaps, interval_seconds)
+            new_ochlv_data = self._fetch_and_fill_gaps_from_api(pool_address, merged_gaps, timeframe)
+            # --- END OF FIX ---
             
-            # 4. Find gaps in the raw OCHLV cache
-            raw_gaps = self._find_data_gaps(raw_ochlv_data, aligned_start_dt, aligned_end_dt, force_refetch, interval_seconds)
+            if new_ochlv_data:
+                raw_ochlv_data = self._merge_and_save_data(self.raw_cache_dir, pool_address, raw_ochlv_data, new_ochlv_data)
+                self.refresh_offline_processed_cache_for_pool(pool_address)
 
-            # 5. If raw cache also has gaps, fetch from API
-            if raw_gaps and not kwargs.get('use_cache_only'):
-                new_ochlv_data = self._fetch_and_fill_gaps_from_api(pool_address, raw_gaps, timeframe)
-                if new_ochlv_data:
-                    # Save new raw data and merge it
-                    raw_ochlv_data = self._merge_and_save_data(self.raw_cache_dir, pool_address, raw_ochlv_data, new_ochlv_data)
-                    # IMPORTANT: After fetching, we must refresh the processed cache to reflect new data
-                    self.refresh_offline_processed_cache_for_pool(pool_address)
-                    # Reload the processed cache to get the most up-to-date data
-                    all_data = self._load_monthly_cache_files(self.offline_processed_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
+        # 4. Load the processed cache, which is now guaranteed to be up-to-date.
+        all_data = self._load_monthly_cache_files(self.offline_processed_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
 
-        # 6. Final processing: align, forward-fill, and filter
+        # 5. Final processing: align, forward-fill, and filter.
         timestamp_map = self._map_to_candle_boundaries(all_data, interval_seconds)
         final_data = self._conservative_forward_fill(timestamp_map, interval_seconds, aligned_start_dt, aligned_end_dt)
         self._log_placeholder_warnings(final_data, pool_address, timeframe)
@@ -126,16 +121,8 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         """
         [PRIMARY VALIDATION METHOD] Checks if the raw cache contains complete OCHLV+Volume data
         for a position's required simulation timeframe (including post-close period).
-
-        Args:
-            position (Position): A position-like object with pool_address, open_timestamp,
-                                 and close_timestamp attributes.
-
-        Returns:
-            Dict[str, Any]: A dictionary containing validation results:
-                            - 'is_complete' (bool)
-                            - 'has_price_data' (bool)
-                            - 'has_volume_data' (bool)
+        This validation is strict: any gap or placeholder for a failed API call
+        marks the position as incomplete.
         """
         try:
             # 1. Determine the full required time range for simulation
@@ -152,33 +139,28 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             interval_seconds = self._get_interval_seconds(timeframe)
             raw_data = self._load_monthly_cache_files(self.raw_cache_dir, position.pool_address, start_dt, end_dt)
 
+            # A position with no data is obviously incomplete.
             if not raw_data:
                 return {'is_complete': False, 'has_price_data': False, 'has_volume_data': False}
 
-            # 3. Check for price data completeness (gap detection), now aware of tombstones
-            # We now check if a timestamp is either present with data or marked as a tombstone.
-            covered_timestamps = {
-                self._align_timestamp_to_boundary(d['timestamp'], interval_seconds) 
-                for d in raw_data
-            }
-            
+            # 3. Check for any gaps (missing timestamps or API failure placeholders)
+            data_map = {d['timestamp']: d for d in raw_data}
             current_ts = self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds)
             end_ts = self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds)
             
-            has_gaps = False
+            has_gaps_or_failures = False
             while current_ts <= end_ts:
-                if current_ts not in covered_timestamps:
-                    has_gaps = True
+                point = data_map.get(current_ts)
+                if point is None or point.get('is_api_failure') or point.get('is_tombstone'):
+                    has_gaps_or_failures = True
                     break
                 current_ts += interval_seconds
             
-            has_price_data = not has_gaps
-
-            # 4. Check for volume data availability
-            has_volume_data = any(d.get('volume', 0) > 0 for d in raw_data)
-
-            # 5. Determine overall completeness
-            is_complete = has_price_data and has_volume_data
+            is_complete = not has_gaps_or_failures
+            
+            # 4. Check for business value (at least some real data exists)
+            has_price_data = any(d.get('close', -1) > 0 for d in raw_data)
+            has_volume_data = any(d.get('volume', 0) > 0 for d in raw_data if not d.get('is_tombstone') and not d.get('is_api_failure'))
 
             return {'is_complete': is_complete, 'has_price_data': has_price_data, 'has_volume_data': has_volume_data}
         
@@ -188,8 +170,8 @@ class EnhancedPriceCacheManager(PriceCacheManager):
 
     def _fetch_and_fill_gaps_from_api(self, pool_address: str, gaps: List[Tuple[datetime, datetime]], timeframe: str) -> List[Dict]:
         """
-        Fetches data from API for gaps and creates 'tombstone' placeholders for intervals
-        where the API confirms no data exists. This prevents infinite re-fetching loops.
+        [REVISED FOR EFFICIENCY] Fetches data from API for gaps, but intelligently skips redundant
+        calls if a previous fetch for a small gap already covered a larger time range.
         """
         if not self.api_key:
             logger.warning(f"Gaps found for {pool_address} but no API key. Cannot fetch.")
@@ -197,34 +179,47 @@ class EnhancedPriceCacheManager(PriceCacheManager):
 
         all_new_data = []
         interval_seconds = self._get_interval_seconds(timeframe)
+        covered_timestamps = set()
 
         for gap_start, gap_end in gaps:
+            gap_start_ts = self._align_timestamp_to_boundary(int(gap_start.timestamp()), interval_seconds)
+            
+            # --- AIDEV-FIX: SMART PRE-EMPTION LOGIC ---
+            if gap_start_ts in covered_timestamps:
+                # This gap has already been filled by a previous, larger API call in this same run.
+                logger.info(f"Skipping redundant fetch for gap at {gap_start}, already covered.")
+                continue
+            # --- END OF FIX ---
+
             logger.info(f"Processing gap for {pool_address} from {gap_start} to {gap_end}")
             
-            # Fetch data from API for the entire gap period
-            api_data = self._fetch_ochlv_from_api(pool_address, gap_start, gap_end, timeframe)
-            all_new_data.extend(api_data)
+            api_data, fetch_successful = self._fetch_ochlv_from_api(pool_address, gap_start, gap_end, timeframe)
             
-            # --- AIDEV-NOTE-CLAUDE: START OF TOMBSTONE LOGIC ---
-            # Create a set of timestamps for which the API actually returned data
-            returned_timestamps = {self._align_timestamp_to_boundary(p['timestamp'], interval_seconds) for p in api_data}
-            
-            # Iterate through all expected timestamps in the gap
-            current_ts = self._align_timestamp_to_boundary(int(gap_start.timestamp()), interval_seconds)
+            current_ts = gap_start_ts
             end_ts = self._align_timestamp_to_boundary(int(gap_end.timestamp()), interval_seconds)
-            
-            while current_ts <= end_ts:
-                # If the API did not return data for this specific timestamp, create a tombstone
-                if current_ts not in returned_timestamps:
-                    tombstone = {
-                        'timestamp': current_ts,
-                        'open': -1, 'high': -1, 'low': -1, 'close': -1,
-                        'volume': -1, 'is_tombstone': True
-                    }
-                    all_new_data.append(tombstone)
-                current_ts += interval_seconds
-            # --- END OF TOMBSTONE LOGIC ---
-            
+                
+            if fetch_successful:
+                all_new_data.extend(api_data)
+                returned_timestamps = {self._align_timestamp_to_boundary(p['timestamp'], interval_seconds) for p in api_data}
+                covered_timestamps.update(returned_timestamps) # Add newly fetched points to our memory
+                
+                while current_ts <= end_ts:
+                    if current_ts not in returned_timestamps:
+                        tombstone = {
+                            'timestamp': current_ts, 'open': -1, 'high': -1, 'low': -1, 'close': -1,
+                            'volume': -1, 'is_tombstone': True
+                        }
+                        all_new_data.append(tombstone)
+                        covered_timestamps.add(current_ts) # Also mark tombstones as covered
+                    current_ts += interval_seconds
+            else:
+                logger.warning(f"API fetch failed for {pool_address}. Marking gap with temporary failure placeholders.")
+                while current_ts <= end_ts:
+                    failure_placeholder = {'timestamp': current_ts, 'is_api_failure': True}
+                    all_new_data.append(failure_placeholder)
+                    # We DO NOT add failures to 'covered_timestamps' so we can retry them next time.
+                    current_ts += interval_seconds
+                
             time.sleep(0.6) # API rate limit
 
         return all_new_data
@@ -248,30 +243,67 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         return sorted(unique_points.values(), key=lambda x: x['timestamp'])
 
     def _find_data_gaps(self, existing_data: List[Dict], start_dt: datetime, end_dt: datetime, force_refetch: bool, interval_seconds: int) -> List[Tuple[datetime, datetime]]:
-        """Finds time gaps in a list of data points, more robustly."""
+        """
+        Finds time gaps in a list of data points. Treats permanent tombstones as valid data,
+        but temporary API failure placeholders as gaps to be refetched.
+        """
         if force_refetch: return [(start_dt, end_dt)]
-        if not existing_data: return [(start_dt, end_dt)]
+        if not existing_data and not force_refetch: return [(start_dt, end_dt)]
 
         gaps = []
-        # Timestamps of existing data points
-        existing_timestamps = {p['timestamp'] for p in existing_data}
+        data_map = {p['timestamp']: p for p in existing_data}
         
-        # Iterate through expected timestamps and find missing ones
         current_ts = self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds)
         end_ts = self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds)
         
         while current_ts <= end_ts:
-            if current_ts not in existing_timestamps:
+            point = data_map.get(current_ts)
+            is_gap_point = (point is None or point.get('is_api_failure', False))
+
+            if is_gap_point:
                 gap_start_ts = current_ts
                 # Find the end of this gap
-                while current_ts <= end_ts and current_ts not in existing_timestamps:
-                    current_ts += interval_seconds
+                while current_ts <= end_ts:
+                    point = data_map.get(current_ts)
+                    if point is None or point.get('is_api_failure', False):
+                        current_ts += interval_seconds
+                    else:
+                        break # Gap ends here
                 gap_end_ts = current_ts - interval_seconds
                 gaps.append((datetime.fromtimestamp(gap_start_ts, tz=timezone.utc), datetime.fromtimestamp(gap_end_ts, tz=timezone.utc)))
             else:
                 current_ts += interval_seconds
         
         return gaps
+
+    def _merge_gaps(self, gaps: List[Tuple[datetime, datetime]], interval_seconds: int) -> List[Tuple[datetime, datetime]]:
+        """Merges consecutive or overlapping gaps into larger, continuous chunks."""
+        if not gaps:
+            return []
+
+        # Sort gaps by start time
+        sorted_gaps = sorted(gaps, key=lambda x: x[0])
+        
+        merged = []
+        current_start, current_end = sorted_gaps[0]
+
+        for next_start, next_end in sorted_gaps[1:]:
+            # If the next gap starts right after the current one ends (or overlaps)
+            if next_start <= current_end + timedelta(seconds=interval_seconds):
+                # Extend the current gap's end time
+                current_end = max(current_end, next_end)
+            else:
+                # The gap is not contiguous, so we finalize the current one and start a new one
+                merged.append((current_start, current_end))
+                current_start, current_end = next_start, next_end
+        
+        # Add the last merged gap
+        merged.append((current_start, current_end))
+        
+        if len(merged) < len(gaps):
+            logger.info(f"Merged {len(gaps)} small gaps into {len(merged)} larger API requests.")
+        
+        return merged
 
     def _merge_and_save_data(self, base_dir: str, pool_address: str, existing_data: List[Dict], new_data: List[Dict]) -> List[Dict]:
         """
@@ -402,26 +434,23 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         if duration_hours <= 72: return "30min"
         return "1h"
         
-    def _fetch_ochlv_from_api(self, pool_address: str, start_dt: datetime, end_dt: datetime, timeframe: str) -> List[Dict]:
+    def _fetch_ochlv_from_api(self, pool_address: str, start_dt: datetime, end_dt: datetime, timeframe: str) -> Tuple[List[Dict], bool]:
         """
-        Fetches OCHLV data from Moralis API, with robust error handling, pagination, a circuit breaker,
-        and a critical workaround for the fromDate == toDate bug.
+        Fetches OCHLV data from Moralis API, returning the data and a boolean success flag.
+        Includes a critical safety check to treat successful but empty responses for significant
+        time ranges as failures, preventing false tombstones on silent API errors (e.g., credit exhaustion).
         """
         if not self.api_key:
-            return []
+            return [], False
 
-        # --- CIRCUIT BREAKER ---
         if not hasattr(self, '_api_circuit_breaker_open'): self._api_circuit_breaker_open = False
         if self._api_circuit_breaker_open:
             logger.warning(f"API circuit breaker is open. Skipping request for {pool_address}.")
-            return []
+            return [], False
 
         url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{pool_address}/ohlcv"
         headers = {"accept": "application/json", "X-API-Key": self.api_key}
         
-        # --- AIDEV-NOTE-CLAUDE: CRITICAL MORALIS API WORKAROUND ---
-        # The API returns 400 Bad Request if fromDate == toDate.
-        # This logic ensures we always request at least a one-day range.
         from_date_str = start_dt.strftime('%Y-%m-%d')
         to_date_str = end_dt.strftime('%Y-%m-%d')
         
@@ -429,22 +458,18 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             api_end_dt = end_dt + timedelta(days=1)
             to_date_str = api_end_dt.strftime('%Y-%m-%d')
             logger.info(f"Applying Moralis single-day workaround for {from_date_str}.")
-        # --- END WORKAROUND ---
 
-        params = {
-            "timeframe": timeframe,
-            "fromDate": from_date_str,
-            "toDate": to_date_str,
-            "limit": 500
-        }
+        # FINAL CORRECT PARAMS: Includes pagination and required 'currency'
+        params = {"timeframe": timeframe, "fromDate": from_date_str, "toDate": to_date_str, "limit": 500, "currency": "usd"}
         
         all_results = []
         page_count = 0
+        fetch_successful = True
         while True:
             page_count += 1
             try:
                 response = requests.get(url, headers=headers, params=params, timeout=30)
-                if response.status_code in [401, 403, 429]:  # Unauthorized, Forbidden, Too Many Requests
+                if response.status_code in [401, 403, 429]:
                     error_reason = "Unknown"
                     if response.status_code == 401: error_reason = "Unauthorized (Invalid API Key?)"
                     if response.status_code == 403: error_reason = "Forbidden (Permission Denied)"
@@ -452,7 +477,8 @@ class EnhancedPriceCacheManager(PriceCacheManager):
                     
                     logger.error(f"CRITICAL API ERROR ({response.status_code} - {error_reason}) for {pool_address}. Opening circuit breaker.")
                     self._api_circuit_breaker_open = True
-                    return []  # Stop immediately
+                    fetch_successful = False
+                    break
                 response.raise_for_status()
                 data = response.json()
                 api_result = data.get('result', [])
@@ -464,13 +490,26 @@ class EnhancedPriceCacheManager(PriceCacheManager):
                 else:
                     break
             except requests.exceptions.HTTPError as e:
-                logger.error(f"API HTTPError (likely 400 Bad Request) for {pool_address} with params {params}. The pair may not be supported. Error: {e}")
-                return []
-            except requests.exceptions.RequestException as e:
-                logger.error(f"API RequestException for {pool_address}. Returning partial data if any. Error: {e}")
+                logger.error(f"API HTTPError for {pool_address}. Error: {e}")
+                fetch_successful = False
                 break
+            except requests.exceptions.RequestException as e:
+                logger.error(f"API RequestException for {pool_address}. Error: {e}")
+                fetch_successful = False
+                break
+                
+        # --- AIDEV-NOTE-GEMINI: CRITICAL SAFETY NET AGAINST SILENT API FAILURES ---
+        # If the API returned 200 OK (fetch_successful is still True) but sent no data
+        # for a time range longer than a day, we treat it as a failure. This prevents
+        # creating false tombstones when credits run out and the API returns empty results.
+        if fetch_successful and not all_results and (end_dt - start_dt).days >= 1:
+            logger.warning(f"API returned 200 OK but NO DATA for a multi-day gap for {pool_address}. "
+                        f"This is suspicious. Treating as an API FAILURE to be safe.")
+            fetch_successful = False
+        # --- END SAFETY NET ---
 
         processed_data = []
+        # Process data even on failure, we might have partial results
         for point in all_results:
             try:
                 processed_data.append({
@@ -484,5 +523,23 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         unique_points = {d['timestamp']: d for d in processed_data}
         final_data = sorted(unique_points.values(), key=lambda x: x['timestamp'])
 
-        logger.info(f"Fetched {len(final_data)} total unique OCHLV points in {page_count} page(s) for {pool_address} from {params['fromDate']} to {params['toDate']}")
-        return final_data
+        if fetch_successful:
+            logger.info(f"Fetched {len(final_data)} total unique OCHLV points in {page_count} page(s) for {pool_address}")
+        
+        return final_data, fetch_successful
+
+    def get_volume_for_position(self, position: 'Position') -> List[float]:
+        """Gets all valid volume data points for a given position from the raw cache."""
+        try:
+            start_dt = position.open_timestamp
+            end_dt = position.close_timestamp
+            raw_data = self._load_monthly_cache_files(self.raw_cache_dir, position.pool_address, start_dt, end_dt)
+            
+            volume_data = [
+                d['volume'] for d in raw_data 
+                if 'volume' in d and not d.get('is_tombstone') and not d.get('is_api_failure')
+            ]
+            return volume_data
+        except Exception as e:
+            logger.error(f"Failed to get volume for position {position.pool_address}: {e}")
+            return []

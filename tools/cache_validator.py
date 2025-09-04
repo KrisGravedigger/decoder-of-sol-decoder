@@ -109,8 +109,8 @@ def main():
     print("--- Cache Validator for TP/SL Simulator ---")
     
     # --- CONFIG ---
-    # TARGET_STRATEGY_ID = "Bid-Ask (1-Sided) SIXTYNINE_TP6_SL9_2025-08-08_731d9f"
-    TARGET_STRATEGY_ID = "Bid-Ask (1-Sided) SIXTYNINE_TP6_SL9_2025-06-23_b1bee1"
+    TARGET_STRATEGY_ID = "Bid-Ask (1-Sided) SIXTYNINE_TP6_SL9_2025-08-08_731d9f"
+    # TARGET_STRATEGY_ID = "Bid-Ask (1-Sided) SIXTYNINE_TP6_SL9_2025-06-23_b1bee1"
     POSITIONS_FILE = "positions_to_analyze.csv"
     CACHE_BASE_PATH = "price_cache"
     

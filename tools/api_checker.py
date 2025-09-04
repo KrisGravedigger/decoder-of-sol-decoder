@@ -2,29 +2,42 @@ import os
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import json
 
 # --- Konfiguracja ---
-# Wczytaj klucze API z pliku .env
-load_dotenv()
+# Wczytaj klucze API z pliku .env w głównym katalogu projektu
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
 MORALIS_API_KEY = os.getenv("MORALIS_API_KEY")
-BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY")
 
 # --- Dane Testowe (PRECYZYJNIE DLA NASZEGO PROBLEMU) ---
-# Adres puli "unstable coin-SOL" z data_loader.py
-TEST_POOL_ADDRESS = "67C4rdUriP9EFbUo7CeoiFhM52Jgu9LZpe37Jk2k1tHZ"
-
-# Daty, dla których obserwujemy ponowne pobieranie w logach.
-# Testujemy DOKŁADNIE te przedziały.
-GAPS_TO_TEST = [
-    {"start": "2025-08-17", "end": "2025-08-18"}, # Luka z pierwszej problematycznej pozycji
-    {"start": "2025-08-23", "end": "2025-08-23"}, # Pojedynczy dzień, który wymaga obejścia API
-    {"start": "2025-08-26", "end": "2025-08-26"}, # Kolejny pojedynczy dzień
+TARGETS_TO_TEST = [
+    {
+        "name": "SPX6900 (Wormhole)-SOL",
+        "pool_address": "2cfmoth8SaKjuSXe7wKcxg5825J8HNKSQQbWAacoUiP6",
+        "start": "2025-05-29",  # POPRAWIONY ROK NA BIEŻĄCY
+        "end": "2025-05-30"
+    },
+    {
+        "name": "Shark Cat-SOL",
+        "pool_address": "ADfGhbkCeT3yrjLCJNY19wJx6VCjxxsJ5LQ8mNWLw6LC",
+        "start": "2025-06-13",  # POPRAWIONY ROK NA BIEŻĄCY
+        "end": "2025-06-14"
+    },
+    {
+        "name": "GIGACHAD-SOL",
+        "pool_address": "44bUbBQxukyZ8rr3B5W8L3Gm8dm1QcL7gERD32zL7vpY",
+        "start": "2025-05-29",  # POPRAWIONY ROK NA BIEŻĄCY
+        "end": "2025-05-30"
+    }
 ]
 
 # --- Funkcje pomocnicze ---
 
 def parse_date(date_str):
     """Prosta funkcja do parsowania daty YYYY-MM-DD."""
+    # POPRAWIONY FORMAT DATY
     return datetime.strptime(date_str, "%Y-%m-%d")
 
 def print_header(title):
@@ -43,17 +56,16 @@ def test_api_call(name, url, headers, params):
         
         try:
             response_data = response.json()
-            print(response_data)
-            if isinstance(response_data, list):
-                print(f"==> WYNIK: Otrzymano {len(response_data)} punktów danych.")
-            elif isinstance(response_data.get('result'), list):
-                 print(f"==> WYNIK: Otrzymano {len(response_data['result'])} punktów danych.")
-            elif response_data.get('data', {}).get('items'):
-                print(f"==> WYNIK: Otrzymano {len(response_data['data']['items'])} punktów danych.")
+            print(json.dumps(response_data, indent=2))
+            
+            if isinstance(response_data.get('result'), list):
+                 print(f"\n==> WYNIK: Otrzymano {len(response_data['result'])} punktów danych.")
+            else:
+                print("\n==> WYNIK: Odpowiedź nie zawierała oczekiwanego pola 'result'.")
 
-        except requests.exceptions.JSONDecodeError:
+        except json.JSONDecodeError:
             print(response.text)
-            print(f"==> WYNIK: Odpowiedź nie jest w formacie JSON.")
+            print(f"\n==> WYNIK: Odpowiedź nie jest w formacie JSON.")
 
     except Exception as e:
         print(f"WYSTĄPIŁ KRYTYCZNY BŁĄD: {e}")
@@ -63,56 +75,37 @@ def test_api_call(name, url, headers, params):
 # --- Główna funkcja diagnostyczna ---
 
 def main():
-    print_header("ROZPOCZYNANIE PRECYZYJNEJ DIAGNOSTYKI API")
+    print_header("ROZPOCZYNANIE PRECYZYJNEJ DIAGNOSTYKI API V4 (TYLKO MORALIS)")
     
     if not MORALIS_API_KEY:
-        print("\nBŁĄD: Brak klucza MORALIS_API_KEY w pliku .env! Test Moralis nie powiedzie się.")
+        print("\nBŁĄD: Brak klucza MORALIS_API_KEY w pliku .env! Upewnij się, że plik .env znajduje się w głównym katalogu projektu.")
         return
 
-    for gap in GAPS_TO_TEST:
-        start_str, end_str = gap['start'], gap['end']
-        print_header(f"TESTOWANIE LUKI: {start_str} do {end_str}")
+    for target in TARGETS_TO_TEST:
+        pool_address = target['pool_address']
+        start_str, end_str = target['start'], target['end']
+        name = target['name']
+        print_header(f"TESTOWANIE PARY: {name} ({start_str} do {end_str})")
 
         start_dt = parse_date(start_str)
         end_dt = parse_date(end_str)
         
-        # --- Test MORALIS API ---
-        # Używamy dokładnie tej samej logiki, co w naszym cache managerze
-        moralis_url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{TEST_POOL_ADDRESS}/ohlcv"
+        moralis_url = f"https://solana-gateway.moralis.io/token/mainnet/pairs/{pool_address}/ohlcv"
         moralis_headers = {"accept": "application/json", "X-API-Key": MORALIS_API_KEY}
         
-        # Obejście problemu Moralis API dla zapytań o jeden dzień
         api_end_dt = end_dt
         if start_dt == end_dt:
             api_end_dt = end_dt + timedelta(days=1)
-            print(f"INFO: Stosowanie obejścia Moralis dla pojedynczego dnia (zapytanie o {start_str} do {api_end_dt.strftime('%Y-%m-%d')})")
+            print(f"INFO: Stosowanie obejścia Moralis dla pojedynczego dnia...")
 
         moralis_params = {
-            "timeframe": "1h", # Używamy 1h dla większej szansy na dane
+            "timeframe": "1h",
             "fromDate": start_dt.strftime('%Y-%m-%d'),
             "toDate": api_end_dt.strftime('%Y-%m-%d'),
         }
-        test_api_call("Moralis (by Date)", moralis_url, moralis_headers, moralis_params)
-
-        # --- Test BIRDEYE API (jako niezależne źródło do porównania) ---
-        start_unix = int(start_dt.timestamp())
-        end_unix = int((end_dt + timedelta(days=1) - timedelta(seconds=1)).timestamp()) # Koniec dnia
-        
-        birdeye_url = "https://public-api.birdeye.so/defi/history_price"
-        birdeye_params = {
-            "address": TEST_POOL_ADDRESS,
-            "address_type": "pair",
-            "type": "1H",
-            "time_from": start_unix,
-            "time_to": end_unix
-        }
-        birdeye_headers = {}
-        if BIRDEYE_API_KEY:
-            birdeye_headers["X-API-Key"] = BIRDEYE_API_KEY
-            
-        test_api_call("Birdeye Public API", birdeye_url, birdeye_headers, birdeye_params)
+        test_api_call(f"Moralis dla {name}", moralis_url, moralis_headers, moralis_params)
     
-    print_header("ZAKOŃCZONO DIAGNOSTYKĘ")
+    print_header("ZAKOŃCZONO DIAGNOSTYKĘ V4")
 
 
 if __name__ == "__main__":

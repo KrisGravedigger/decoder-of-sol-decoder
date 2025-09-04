@@ -698,3 +698,18 @@ Issue Resolution - Peak PnL Values Investigation:
 -   **Enhanced Resilience:** Improved the `circuit breaker` mechanism with more descriptive logging for critical API errors (e.g., exhausted credits), making the system's behavior more transparent during large-scale data fetching operations.
 
 **Outcome:** The price cache is now fully stable, efficient, and resilient. It correctly handles all known API edge cases, completely eliminating the infinite loop and ensuring the integrity of offline data. The entire data fetching pipeline is now production-ready.
+
+**2025-09-03: Resolved Critical Price Cache Infinite Loop & Hardened API Logic**
+
+**Issue Resolution:** Successfully diagnosed and fixed a critical, multi-layered bug causing an infinite re-fetch loop in the price cache system, which led to excessive API credit consumption. The problem was elusive, requiring a deep debugging process that ruled out several incorrect hypotheses.
+
+-   **Root Cause Discovery:** The core issue was a combination of two problems:
+    1.  **Inefficiency:** The system was making one API call for every single missing hour of data ("death by a thousand cuts"), rapidly depleting API credits even for small gaps.
+    2.  **Logical Flaw:** The cache validation logic did not correctly handle all gap scenarios, contributing to unnecessary re-checks.
+
+-   **The Multi-Stage Solution:** A comprehensive refactoring was implemented to solve the problem at its root:
+    1.  **Gap Merging for Efficiency:** A new `_merge_gaps` function was introduced to intelligently combine fragmented, consecutive gaps into single, large blocks. This drastically reduces the number of API calls from dozens to just one for a given period.
+    2.  **Hardened Validation Logic:** The `validate_cache_completeness` function was corrected to ensure it has a consistent and strict definition of what constitutes a data gap, preventing future loops.
+    3.  **Resilient API Handling:** The system's `circuit breaker` and error handling proved effective, correctly stopping API calls upon credit exhaustion and marking gaps for future retries.
+
+**Outcome:** The price cache is now fully stable, efficient, and resilient. It correctly handles all known API edge cases, minimizes API credit consumption, and ensures the integrity of offline data. The entire data fetching pipeline is now robust and production-ready.

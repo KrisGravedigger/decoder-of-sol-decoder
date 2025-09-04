@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from utils.common import print_header
 from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
 from reporting.data_loader import load_and_prepare_positions
+from tools.repair_cache import run_cache_repair
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +67,8 @@ def fetch_enhanced_cache_data(mode: Literal['fill_gaps', 'force_refetch']):
                     skipped_complete += 1
                     continue
 
-                # PRAGMATIC CACHE RULE: Don't try to fix old, incomplete positions
-                # This rule should ONLY apply if we have already tried to fetch data before (i.e., cache exists but is partial)
-                has_any_data = validation_result['has_price_data'] # We use this as a proxy for "cache exists"
-                position_close_date = row.get('close_timestamp')
-                
-                if has_any_data and position_close_date < datetime.now() - timedelta(days=2):
-                    print("✓ Skipping (old, known-incomplete)")
-                    skipped_old +=1
-                    continue
+                # The "Pragmatic 2-Day Rule" has been removed for simplicity and robustness.
+                # The system will now always attempt to fill gaps for any non-complete position.
 
             try:
                 # AIDEV-NOTE-CLAUDE: Fetch data for an extended period to support post-close analysis.
@@ -139,9 +133,10 @@ def enhanced_cache_fetching_menu():
         print("-"*70)
         print("1. Fill Gaps Only (Recommended - skips complete & very old positions)")
         print("2. Force Refetch All Data (Re-downloads all data, uses more API credits)")
-        print("3. Back")
+        print("3. [ONE-TIME] Repair Cache (Converts old 'tombstones' to be re-checked)")
+        print("4. Back")
 
-        choice = input("Select an option (1-3): ")
+        choice = input("Select an option (1-4): ")
 
         if choice == '1':
             fetch_enhanced_cache_data(mode='fill_gaps')
@@ -150,6 +145,9 @@ def enhanced_cache_fetching_menu():
             fetch_enhanced_cache_data(mode='force_refetch')
             break
         elif choice == '3':
+            run_cache_repair()
+            # After repair, we stay in the menu to allow user to fill gaps
+        elif choice == '4':
             break
         else:
             print("Invalid choice, please try again.")
