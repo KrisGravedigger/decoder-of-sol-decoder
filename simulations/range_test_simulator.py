@@ -104,17 +104,28 @@ class TpSlRangeSimulator:
         """
         try:
             # --- 1. Fetch data for the actual "in-position" period (from cache) ---
-            in_position_data = self.post_close_analyzer.cache_manager.fetch_ochlv_data(
-                position.pool_address,
-                position.open_timestamp,
-                position.close_timestamp,
+            timeframe_in_pos = self.post_close_analyzer.cache_manager._determine_timeframe_from_duration(
+                position.open_timestamp, position.close_timestamp
+            )
+            in_position_data = self.post_close_analyzer.cache_manager.get_price_data(
+                pool_address=position.pool_address,
+                start_dt=position.open_timestamp,
+                end_dt=position.close_timestamp,
+                timeframe=timeframe_in_pos,
                 use_cache_only=True
             )
 
             # --- 2. Fetch data for the "post-close" simulation period ---
-            _, extension_hours = self.post_close_analyzer._calculate_post_close_period(position)
-            post_close_data = self.post_close_analyzer.cache_manager.fetch_post_close_data(
-                position, extension_hours
+            end_dt, _ = self.post_close_analyzer._calculate_post_close_period(position)
+            timeframe_post_close = self.post_close_analyzer.cache_manager._determine_timeframe_from_duration(
+                position.close_timestamp, end_dt
+            )
+            post_close_data = self.post_close_analyzer.cache_manager.get_price_data(
+                pool_address=position.pool_address,
+                start_dt=position.close_timestamp,
+                end_dt=end_dt,
+                timeframe=timeframe_post_close,
+                use_cache_only=True
             )
 
             combined_price_data = in_position_data + post_close_data

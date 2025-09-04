@@ -713,3 +713,13 @@ Issue Resolution - Peak PnL Values Investigation:
     3.  **Resilient API Handling:** The system's `circuit breaker` and error handling proved effective, correctly stopping API calls upon credit exhaustion and marking gaps for future retries.
 
 **Outcome:** The price cache is now fully stable, efficient, and resilient. It correctly handles all known API edge cases, minimizes API credit consumption, and ensures the integrity of offline data. The entire data fetching pipeline is now robust and production-ready.
+
+**2025-09-04: Critical Refactoring: Unifying Price Cache Access and Fixing Report Generation**
+
+**Issue Resolution:** Resolved a multi-layered series of crashes caused by incomplete refactoring of the price cache system. The initial `AttributeError` in the TP/SL simulator was fixed, which then exposed a deeper, critical `NotImplementedError` during final report generation. The root cause was identified as the `InfrastructureCostAnalyzer` still using the deprecated `PriceCacheManager`.
+
+-   **Initial `AttributeError` Fix:** Replaced all legacy calls to `fetch_ochlv_data` with the new `get_price_data` method across `range_test_simulator.py`, `post_close_analyzer.py`, and `cache_debugger.py`, correctly adding the required `timeframe` parameter.
+-   **Comprehensive `NotImplementedError` Fix:** Migrated `infrastructure_cost_analyzer.py` entirely to the modern `EnhancedPriceCacheManager`, simplifying its logic and ensuring it uses the single source of truth for price data.
+-   **Code Hygiene:** Removed dead `import` statements for the legacy `PriceCacheManager` from `main.py` and `analysis_runner.py` to prevent future bugs.
+
+**Outcome:** The entire data pipeline, from simulation to final report generation, now exclusively and correctly uses the `EnhancedPriceCacheManager`. This eliminates critical bugs, removes technical debt, and stabilizes the entire reporting workflow.

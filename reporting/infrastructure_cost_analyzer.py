@@ -8,8 +8,8 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import yaml
 
-# AIDEV-NOTE-CLAUDE: Import PriceCacheManager to replace old cache logic
-from .price_cache_manager import PriceCacheManager
+# AIDEV-NOTE-GEMINI: Use the single source of truth for all price data.
+from data_fetching.enhanced_price_cache_manager import EnhancedPriceCacheManager
 
 # AIDEV-NOTE-GEMINI: CRITICAL FIX - Removed redundant basicConfig. 
 # It should only be called once in the main entry point (main.py).
@@ -22,6 +22,9 @@ class InfrastructureCostAnalyzer:
         
         self.monthly_costs = self.config.get('infrastructure_costs', {}).get('monthly', {})
         self.daily_cost_usd = sum(self.monthly_costs.values()) / 30
+        
+        # AIDEV-FIX-GEMINI: Use the single source of truth for price data, initialized once.
+        self.cache_manager = EnhancedPriceCacheManager(config=self.config, api_key=self.api_key)
         
         logger.info(f"Daily infrastructure cost: ${self.daily_cost_usd:.2f} USD")
         if not self.api_key:
@@ -36,71 +39,45 @@ class InfrastructureCostAnalyzer:
 
     def get_sol_usdc_rates(self, start_date: str, end_date: str, force_refetch: bool = False) -> Dict[str, Optional[float]]:
         """
-        Get daily SOL/USDC prices using the centralized PriceCacheManager and a proven high-liquidity pair address.
-        Includes enhanced logging for cache utilization.
+        Get daily SOL/USDC prices using the centralized EnhancedPriceCacheManager.
         """
         logger.info(f"Fetching SOL/USDC rates from {start_date} to {end_date}. Force refetch: {force_refetch}")
-        cache_manager = PriceCacheManager()
         
         sol_usdc_pair_address = "83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d"
         
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
 
-        # --- Pre-check cache status ---
-        logger.info("Pre-checking cache for existing rates...")
-        cached_price_data = cache_manager.get_price_data(
-            pool_address=sol_usdc_pair_address,
-            start_dt=start_dt,
-            end_dt=end_dt,
-            timeframe='1d',
-            api_key=None, 
-            force_refetch=False 
-        )
-        cached_rates_count = 0
-        if cached_price_data:
-            df_cache = pd.DataFrame([p for p in cached_price_data if not p.get('is_placeholder') and p.get('close', 0) > 0])
-            if not df_cache.empty:
-                df_cache['timestamp'] = pd.to_numeric(df_cache['timestamp'], errors='coerce').fillna(df_cache['timestamp'].apply(lambda x: datetime.fromisoformat(x.replace('Z', '+00:00')).timestamp() if isinstance(x, str) else x))
-                df_cache['date'] = pd.to_datetime(df_cache['timestamp'], unit='s').dt.date
-                cached_rates_count = df_cache['date'].nunique()
-        logger.info(f"Found {cached_rates_count} valid daily rates in cache before main fetch.")
-        
-        # --- Main fetch operation ---
-        price_data = cache_manager.get_price_data(
+        # AIDEV-FIX-CLAUDE: Use the correct cache manager instance and method.
+        price_data = self.cache_manager.get_price_data(
             pool_address=sol_usdc_pair_address,
             start_dt=start_dt,
             end_dt=end_dt,
             timeframe='1d',
             api_key=self.api_key,
-            force_refetch=force_refetch
+            force_refetch=force_refetch,
+            use_cache_only=not self.api_key
         )
         
         if not price_data:
-            logger.warning("No SOL/USDC price data returned from PriceCacheManager.")
+            logger.warning("No SOL/USDC price data returned from EnhancedPriceCacheManager.")
             return {d.strftime("%Y-%m-%d"): None for d in pd.date_range(start_date, end_date)}
             
         df = pd.DataFrame(price_data)
-        df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').fillna(df['timestamp'].apply(lambda x: datetime.fromisoformat(x.replace('Z', '+00:00')).timestamp() if isinstance(x, str) else x))
         df['date'] = pd.to_datetime(df['timestamp'], unit='s').dt.date
         
+        # Get the last price for each day to ensure we have the closing price
         daily_prices_df = df.sort_values('timestamp').groupby('date')['close'].last()
         
+        # Forward-fill and back-fill to handle weekends or no-trade days
         all_dates = pd.date_range(start=start_date, end=end_date)
-        total_days_required = len(all_dates)
         rates_series = daily_prices_df.reindex(all_dates.date, method=None)
-        
         rates_series_filled = rates_series.ffill().bfill()
+        
         final_rates = {date.strftime('%Y-%m-%d'): price for date, price in rates_series_filled.items()}
         
-        total_rates_available = len(final_rates)
-        newly_fetched_count = total_rates_available - cached_rates_count if total_rates_available > cached_rates_count else 0 # Defensive check
-        
         self.sol_usdc_rates = final_rates
-        logger.info(
-            f"Successfully prepared {total_rates_available}/{total_days_required} SOL/USDC daily rates. "
-            f"(Found {cached_rates_count} in cache, added/updated {newly_fetched_count})"
-        )
+        logger.info(f"Successfully prepared {len(final_rates)} SOL/USDC daily rates for the period.")
             
         return self.sol_usdc_rates
 

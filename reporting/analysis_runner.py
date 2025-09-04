@@ -13,7 +13,6 @@ if project_root not in sys.path:
 
 from simulations.spot_vs_bidask_simulator import SpotVsBidAskSimulator
 from reporting.data_loader import _parse_custom_timestamp
-from reporting.price_cache_manager import PriceCacheManager
 
 logger = logging.getLogger(__name__)
 

@@ -31,7 +31,6 @@ from reporting.strategy_instance_detector import run_instance_detection
 from reporting.analysis_runner import AnalysisRunner
 from reporting.orchestrator import PortfolioAnalysisOrchestrator
 from reporting.data_loader import load_and_prepare_positions
-from reporting.price_cache_manager import PriceCacheManager
 from data_fetching.main_data_orchestrator import data_fetching_menu
 from data_fetching.cache_orchestrator import (
     enhanced_cache_fetching_menu, 

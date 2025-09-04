@@ -85,7 +85,14 @@ class PostCloseAnalyzer:
             result['simulation_duration_hours'] = extension_hours
             
             # Step 3: Fetch post-close data
-            post_close_data = self.cache_manager.fetch_post_close_data(position, extension_hours)
+            timeframe_post_close = self.cache_manager._determine_timeframe_from_duration(position.close_timestamp, end_datetime)
+            post_close_data = self.cache_manager.get_price_data(
+                pool_address=position.pool_address,
+                start_dt=position.close_timestamp,
+                end_dt=end_datetime,
+                timeframe=timeframe_post_close,
+                use_cache_only=True
+            )
 
             if not post_close_data:
                 logger.warning(f"Position {position.position_id} excluded: No post-close data available")
@@ -97,10 +104,12 @@ class PostCloseAnalyzer:
             result['post_close_data_points'] = len(post_close_data)
             
             # Step 4: Fetch position lifetime volume data for fee rate calculation
-            position_volume_data = self.cache_manager.fetch_ochlv_data(
-                position.pool_address, 
-                position.open_timestamp, 
-                position.close_timestamp,
+            timeframe_in_pos = self.cache_manager._determine_timeframe_from_duration(position.open_timestamp, position.close_timestamp)
+            position_volume_data = self.cache_manager.get_price_data(
+                pool_address=position.pool_address,
+                start_dt=position.open_timestamp,
+                end_dt=position.close_timestamp,
+                timeframe=timeframe_in_pos,
                 use_cache_only=True  # Should already be cached from previous analyses
             )
 

@@ -32,10 +32,14 @@ def test_enhanced_cache_manager():
         
         print("\n1. Testing cache-only OCHLV data fetch...")
         try:
-            ochlv_data = enhanced_cache.fetch_ochlv_data(
+            start_dt = test_position.get('open_timestamp')
+            end_dt = test_position.get('close_timestamp')
+            timeframe = enhanced_cache._determine_timeframe_from_duration(start_dt, end_dt)
+            ochlv_data = enhanced_cache.get_price_data(
                 pool_address=test_position.get('pool_address'),
-                start_dt=test_position.get('open_timestamp'),
-                end_dt=test_position.get('close_timestamp'),
+                start_dt=start_dt,
+                end_dt=end_dt,
+                timeframe=timeframe,
                 use_cache_only=True
             )
             print(f"   ✓ Retrieved {len(ochlv_data)} OCHLV data points")
