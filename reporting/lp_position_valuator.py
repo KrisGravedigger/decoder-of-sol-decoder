@@ -84,7 +84,8 @@ class LPPositionValuator:
     def simulate_position_timeline(self, position: 'Position', price_data: List[Dict], 
                                  fee_data: List[float]) -> List[Dict]:
         """
-        Simulates position value over a timeline, correctly handling OOR state.
+        Simulates position value over a timeline, correctly handling OOR state and
+        calculating PnL for high and low prices for accurate backtesting.
         """
         if not price_data:
             return []
@@ -102,39 +103,54 @@ class LPPositionValuator:
 
         for i, price_point in enumerate(price_data):
             timestamp = datetime.fromtimestamp(price_point['timestamp'])
+            
+            # Extract OCHL prices from the candle
             current_price = price_point['close']
+            high_price = price_point['high']
+            low_price = price_point['low']
             
             if i < len(fee_data):
                 accumulated_fees += fee_data[i]
 
             position_value = 0.0
+            position_value_high = 0.0
+            position_value_low = 0.0
             
-            # Check for OOR condition
+            # Check for OOR condition based on the closing price of the candle
             is_currently_out_of_range = (min_price is not None and current_price < min_price) or \
                                         (max_price is not None and current_price > max_price)
 
             if not is_oor and is_currently_out_of_range:
-                # First time hitting OOR: lock the value.
-                # At OOR, we are 100% in SOL, so value is initial investment + fees.
+                # Transition to OOR: lock the value based on this candle's close
                 is_oor = True
                 oor_value = initial_investment + accumulated_fees
                 position_value = oor_value
             elif is_oor:
-                # Already OOR, value is locked.
+                # Already OOR: value is locked in SOL terms
                 position_value = oor_value
             else:
-                # Still in range, calculate value dynamically.
-                position_value = self.calculate_in_range_value(
-                    position, initial_price, current_price, accumulated_fees
-                )
+                # Still in range: calculate value dynamically for close, high, and low
+                position_value = self.calculate_in_range_value(position, initial_price, current_price, accumulated_fees)
+                position_value_high = self.calculate_in_range_value(position, initial_price, high_price, accumulated_fees)
+                position_value_low = self.calculate_in_range_value(position, initial_price, low_price, accumulated_fees)
+
+            if is_oor:
+                # If OOR, high and low values are the same as the locked value
+                position_value_high = position_value
+                position_value_low = position_value
             
+            # Calculate PnL percentages for all three price points
             pnl_pct = ((position_value - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
+            pnl_pct_high = ((position_value_high - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
+            pnl_pct_low = ((position_value_low - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
             
             timeline.append({
                 'timestamp': timestamp,
-                'price': current_price,
+                'price': current_price, # price still refers to 'close'
                 'position_value_sol': position_value,
                 'pnl_pct': pnl_pct,
+                'pnl_pct_high': pnl_pct_high,
+                'pnl_pct_low': pnl_pct_low,
                 'accumulated_fees': accumulated_fees
             })
             

@@ -168,8 +168,10 @@ class TpSlRangeSimulator:
 
     def _find_exit_in_timeline(self, position: Position, timeline: List[Dict], tp_level: float, sl_level: float) -> Dict[str, Any]:
         """
-        Finds the simulated exit point and calculates the resulting PnL,
-        correctly handling a dynamic OOR (Out of Range) timeout and price threshold.
+        Finds the simulated exit point using realistic intra-candle (high/low) logic.
+        - TP triggers if candle's high reaches the level, closing at exactly tp_level.
+        - SL triggers if candle's low reaches the level, closing at exactly -sl_level.
+        - OOR is checked based on the candle's close price.
         """
         if not timeline:
             return {'simulated_pnl': 0.0, 'simulated_pnl_pct': 0.0, 'exit_reason': 'NO_DATA', 'days_to_exit': 0.0}
@@ -181,13 +183,31 @@ class TpSlRangeSimulator:
         oor_start_timestamp = None
         exit_point = None
         exit_reason = 'END'
+        final_pnl_pct = 0.0
                 
         for i, point in enumerate(timeline):
-            pnl_pct = point.get('pnl_pct', 0.0)
-            current_price = point.get('price', 0.0)
-            current_timestamp = point.get('timestamp')
+            pnl_pct_high = point.get('pnl_pct_high', point['pnl_pct'])
+            pnl_pct_low = point.get('pnl_pct_low', point['pnl_pct'])
+            pnl_pct_close = point['pnl_pct']
             
-            # --- OOR LOGIC ---
+            current_price = point['price'] # This is the close price
+            current_timestamp = point['timestamp']
+            
+            # --- REALISTIC TP/SL TRIGGER LOGIC (INTRA-CANDLE) ---
+            # Standard backtesting practice: check high for TP first, then low for SL.
+            if pnl_pct_high >= tp_level:
+                exit_reason = 'TP'
+                final_pnl_pct = tp_level # Exit at the exact TP level
+                exit_point = point
+                break
+
+            if pnl_pct_low <= -sl_level:
+                exit_reason = 'SL'
+                final_pnl_pct = -sl_level # Exit at the exact SL level
+                exit_point = point
+                break
+
+            # --- OOR LOGIC (based on close price) ---
             is_out_of_range = (min_price is not None and current_price < min_price) or \
                               (max_price is not None and current_price > max_price)
 
@@ -198,32 +218,25 @@ class TpSlRangeSimulator:
                 time_in_oor = (current_timestamp - oor_start_timestamp).total_seconds() / 60
                 if time_in_oor >= oor_timeout_minutes:
                     exit_reason = 'OOR'
+                    final_pnl_pct = pnl_pct_close
                     exit_point = point
                     break
             else:
                 oor_start_timestamp = None
-
-            # --- TP/SL LOGIC ---
-            if pnl_pct >= tp_level:
-                exit_reason = 'TP'
-                exit_point = point
-                break
-
-            if pnl_pct <= -sl_level:
-                exit_reason = 'SL'
-                exit_point = point
-                break
         
+        # If no exit condition was met, position runs to the end of the timeline
         if exit_point is None:
             exit_reason = 'END'
             exit_point = timeline[-1]
+            final_pnl_pct = exit_point['pnl_pct']
 
-        simulated_pnl = exit_point['position_value_sol'] - position.initial_investment
+        # Calculate final PnL in SOL based on the determined PnL percentage
+        simulated_pnl = position.initial_investment * (final_pnl_pct / 100.0)
         days_to_exit = (exit_point['timestamp'] - position.open_timestamp).total_seconds() / 86400
 
         return {
             'simulated_pnl': simulated_pnl,
-            'simulated_pnl_pct': exit_point['pnl_pct'],
+            'simulated_pnl_pct': final_pnl_pct,
             'exit_reason': exit_reason,
             'days_to_exit': days_to_exit,
         }

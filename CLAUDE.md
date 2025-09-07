@@ -723,3 +723,19 @@ Issue Resolution - Peak PnL Values Investigation:
 -   **Code Hygiene:** Removed dead `import` statements for the legacy `PriceCacheManager` from `main.py` and `analysis_runner.py` to prevent future bugs.
 
 **Outcome:** The entire data pipeline, from simulation to final report generation, now exclusively and correctly uses the `EnhancedPriceCacheManager`. This eliminates critical bugs, removes technical debt, and stabilizes the entire reporting workflow.
+
+**2025-09-07: Realistic Intra-Candle Simulation & Critical Data Pipeline Repair**
+
+**Issue Resolution:** Fixed a fundamental flaw in the TP/SL simulation logic that caused counter-intuitive results (e.g., raising TP did not increase PnL). The root cause was twofold:
+
+1.  **Simulation Logic Flaw:** The backtester only considered the `close` price of each candle, ignoring `high` and `low` prices. This caused the simulation to miss actual TP/SL trigger points within a candle, leading to unrealistic "PnL jumps".
+2.  **Critical Data Pipeline Bug:** A deep-seated bug was discovered in `EnhancedPriceCacheManager`. The primary `get_price_data` method was incorrectly discarding the full, raw OCHLV data and instead serving a simplified `{timestamp, close}` version from a processed cache, which made realistic simulation impossible and caused `KeyError: 'high'`.
+
+**Comprehensive Solution Implemented:**
+
+-   **Data Pipeline Repaired:** The `EnhancedPriceCacheManager` was refactored to exclusively use the full, raw OCHLV data as the single source of truth throughout its entire processing pipeline, ensuring no data loss.
+-   **Realistic Simulation Logic:** `lp_position_valuator` was upgraded to calculate PnL based on `high` and `low` prices. The core simulation engine in `range_test_simulator` now implements standard backtesting logic:
+    -   If a candle's `high` price triggers TP, the position exits with PnL set **exactly to `tp_level`**.
+    -   If a candle's `low` price triggers SL, the position exits with PnL set **exactly to `-sl_level`**.
+
+**Outcome:** The simulation engine is now significantly more accurate, robust, and produces logical, intuitive results. The underlying data infrastructure has been hardened to prevent future data integrity issues.

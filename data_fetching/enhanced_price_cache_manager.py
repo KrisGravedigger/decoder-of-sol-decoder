@@ -44,7 +44,8 @@ class EnhancedPriceCacheManager(PriceCacheManager):
                          timeframe: str, api_key: Optional[str] = None,
                          force_refetch: bool = False, **kwargs) -> List[Dict]:
         """
-        [PRIMARY METHOD V3] Get price data with smart, efficient caching and guaranteed continuous output.
+        [PRIMARY METHOD V4 - HOTFIX] Get price data with smart caching, using the full OCHLV raw
+        cache as the single source of truth to support advanced simulations.
         """
         if api_key: self.api_key = api_key
 
@@ -60,20 +61,18 @@ class EnhancedPriceCacheManager(PriceCacheManager):
 
         # 3. If the raw cache has gaps, fetch from the API to fill them.
         if raw_gaps and not kwargs.get('use_cache_only'):
-            # --- AIDEV-FIX: MERGE GAPS FOR EFFICIENCY ---
             merged_gaps = self._merge_gaps(raw_gaps, interval_seconds)
             new_ochlv_data = self._fetch_and_fill_gaps_from_api(pool_address, merged_gaps, timeframe)
-            # --- END OF FIX ---
             
             if new_ochlv_data:
+                # Merge new data into our in-memory list and save to disk.
                 raw_ochlv_data = self._merge_and_save_data(self.raw_cache_dir, pool_address, raw_ochlv_data, new_ochlv_data)
+                # We can still refresh the processed cache for backward compatibility with other tools.
                 self.refresh_offline_processed_cache_for_pool(pool_address)
-
-        # 4. Load the processed cache, which is now guaranteed to be up-to-date.
-        all_data = self._load_monthly_cache_files(self.offline_processed_cache_dir, pool_address, aligned_start_dt, aligned_end_dt)
-
-        # 5. Final processing: align, forward-fill, and filter.
-        timestamp_map = self._map_to_candle_boundaries(all_data, interval_seconds)
+        
+        # 4. Use the complete raw OCHLV data for final processing.
+        #    DO NOT load from the simplified processed cache.
+        timestamp_map = self._map_to_candle_boundaries(raw_ochlv_data, interval_seconds)
         final_data = self._conservative_forward_fill(timestamp_map, interval_seconds, aligned_start_dt, aligned_end_dt)
         self._log_placeholder_warnings(final_data, pool_address, timeframe)
         
@@ -357,32 +356,36 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         final_merged = {p['timestamp']: p for p in all_incoming_data if isinstance(p, dict) and 'timestamp' in p}
         return sorted(final_merged.values(), key=lambda x: x['timestamp'])
 
-    def _conservative_forward_fill(self, data_map: Dict[int, float], interval_seconds: int, start_dt: datetime, end_dt: datetime) -> List[Dict]:
-        """Performs a robust forward-fill on the data map to guarantee a continuous series."""
+    def _conservative_forward_fill(self, data_map: Dict[int, Dict], interval_seconds: int, start_dt: datetime, end_dt: datetime) -> List[Dict]:
+        """Performs a robust forward-fill on a map of full OCHLV points."""
         filled_data = []
-        last_valid_price = None
+        last_valid_point = None
         
-        # Find the first available price to start filling
+        # Find the first available point to start filling from
         sorted_keys = sorted(data_map.keys())
         if sorted_keys:
-            first_available_ts = sorted_keys[0]
-            if first_available_ts <= int(start_dt.timestamp()):
-                last_valid_price = data_map[first_available_ts]
+            # Look backwards from the start_dt to find the last known price if available
+            first_relevant_idx = next((i for i, ts in enumerate(sorted_keys) if ts >= int(start_dt.timestamp())), -1)
+            if first_relevant_idx > 0:
+                last_valid_point = data_map[sorted_keys[first_relevant_idx - 1]]
+            elif first_relevant_idx == 0:
+                 last_valid_point = data_map[sorted_keys[0]]
 
         current_ts = self._align_timestamp_to_boundary(int(start_dt.timestamp()), interval_seconds)
         end_ts = self._align_timestamp_to_boundary(int(end_dt.timestamp()), interval_seconds)
 
         while current_ts <= end_ts:
-            price = data_map.get(current_ts)
-            if price is not None and price > 0:
-                last_valid_price = price
+            point = data_map.get(current_ts)
+            if point is not None:
+                last_valid_point = point
             
-            if last_valid_price is not None:
-                filled_data.append({
-                    'timestamp': current_ts,
-                    'close': last_valid_price,
-                    'is_forward_filled': (price is None or price <= 0)
-                })
+            if last_valid_point is not None:
+                # Create a copy to avoid modifying the original cache object
+                filled_point = last_valid_point.copy()
+                filled_point['timestamp'] = current_ts
+                filled_point['is_forward_filled'] = (point is None)
+                filled_data.append(filled_point)
+                
             current_ts += interval_seconds
         return filled_data
 
@@ -394,12 +397,14 @@ class EnhancedPriceCacheManager(PriceCacheManager):
     def _align_timestamp_to_boundary(self, timestamp: int, interval_seconds: int) -> int:
         return (timestamp // interval_seconds) * interval_seconds
 
-    def _map_to_candle_boundaries(self, data: List[Dict], interval_seconds: int) -> Dict[int, float]:
+    def _map_to_candle_boundaries(self, data: List[Dict], interval_seconds: int) -> Dict[int, Dict]:
+        """Maps data points to candle boundaries, keeping the full OCHLV dictionary."""
         timestamp_map = {}
         for point in data:
             aligned_ts = self._align_timestamp_to_boundary(point['timestamp'], interval_seconds)
-            current_price = point.get('close', 0.0)
-            if current_price > 0: timestamp_map[aligned_ts] = current_price
+            # Ensure the point is a valid candle before adding it
+            if point.get('close', 0.0) > 0 and not point.get('is_api_failure'):
+                timestamp_map[aligned_ts] = point
         return timestamp_map
 
     def _log_placeholder_warnings(self, filled_data: List[Dict], pool_address: str, timeframe: str):
