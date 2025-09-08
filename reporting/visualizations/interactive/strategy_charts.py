@@ -61,12 +61,8 @@ def _create_strategy_instances_professional_heatmap(strategy_instances_df: pd.Da
     else:
         strategy_instances_df = strategy_instances_df.head(top_strategies)
         
-    strategy_instances_df['strategy_display_name'] = (
-        strategy_instances_df['strategy'] + ' ' + 
-        strategy_instances_df['step_size'] + ' ' +
-        strategy_instances_df['investment_sol'].astype(str) + 'SOL' +
-        ' (' + strategy_instances_df['position_count'].astype(str) + ')'
-    )
+    # Use strategy_instance_id for consistent naming with TP/SL Range Testing
+    strategy_instances_df['strategy_display_name'] = strategy_instances_df['strategy_instance_id']
     
     metrics = ['avg_pnl_percent', 'win_rate']
     if 'sharpe_ratio' in strategy_instances_df.columns:
@@ -201,12 +197,8 @@ def create_strategy_avg_pnl_summary(config: Dict[str, Any], strategy_instances_p
         else:
             strategy_instances_df = strategy_instances_df.head(top_strategies)
         
-        strategy_instances_df['strategy_display_name'] = (
-            strategy_instances_df['strategy'] + ' ' + 
-            strategy_instances_df['step_size'] + ' ' +
-            strategy_instances_df['investment_sol'].astype(str) + 'SOL' +
-            ' (' + strategy_instances_df['position_count'].astype(str) + ')'
-        )
+        # Use strategy_instance_id for consistent naming with TP/SL Range Testing
+        strategy_instances_df['strategy_display_name'] = strategy_instances_df['strategy_instance_id']
         
         colors = ['#27ae60' if x >= 0 else '#c0392b' for x in strategy_instances_df['avg_pnl_percent']]
         

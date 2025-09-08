@@ -519,7 +519,8 @@ class LogParser:
         pnl_result = parse_final_pnl_with_line_info(
             self.all_lines, index, 70, 
             debug_enabled=(DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG"),
-            debug_file_path=DEBUG_TRACE_FILE if TARGETED_DEBUG_ENABLED else None
+            debug_file_path=DEBUG_TRACE_FILE if TARGETED_DEBUG_ENABLED else None,
+            open_line_index=pos.open_line_index
         )
         pos.final_pnl = pnl_result['pnl']
         

@@ -20,6 +20,7 @@ import pandas as pd
 
 from .visualizations import interactive as interactive_charts
 from .visualizations.interactive import range_test_charts
+from utils.common import sort_strategies_by_date_descending
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -114,7 +115,8 @@ class HTMLReportGenerator:
         try:
             if os.path.exists("reporting/output/range_test_aggregated.csv"):
                 agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
-                strategies = agg_df['strategy_instance_id'].unique()[:5]
+                # Sort strategies by date (newest first) for heatmaps - show all strategies
+                strategies = sort_strategies_by_date_descending(agg_df['strategy_instance_id'].unique().tolist())
                 charts['range_test_heatmaps'] = []
                 for strategy_id in strategies:
                     heatmap_html = range_test_charts.create_range_test_heatmap(agg_df, strategy_id, self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl'))
@@ -157,7 +159,11 @@ class HTMLReportGenerator:
                 agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
                 metric = self.config.get('range_testing', {}).get('primary_ranking_metric', 'total_pnl')
                 optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')[metric].idxmax()]
-                optimal_settings_map = optimal_df.set_index('strategy_instance_id')[['tp_level', 'sl_level']].to_dict('index')
+                
+                # Sort strategies by date (newest first) before creating the map
+                sorted_strategies = sort_strategies_by_date_descending(optimal_df['strategy_instance_id'].tolist())
+                optimal_df = optimal_df.set_index('strategy_instance_id').reindex(sorted_strategies)
+                optimal_settings_map = optimal_df[['tp_level', 'sl_level']].to_dict('index')
         except Exception as e:
             logger.warning(f"Could not generate optimal settings map for interactive tool: {e}")
 

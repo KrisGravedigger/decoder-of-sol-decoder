@@ -25,8 +25,8 @@ visualization:
   chart_types: ["equity_curve", "drawdown", "cost_impact", "strategy_heatmap"]
   timestamp_format: "%Y%m%d_%H%M"
   filters:
-    min_strategy_occurrences: 2  # minimum positions per strategy
-    top_strategies_only: 10      # show only top N strategies
+    min_strategy_occurrences: 3  # minimum positions per strategy
+    top_strategies_only: 100      # show only top N strategies
     exclude_outliers: false       # remove statistical outliers
     date_range_filter: false      # custom date range selection
 
@@ -111,7 +111,7 @@ range_testing:
   tp_levels: [2, 3, 4, 5, 6, 7, 8, 9] 
 
   # Define SL levels to test (in percentage, positive value)
-  sl_levels: [6, 7, 8, 9, 10, 11, 12]
+  sl_levels: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
   # Metric for heatmap color and ranking
   primary_ranking_metric: "total_pnl"

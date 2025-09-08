@@ -274,7 +274,18 @@
                         results.push({ strategyId, positionCount, totalPnL, avgPnL, exitCounts, actualTP: closestRow.tp_level, actualSL: closestRow.sl_level });
                     });
 
-                    results.sort((a, b) => b.totalPnL - a.totalPnL);
+                    // Sort strategies by date (newest first) instead of by PnL
+                    // Extract date from strategy name using regex pattern YYYY-MM-DD
+                    function extractDateFromStrategyName(strategyName) {
+                        const dateMatch = strategyName.match(/(\d{4}-\d{2}-\d{2})/);
+                        return dateMatch ? new Date(dateMatch[1]) : new Date('1900-01-01'); // fallback to very old date
+                    }
+                    
+                    results.sort((a, b) => {
+                        const dateA = extractDateFromStrategyName(a.strategyId);
+                        const dateB = extractDateFromStrategyName(b.strategyId);
+                        return dateB - dateA; // newest first (descending)
+                    });
                     const tbody = document.getElementById('whatif-results-body');
                     tbody.innerHTML = '';
                     if (results.length === 0) {
