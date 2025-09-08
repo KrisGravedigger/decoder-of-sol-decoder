@@ -11,8 +11,14 @@ import json
 import requests
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING, Protocol
 import logging
+
+class PositionLike(Protocol):
+    """Protocol for position-like objects with required attributes."""
+    pool_address: str
+    open_timestamp: datetime
+    close_timestamp: datetime
 
 if TYPE_CHECKING:
     from core.models import Position
@@ -116,7 +122,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
 
     # --- Helper methods moved and adapted from legacy manager ---
 
-    def validate_cache_completeness(self, position: 'Position') -> Dict[str, Any]:
+    def validate_cache_completeness(self, position: PositionLike) -> Dict[str, Any]:
         """
         [PRIMARY VALIDATION METHOD] Checks if the raw cache contains complete OCHLV+Volume data
         for a position's required simulation timeframe (including post-close period).
@@ -533,7 +539,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
         
         return final_data, fetch_successful
 
-    def get_volume_for_position(self, position: 'Position') -> List[float]:
+    def get_volume_for_position(self, position: PositionLike) -> List[float]:
         """Gets all valid volume data points for a given position from the raw cache."""
         try:
             start_dt = position.open_timestamp

@@ -190,11 +190,22 @@ def cache_analyzer_menu():
             cache_manager = EnhancedPriceCacheManager()
             complete_count = 0
             
+            from datetime import datetime
+            
             class SimplePos:
                 def __init__(self, row):
-                    self.pool_address = row['pool_address']
-                    self.open_timestamp = row['open_timestamp']
-                    self.close_timestamp = row['close_timestamp']
+                    self.pool_address: str = row['pool_address']
+                    
+                    # Convert timestamp strings to datetime objects if needed
+                    if isinstance(row['open_timestamp'], str):
+                        self.open_timestamp = datetime.fromisoformat(row['open_timestamp'].replace('Z', '+00:00'))
+                    else:
+                        self.open_timestamp = row['open_timestamp']
+                        
+                    if isinstance(row['close_timestamp'], str):
+                        self.close_timestamp = datetime.fromisoformat(row['close_timestamp'].replace('Z', '+00:00'))
+                    else:
+                        self.close_timestamp = row['close_timestamp']
 
             for _, row in positions_df.iterrows():
                 if cache_manager.validate_cache_completeness(SimplePos(row))['is_complete']:

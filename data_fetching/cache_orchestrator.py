@@ -182,9 +182,21 @@ def validate_cache_completeness_for_positions():
             
             class SimplePosition:
                 def __init__(self, row):
+                    from datetime import datetime
                     self.pool_address = row.get('pool_address')
-                    self.open_timestamp = row.get('open_timestamp')
-                    self.close_timestamp = row.get('close_timestamp')
+                    
+                    # Convert timestamp strings to datetime objects if needed
+                    open_ts = row.get('open_timestamp')
+                    if isinstance(open_ts, str):
+                        self.open_timestamp = datetime.fromisoformat(open_ts.replace('Z', '+00:00'))
+                    else:
+                        self.open_timestamp = open_ts
+                        
+                    close_ts = row.get('close_timestamp')
+                    if isinstance(close_ts, str):
+                        self.close_timestamp = datetime.fromisoformat(close_ts.replace('Z', '+00:00'))
+                    else:
+                        self.close_timestamp = close_ts
             
             validation_result = enhanced_cache.validate_cache_completeness(SimplePosition(row))
             
@@ -246,9 +258,21 @@ def check_volume_data_availability():
             
             class SimplePosition:
                 def __init__(self, row):
+                    from datetime import datetime
                     self.pool_address = row.get('pool_address')
-                    self.open_timestamp = row.get('open_timestamp')
-                    self.close_timestamp = row.get('close_timestamp')
+                    
+                    # Convert timestamp strings to datetime objects if needed
+                    open_ts = row.get('open_timestamp')
+                    if isinstance(open_ts, str):
+                        self.open_timestamp = datetime.fromisoformat(open_ts.replace('Z', '+00:00'))
+                    else:
+                        self.open_timestamp = open_ts
+                        
+                    close_ts = row.get('close_timestamp')
+                    if isinstance(close_ts, str):
+                        self.close_timestamp = datetime.fromisoformat(close_ts.replace('Z', '+00:00'))
+                    else:
+                        self.close_timestamp = close_ts
 
             simple_pos = SimplePosition(row)
             volume_data = enhanced_cache.get_volume_for_position(simple_pos)
