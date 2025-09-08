@@ -209,9 +209,11 @@ def parse_position_from_open_line(line: str, line_index: int, all_lines: List[st
 
 def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback: int, 
                                    debug_enabled: bool = False,
-                                   debug_file_path: Optional[str] = None) -> Dict[str, Any]:
+                                   debug_file_path: Optional[str] = None,
+                                   open_line_index: Optional[int] = None) -> Dict[str, Any]:
     """
     Parse final PnL from log context with line number information and debug tracing.
+    Uses priority-based regex patterns to prefer final/closing PnL statements over intermediate updates.
     
     Args:
         lines: All log lines
@@ -219,6 +221,7 @@ def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback:
         lookback: Number of lines to look back
         debug_enabled: Whether debug logging is enabled
         debug_file_path: Path to a debug trace file.
+        open_line_index: Optional position open line index for boundary constraint
         
     Returns:
         Dictionary with 'pnl' (float or None) and 'line_number' (int or None)
@@ -226,38 +229,66 @@ def parse_final_pnl_with_line_info(lines: List[str], start_index: int, lookback:
     # AIDEV-NOTE: Increased lookback from 70 to 150 to catch PnL lines that are logged far before the final close confirmation.
     lookback = 150
     
+    # Priority-based regex patterns - higher priority patterns are checked first
+    pnl_patterns = [
+        # Highest priority: Final/closing PnL with explicit context and return percentage
+        (r'(?:Final|FINAL|Closing|closed).*PnL:\s*(-?\d+\.?\d+)\s*SOL\s*\(Return:\s*([+-]?\d+\.?\d*)\s*%\)', 'final_context_with_return'),
+        
+        # High priority: Transaction confirmed PnL with return percentage
+        (r'(?:Transaction|confirmed).*PnL:\s*(-?\d+\.?\d+)\s*SOL\s*\(Return:\s*([+-]?\d+\.?\d*)\s*%\)', 'transaction_context_with_return'),
+        
+        # Medium-high priority: PnL with return percentage (standard format)
+        (r'PnL:\s*(-?\d+\.?\d+)\s*SOL\s*\(Return:\s*([+-]?\d+\.?\d*)\s*%\)', 'pnl_with_return'),
+        
+        # Medium priority: Final/closing PnL without return percentage
+        (r'(?:Final|FINAL|Closing|closed).*PnL:\s*(-?\d+\.?\d*)\s*SOL', 'final_context'),
+        
+        # Lower priority: Transaction PnL without return percentage
+        (r'(?:Transaction|confirmed).*PnL:\s*(-?\d+\.?\d*)\s*SOL', 'transaction_context'),
+        
+        # Lowest priority: Basic PnL pattern (fallback)
+        (r'PnL:\s*(-?\d+\.?\d*)\s*SOL', 'basic_pattern')
+    ]
+    
     def _trace(msg: str):
         if debug_file_path:
             with open(debug_file_path, 'a', encoding='utf-8') as f:
                 f.write(msg + '\n')
 
-    _trace("\n--- TRACING PnL PARSING ---")
+    _trace("\n--- TRACING IMPROVED PnL PARSING ---")
     _trace(f"Starting search for PnL from line {start_index + 1}, looking back {lookback} lines.")
-
-    for i in range(start_index, max(-1, start_index - lookback), -1):
-        line = clean_ansi(lines[i])
-        if debug_file_path:
-            _trace(f"  [Line {i+1}] Checking: {line.strip()}")
-        if "PnL:" in line and "Return:" in line:
+    if open_line_index is not None:
+        _trace(f"Position boundary constraint: not searching before line {open_line_index + 1}")
+    
+    # Determine search boundary
+    search_start = max(open_line_index if open_line_index is not None else 0, start_index - lookback)
+    
+    # Try each pattern in priority order
+    for pattern_regex, pattern_name in pnl_patterns:
+        _trace(f"\n--- Trying pattern: {pattern_name} ---")
+        _trace(f"Pattern: {pattern_regex}")
+        
+        for i in range(start_index, search_start - 1, -1):
+            line = clean_ansi(lines[i])
             if debug_file_path:
-                _trace(f"    -> Found potential PnL line.")
-            match = re.search(r'PnL:\s*(-?\d+\.?\d*)\s*SOL', line)
-            if match: 
+                _trace(f"  [Line {i+1}] Checking: {line.strip()}")
+            
+            match = re.search(pattern_regex, line, re.IGNORECASE)
+            if match:
                 pnl_value = round(float(match.group(1)), 5)
                 if debug_file_path:
-                    _trace(f"    --> SUCCESS: Matched PnL value '{pnl_value}' at line {i + 1}.")
+                    _trace(f"    --> SUCCESS: Matched PnL value '{pnl_value}' with pattern '{pattern_name}' at line {i + 1}.")
+                    if len(match.groups()) > 1:
+                        _trace(f"    --> Additional info: Return percentage: {match.group(2)}%")
                 if debug_enabled:
-                    logger.debug(f"Found PnL value {pnl_value} at line {i + 1}: {line.strip()}")
-                return {'pnl': pnl_value, 'line_number': i + 1}
-            else:
-                if debug_file_path:
-                    _trace(f"    --> FAILED: 'PnL:' and 'Return:' present, but regex did not match.")
+                    logger.debug(f"Found PnL value {pnl_value} at line {i + 1} using pattern '{pattern_name}': {line.strip()}")
+                return {'pnl': pnl_value, 'line_number': i + 1, 'pattern_used': pattern_name}
     
     if debug_file_path:
-        _trace("--- PnL PARSING FAILED: No matching line found in lookback range. ---\n")
+        _trace("--- PnL PARSING FAILED: No matching line found with any pattern in lookback range. ---\n")
     if debug_enabled:
-        logger.debug(f"No PnL found in lookback range {start_index + 1} to {max(1, start_index - lookback + 2)}")
-    return {'pnl': None, 'line_number': None}
+        logger.debug(f"No PnL found in lookback range {start_index + 1} to {search_start + 1}")
+    return {'pnl': None, 'line_number': None, 'pattern_used': None}
 
 def extract_peak_pnl_from_logs(lines: List[str], start_line: int, end_line: int, 
                               significance_threshold: float = 0.01,
