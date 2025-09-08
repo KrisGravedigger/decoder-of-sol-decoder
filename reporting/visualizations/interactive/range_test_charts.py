@@ -9,6 +9,7 @@ import plotly.express as px
 import pandas as pd
 from typing import Dict, Any, List
 import numpy as np
+from utils.common import sort_strategies_by_date_descending
 
 
 def create_range_test_heatmap(aggregated_df: pd.DataFrame, strategy_id: str, 
@@ -109,7 +110,10 @@ def create_optimal_settings_table(aggregated_df: pd.DataFrame,
     # Find optimal settings for each strategy
     optimal_rows = []
     
-    for strategy_id in aggregated_df['strategy_instance_id'].unique():
+    # Sort strategies by date (newest first)
+    strategies = sort_strategies_by_date_descending(aggregated_df['strategy_instance_id'].unique().tolist())
+    
+    for strategy_id in strategies:
         strategy_data = aggregated_df[aggregated_df['strategy_instance_id'] == strategy_id]
         
         # Find row with maximum metric value
@@ -125,9 +129,8 @@ def create_optimal_settings_table(aggregated_df: pd.DataFrame,
             'Positions': int(optimal_row['position_count'])
         })
         
-    # Convert to DataFrame and sort
-    optimal_df = pd.DataFrame(optimal_rows)
-    optimal_df = optimal_df.sort_values(metric.replace('_', ' ').title(), ascending=False).head(top_n)
+    # Convert to DataFrame and limit to top_n
+    optimal_df = pd.DataFrame(optimal_rows).head(top_n)
     
     # Create HTML table
     table_html = optimal_df.to_html(
@@ -154,7 +157,10 @@ def create_strategy_comparison_chart(aggregated_df: pd.DataFrame,
     # Find optimal metric value for each strategy
     optimal_values = []
     
-    for strategy_id in aggregated_df['strategy_instance_id'].unique():
+    # Sort strategies by date (newest first)
+    strategies = sort_strategies_by_date_descending(aggregated_df['strategy_instance_id'].unique().tolist())
+    
+    for strategy_id in strategies:
         strategy_data = aggregated_df[aggregated_df['strategy_instance_id'] == strategy_id]
         max_value = strategy_data[metric].max()
         
@@ -163,9 +169,8 @@ def create_strategy_comparison_chart(aggregated_df: pd.DataFrame,
             'value': max_value
         })
         
-    # Sort and take top strategies
-    optimal_df = pd.DataFrame(optimal_values)
-    optimal_df = optimal_df.sort_values('value', ascending=False).head(15)
+    # Convert to DataFrame and take top 15 (already sorted by date)
+    optimal_df = pd.DataFrame(optimal_values).head(15)
     
     # Create bar chart
     fig = go.Figure(data=[

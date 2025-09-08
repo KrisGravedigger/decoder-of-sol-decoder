@@ -739,3 +739,21 @@ Issue Resolution - Peak PnL Values Investigation:
     -   If a candle's `low` price triggers SL, the position exits with PnL set **exactly to `-sl_level`**.
 
 **Outcome:** The simulation engine is now significantly more accurate, robust, and produces logical, intuitive results. The underlying data infrastructure has been hardened to prevent future data integrity issues.
+
+**2025-09-09: Strategy Date-Based Sorting Implementation**
+
+**Issue Resolution:** Implemented unified date-based sorting across all strategy visualizations and tables, replacing inconsistent sorting methods.
+
+**Problems Fixed:**
+- Inconsistent sorting across different charts and tables
+- Hardcoded 5-strategy limit in heatmaps despite config allowing 100
+- Dynamic PnL sorting in Interactive TP/SL Explorer instead of static date ordering
+
+**Solution Implemented:**
+- Added date extraction utilities to `utils/common.py` using regex pattern `\d{4}-\d{2}-\d{2}`
+- Updated all chart modules (`range_test_charts.py`, `tp_sl_optimizer.py`, `html_report_generator.py`) for consistent date-based sorting
+- Replaced dynamic JavaScript sorting with static date-based sorting in HTML template
+- Removed hardcoded `[:5]` slice to respect `top_strategies_only` config parameter
+
+**Outcome:** All strategy visualizations now consistently display strategies in chronological order (newest first), showing complete strategy sets while maintaining predictable, date-based navigation.
+

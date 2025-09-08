@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import os
+from utils.common import sort_strategies_by_date_descending
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +390,11 @@ class TpSlOptimizer:
         """Create interactive table showing net PnL impact for each strategy."""
         data = []
         
-        for strategy_id, results in optimization_results.items():
+        # Sort strategies by date (newest first)
+        sorted_strategy_ids = sort_strategies_by_date_descending(list(optimization_results.keys()))
+        
+        for strategy_id in sorted_strategy_ids:
+            results = optimization_results[strategy_id]
             strategy_info = self.strategy_instances[
                 self.strategy_instances['strategy_instance_id'] == strategy_id
             ].iloc[0]
@@ -476,7 +481,12 @@ class TpSlOptimizer:
     def _create_sl_floor_table(self, optimization_results: Dict) -> go.Figure:
         """Create summary table showing deepest viable SL for each TP level."""
         data = []
-        for strategy_id, results in optimization_results.items():
+        
+        # Sort strategies by date (newest first)
+        sorted_strategy_ids = sort_strategies_by_date_descending(list(optimization_results.keys()))
+        
+        for strategy_id in sorted_strategy_ids:
+            results = optimization_results[strategy_id]
             ev_analysis_df = results['sl_floor_analysis']
             viable_df = ev_analysis_df[ev_analysis_df['is_viable'] == True]
             if not viable_df.empty:
@@ -492,7 +502,8 @@ class TpSlOptimizer:
         
         if not data:
             diagnostic_data = []
-            for strategy_id, results in optimization_results.items():
+            for strategy_id in sorted_strategy_ids:
+                results = optimization_results[strategy_id]
                 ev_df = results['sl_floor_analysis']
                 if not ev_df.empty:
                     for tp in sorted(ev_df['tp_level'].unique()):
@@ -594,7 +605,11 @@ class TpSlOptimizer:
             
         recommendations = []
         
-        for strategy_id, strategy_results in results['optimization_results'].items():
+        # Sort strategies by date (newest first)
+        sorted_strategy_ids = sort_strategies_by_date_descending(list(results['optimization_results'].keys()))
+        
+        for strategy_id in sorted_strategy_ids:
+            strategy_results = results['optimization_results'][strategy_id]
             strategy_info = self.strategy_instances[
                 self.strategy_instances['strategy_instance_id'] == strategy_id
             ].iloc[0]
