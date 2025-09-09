@@ -50,7 +50,8 @@ class HTMLReportGenerator:
                                     portfolio_analysis: Dict[str, Any],
                                     correlation_analysis: Optional[Dict[str, Any]] = None,
                                     weekend_analysis: Optional[Dict[str, Any]] = None,
-                                    strategy_simulations: Optional[List[Dict]] = None) -> str:
+                                    strategy_simulations: Optional[List[Dict]] = None,
+                                    tls_analysis: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate comprehensive HTML report combining all analyses.
         """
@@ -60,11 +61,11 @@ class HTMLReportGenerator:
             timestamp = datetime.now().strftime(self.timestamp_format)
             
             charts = self._generate_interactive_charts(
-                portfolio_analysis, correlation_analysis, weekend_analysis, strategy_simulations
+                portfolio_analysis, correlation_analysis, weekend_analysis, strategy_simulations, tls_analysis
             )
             
             template_data = self._prepare_template_data(
-                portfolio_analysis, correlation_analysis, weekend_analysis, strategy_simulations, charts
+                portfolio_analysis, correlation_analysis, weekend_analysis, strategy_simulations, tls_analysis, charts
             )
             
             html_content = self._render_html_template(template_data)
@@ -86,7 +87,8 @@ class HTMLReportGenerator:
                                    portfolio_analysis: Dict[str, Any],
                                    correlation_analysis: Optional[Dict[str, Any]],
                                    weekend_analysis: Optional[Dict[str, Any]],
-                                   strategy_simulations: Optional[List[Dict]]) -> Dict[str, str]:
+                                   strategy_simulations: Optional[List[Dict]],
+                                   tls_analysis: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """
         Generate interactive Plotly charts for the report.
         """
@@ -139,6 +141,15 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.warning(f"Could not generate optimization charts: {e}")
 
+        # TLS Analysis Charts (Phase 1)
+        if tls_analysis and tls_analysis.get('status') == 'SUCCESS':
+            try:
+                charts['tls_comparison_summary'] = self._create_tls_comparison_chart(tls_analysis)
+                charts['tls_strategy_effectiveness'] = self._create_tls_effectiveness_chart(tls_analysis)
+                logger.info("Generated TLS analysis charts")
+            except Exception as e:
+                logger.warning(f"Could not generate TLS charts: {e}")
+
         return charts
             
     def _prepare_template_data(self, 
@@ -146,6 +157,7 @@ class HTMLReportGenerator:
                              correlation_analysis: Optional[Dict[str, Any]],
                              weekend_analysis: Optional[Dict[str, Any]],
                              strategy_simulations: Optional[List[Dict]],
+                             tls_analysis: Optional[Dict[str, Any]],
                              charts: Dict[str, str]) -> Dict[str, Any]:
         """Prepare data for HTML template."""
         
@@ -170,6 +182,49 @@ class HTMLReportGenerator:
         # Pass tested TP/SL levels to the template for JS logic
         tested_tp_levels = self.config.get('range_testing', {}).get('tp_levels', [])
         tested_sl_levels = self.config.get('range_testing', {}).get('sl_levels', [])
+        
+        # Prepare TLS analysis data for template
+        tls_summary = None
+        if tls_analysis and tls_analysis.get('status') == 'SUCCESS':
+            baseline_comparison = tls_analysis.get('baseline_comparison')
+            if baseline_comparison is not None:
+                # Handle both DataFrame and dict cases
+                if hasattr(baseline_comparison, 'empty'):
+                    if not baseline_comparison.empty:
+                        total_strategies = len(baseline_comparison)
+                        improved_strategies = len(baseline_comparison[baseline_comparison['tls_improves_performance']])
+                        improvement_rate = (improved_strategies / total_strategies * 100) if total_strategies > 0 else 0
+                        avg_benefit = baseline_comparison['tls_benefit_pct'].mean()
+                        
+                        # Get top 5 TLS improvements for table
+                        top_improvements = baseline_comparison.nlargest(5, 'tls_benefit_pct').to_dict('records')
+                        
+                        tls_summary = {
+                            'total_strategies': total_strategies,
+                            'improved_strategies': improved_strategies,
+                            'improvement_rate': improvement_rate,
+                            'avg_benefit': avg_benefit,
+                            'top_improvements': top_improvements
+                        }
+                elif isinstance(baseline_comparison, list) and baseline_comparison:
+                    # Handle list of dicts
+                    total_strategies = len(baseline_comparison)
+                    improved_strategies = len([row for row in baseline_comparison if row.get('tls_improves_performance', False)])
+                    improvement_rate = (improved_strategies / total_strategies * 100) if total_strategies > 0 else 0
+                    
+                    tls_benefits = [row['tls_benefit_pct'] for row in baseline_comparison]
+                    avg_benefit = sum(tls_benefits) / len(tls_benefits) if tls_benefits else 0
+                    
+                    # Get top 5 TLS improvements for table
+                    top_improvements = sorted(baseline_comparison, key=lambda x: x['tls_benefit_pct'], reverse=True)[:5]
+                    
+                    tls_summary = {
+                        'total_strategies': total_strategies,
+                        'improved_strategies': improved_strategies,
+                        'improvement_rate': improvement_rate,
+                        'avg_benefit': avg_benefit,
+                        'top_improvements': top_improvements
+                    }
 
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -177,6 +232,8 @@ class HTMLReportGenerator:
             'correlation_analysis': correlation_analysis,
             'weekend_analysis': formatted_weekend_data,
             'strategy_simulations': strategy_simulations,
+            'tls_analysis': tls_analysis,  # Add TLS analysis data
+            'tls_summary': tls_summary,    # Add processed TLS summary
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
             'config': self.config,
@@ -245,3 +302,141 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.error(f"Failed to render HTML template: {e}")
             raise
+    
+    def _create_tls_comparison_chart(self, tls_analysis: Dict[str, Any]) -> str:
+        """Create TLS vs Baseline comparison chart."""
+        try:
+            import plotly.graph_objects as go
+            from plotly.offline import plot
+            
+            baseline_comparison = tls_analysis.get('baseline_comparison')
+            if baseline_comparison is None:
+                return "<p>No TLS comparison data available</p>"
+            
+            # Convert DataFrame to dict if needed
+            if hasattr(baseline_comparison, 'empty') and baseline_comparison.empty:
+                return "<p>No TLS comparison data available</p>"
+            
+            if hasattr(baseline_comparison, 'to_dict'):
+                baseline_data = baseline_comparison.to_dict('records')
+            else:
+                baseline_data = baseline_comparison
+                
+            if not baseline_data:
+                return "<p>No TLS comparison data available</p>"
+            
+            # Create scatter plot: TLS benefit vs number of strategies
+            fig = go.Figure()
+            
+            # Extract data for plotting
+            baseline_pnl = [row['baseline_pnl'] for row in baseline_data]
+            best_tls_pnl = [row['best_tls_pnl'] for row in baseline_data]
+            strategy_names = [row['strategy_instance_id'] for row in baseline_data]
+            tls_benefits = [row['tls_benefit_pct'] for row in baseline_data]
+            
+            # Add scatter points
+            fig.add_trace(go.Scatter(
+                x=baseline_pnl,
+                y=best_tls_pnl,
+                mode='markers',
+                text=strategy_names,
+                hovertemplate="<b>%{text}</b><br>" +
+                            "Baseline: %{x:.4f} SOL<br>" +
+                            "TLS Best: %{y:.4f} SOL<br>" +
+                            "<extra></extra>",
+                marker=dict(
+                    size=8,
+                    color=tls_benefits,
+                    colorscale='RdYlGn',
+                    colorbar=dict(title="TLS Benefit (%)"),
+                    line=dict(width=1, color='black')
+                ),
+                name='Strategies'
+            ))
+            
+            # Add diagonal line (break-even)
+            min_val = min(min(baseline_pnl), min(best_tls_pnl))
+            max_val = max(max(baseline_pnl), max(best_tls_pnl))
+            
+            fig.add_trace(go.Scatter(
+                x=[min_val, max_val],
+                y=[min_val, max_val],
+                mode='lines',
+                line=dict(dash='dash', color='gray'),
+                name='Break-even',
+                hoverinfo='skip'
+            ))
+            
+            fig.update_layout(
+                title='TLS vs Baseline Performance Comparison',
+                xaxis_title='Baseline PnL (SOL)',
+                yaxis_title='Best TLS PnL (SOL)',
+                height=500,
+                showlegend=True
+            )
+            
+            return plot(fig, output_type='div', include_plotlyjs=False)
+            
+        except Exception as e:
+            logger.error(f"Failed to create TLS comparison chart: {e}")
+            return f"<p>Error generating TLS comparison chart: {e}</p>"
+    
+    def _create_tls_effectiveness_chart(self, tls_analysis: Dict[str, Any]) -> str:
+        """Create TLS effectiveness summary chart."""
+        try:
+            import plotly.graph_objects as go
+            from plotly.offline import plot
+            
+            baseline_comparison = tls_analysis.get('baseline_comparison')
+            if baseline_comparison is None:
+                return "<p>No TLS effectiveness data available</p>"
+            
+            # Convert DataFrame to dict if needed
+            if hasattr(baseline_comparison, 'empty') and baseline_comparison.empty:
+                return "<p>No TLS effectiveness data available</p>"
+            
+            if hasattr(baseline_comparison, 'to_dict'):
+                baseline_data = baseline_comparison.to_dict('records')
+            else:
+                baseline_data = baseline_comparison
+                
+            if not baseline_data:
+                return "<p>No TLS effectiveness data available</p>"
+            
+            # Calculate summary statistics
+            total_strategies = len(baseline_data)
+            improved_count = len([row for row in baseline_data if row.get('tls_improves_performance', False)])
+            improvement_rate = (improved_count / total_strategies * 100) if total_strategies > 0 else 0
+            
+            tls_benefits = [row['tls_benefit_pct'] for row in baseline_data]
+            avg_benefit = sum(tls_benefits) / len(tls_benefits) if tls_benefits else 0
+            best_benefit = max(tls_benefits) if tls_benefits else 0
+            worst_impact = min(tls_benefits) if tls_benefits else 0
+            
+            # Create bar chart
+            fig = go.Figure()
+            
+            categories = ['Improvement Rate (%)', 'Avg Benefit (%)', 'Best Benefit (%)', 'Worst Impact (%)']
+            values = [improvement_rate, avg_benefit, best_benefit, worst_impact]
+            colors = ['blue', 'green' if avg_benefit > 0 else 'red', 'darkgreen', 'darkred' if worst_impact < 0 else 'orange']
+            
+            fig.add_trace(go.Bar(
+                x=categories,
+                y=values,
+                marker_color=colors,
+                text=[f"{v:.1f}" for v in values],
+                textposition='auto'
+            ))
+            
+            fig.update_layout(
+                title=f'TLS Effectiveness Summary ({total_strategies} Strategies)',
+                yaxis_title='Percentage',
+                height=400,
+                showlegend=False
+            )
+            
+            return plot(fig, output_type='div', include_plotlyjs=False)
+            
+        except Exception as e:
+            logger.error(f"Failed to create TLS effectiveness chart: {e}")
+            return f"<p>Error generating TLS effectiveness chart: {e}</p>"

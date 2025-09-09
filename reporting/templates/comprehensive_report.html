@@ -143,6 +143,68 @@
             {% endif %}
         </div>
         
+        <!-- TLS (Trailing Stop Loss) Analysis -->
+        {% if tls_analysis and tls_analysis.get('status') == 'SUCCESS' %}
+        <div class="section">
+            <h2>TLS (Trailing Stop Loss) Optimization Analysis</h2>
+            <p>This section analyzes the effectiveness of Trailing Stop Loss (TLS) parameters compared to traditional TP/SL strategies. TLS provides dynamic stop loss protection that trails behind the peak profit, potentially enabling safer exploration of higher profit targets.</p>
+            
+            {% if tls_summary %}
+                <div class="recommendation {% if tls_summary.improvement_rate > 50 %}rec-enable{% elif tls_summary.improvement_rate > 25 %}rec-keep{% else %}rec-disable{% endif %}">
+                    <h3>TLS Effectiveness: {{ tls_summary.improvement_rate|round(1) }}% of strategies improved</h3>
+                    <p>
+                        {% if tls_summary.improvement_rate > 50 %}
+                            TLS shows strong potential for your strategies! {{ tls_summary.improved_strategies }} out of {{ tls_summary.total_strategies }} strategies performed better with TLS parameters.
+                        {% elif tls_summary.improvement_rate > 25 %}
+                            TLS shows moderate effectiveness. Consider testing TLS on a subset of your best strategies.
+                        {% else %}
+                            TLS provided limited benefit for your current strategies. Traditional TP/SL may be more suitable.
+                        {% endif %}
+                        Average benefit: {{ tls_summary.avg_benefit|round(2) }}%
+                    </p>
+                </div>
+                
+                <h3>TLS vs Baseline Performance Comparison</h3>
+                <div id="tls_comparison_summary" class="plotly-chart">{{ charts.tls_comparison_summary | safe }}</div>
+                
+                <h3>TLS Effectiveness Summary</h3>
+                <div id="tls_strategy_effectiveness" class="plotly-chart">{{ charts.tls_strategy_effectiveness | safe }}</div>
+                
+                <h3>Top TLS Strategy Improvements</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th>Baseline PnL (SOL)</th>
+                            <th>Best TLS PnL (SOL)</th>
+                            <th>TLS Benefit (%)</th>
+                            <th>Optimal TLS Parameters</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in tls_summary.top_improvements %}
+                        <tr>
+                            <td>{{ row.strategy_instance_id }}</td>
+                            <td class="{% if row.baseline_pnl > 0 %}positive{% else %}negative{% endif %}">{{ "%.4f"|format(row.baseline_pnl) }}</td>
+                            <td class="{% if row.best_tls_pnl > 0 %}positive{% else %}negative{% endif %}">{{ "%.4f"|format(row.best_tls_pnl) }}</td>
+                            <td class="{% if row.tls_benefit_pct > 0 %}positive{% else %}negative{% endif %}">{{ "+%.2f"|format(row.tls_benefit_pct) if row.tls_benefit_pct > 0 else "%.2f"|format(row.tls_benefit_pct) }}</td>
+                            <td>TP:{{ row.best_tls_tp }}% SL:{{ row.best_tls_sl }}% ACT:{{ row.best_tls_activation }}% TRAIL:{{ row.best_tls_trail }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                
+            {% else %}
+                <div class="skipped">TLS analysis completed but no comparison data available.</div>
+            {% endif %}
+        </div>
+        {% elif config.get('tls_range_testing', {}).get('enable', false) %}
+        <div class="section">
+            <h2>TLS (Trailing Stop Loss) Optimization Analysis</h2>
+            <div class="skipped">TLS analysis was enabled but failed to complete. Check the logs for details.</div>
+        </div>
+        {% endif %}
+        
         <!-- Strategy Performance Summary -->
         <div class="section">
             <h2>Strategy Performance Summary</h2>

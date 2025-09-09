@@ -155,3 +155,96 @@ class LPPositionValuator:
             })
             
         return timeline
+
+
+def simulate_position_exit_with_tls(position_data: List[Dict], tp_level: float, sl_level: float, 
+                                   tls_activation: float, tls_trail: float, 
+                                   initial_investment: float) -> Dict[str, Any]:
+    """
+    AIDEV-TLS-CLAUDE: Simulate position exit with TLS logic.
+    
+    Extends existing simulate_position_exit function with TLS activation and trailing.
+    
+    Args:
+        position_data: Timeline data with pnl_pct, pnl_pct_high, pnl_pct_low
+        tp_level: Take profit level (%)
+        sl_level: Stop loss level (%)
+        tls_activation: TLS activation level (%)
+        tls_trail: TLS trail distance (%)
+        initial_investment: Initial investment amount
+        
+    Returns:
+        Dictionary with exit results including TLS-specific information
+    """
+    if not position_data:
+        return {
+            'exit_reason': 'NO_DATA',
+            'final_pnl': 0.0,
+            'final_pnl_pct': 0.0,
+            'exit_price': 0.0,
+            'tls_activated': False,
+            'peak_pnl_reached': 0.0
+        }
+    
+    # TLS state tracking
+    peak_pnl = 0.0
+    tls_activated = False
+    dynamic_sl = -sl_level  # Start with original SL
+    
+    for point in position_data:
+        pnl_pct_high = point.get('pnl_pct_high', point['pnl_pct'])
+        pnl_pct_low = point.get('pnl_pct_low', point['pnl_pct'])
+        pnl_pct_close = point['pnl_pct']
+        
+        # Update peak PnL
+        current_max_pnl = max(pnl_pct_high, peak_pnl)
+        if current_max_pnl > peak_pnl:
+            peak_pnl = current_max_pnl
+            
+        # TLS activation check
+        if not tls_activated and peak_pnl >= tls_activation:
+            tls_activated = True
+            
+        # Update dynamic SL if TLS is active
+        if tls_activated:
+            trailing_sl = peak_pnl - tls_trail
+            dynamic_sl = max(dynamic_sl, trailing_sl)
+        
+        # Exit condition checks (priority order)
+        # 1. TP check (high price)
+        if pnl_pct_high >= tp_level:
+            final_pnl = initial_investment * (tp_level / 100.0)
+            return {
+                'exit_reason': 'TP',
+                'final_pnl': final_pnl,
+                'final_pnl_pct': tp_level,
+                'exit_price': point['price'],
+                'tls_activated': tls_activated,
+                'peak_pnl_reached': peak_pnl
+            }
+        
+        # 2. SL/TLS check (low price)
+        if pnl_pct_low <= dynamic_sl:
+            exit_reason = 'TLS' if (tls_activated and dynamic_sl > -sl_level) else 'SL'
+            final_pnl = initial_investment * (dynamic_sl / 100.0)
+            return {
+                'exit_reason': exit_reason,
+                'final_pnl': final_pnl,
+                'final_pnl_pct': dynamic_sl,
+                'exit_price': point['price'],
+                'tls_activated': tls_activated,
+                'peak_pnl_reached': peak_pnl
+            }
+    
+    # No exit condition met - position runs to end
+    final_point = position_data[-1]
+    final_pnl = initial_investment * (final_point['pnl_pct'] / 100.0)
+    
+    return {
+        'exit_reason': 'END',
+        'final_pnl': final_pnl,
+        'final_pnl_pct': final_point['pnl_pct'],
+        'exit_price': final_point['price'],
+        'tls_activated': tls_activated,
+        'peak_pnl_reached': peak_pnl
+    }

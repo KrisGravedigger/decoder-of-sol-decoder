@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
 
 
 class Position:
@@ -138,4 +139,34 @@ class Position:
             "open_line_index": self.open_line_index,
             "close_line_index": self.close_line_index,
             "strategy_instance_id": ""
+        }
+
+
+# AIDEV-TLS-CLAUDE: Data model for TLS simulation results
+@dataclass
+class TlsSimulationResult:
+    """Represents the result of a single TLS simulation run."""
+    position_id: str
+    strategy_instance_id: str
+    tp_level: float
+    sl_level: float
+    tls_activation: float
+    tls_trail: float
+    simulated_pnl: float
+    exit_reason: str  # "TP", "SL", "TLS", "OOR", "END"
+    strategy_best_non_tls_pnl: float
+    
+    def to_csv_row(self) -> Dict[str, Any]:
+        """Convert to CSV-compatible dictionary."""
+        return {
+            'position_id': self.position_id,
+            'strategy_instance_id': self.strategy_instance_id,
+            'tp_level': self.tp_level,
+            'sl_level': self.sl_level,
+            'tls_activation': self.tls_activation,
+            'tls_trail': self.tls_trail,
+            'simulated_pnl': self.simulated_pnl,
+            'exit_reason': self.exit_reason,
+            'strategy_best_non_tls_pnl': self.strategy_best_non_tls_pnl,
+            'tls_benefit_pct': ((self.simulated_pnl - self.strategy_best_non_tls_pnl) / abs(self.strategy_best_non_tls_pnl) * 100) if self.strategy_best_non_tls_pnl != 0 else 0
         }
