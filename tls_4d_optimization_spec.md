@@ -430,14 +430,429 @@ tls_range_testing:
 - [ ] Performance under 10 minutes for 500 positions × 200 valid combinations
 - [ ] Integration with existing Position model and data pipeline
 
-### **Phase 2: Strategy Overview Visualization** 🔲 *PLANNED*
-**Goal:** Create strategy comparison interface enabling rapid identification of high-performing strategies
+## 📋 Phase 2: Strategy Overview Visualization - Detailed Implementation Plan
 
-**Core Components:**
-- Strategy scatter plot with PnL distribution visualization
-- Clickable strategy filtering integration
-- Top 10 global combinations table with strategy navigation
-- Performance "clouds" showing local parameter density
+### **Goal:** Create strategy comparison interface enabling rapid identification of high-performing strategies
+
+**Target Completion Time:** 1-2 sessions
+
+### **Prerequisites & Context Analysis**
+**Required Modules for Context:**
+- `simulations/tls_range_simulator.py` - TLS simulation results (Phase 1 output)
+- `reporting/visualizations/interactive/range_test_charts.py` - Existing chart infrastructure
+- `reporting/html_report_generator.py` - HTML report integration
+- `simulations/baseline_comparator.py` - Baseline comparison data
+- `reporting/strategy_instance_detector.py` - Strategy grouping and naming
+- `reporting/config/portfolio_config.yaml` - Visualization configuration
+
+### **Implementation Tasks**
+
+#### **Task 2.1: Strategy Scatter Plot Visualization**
+**File:** `reporting/visualizations/interactive/tls_strategy_charts.py` (NEW)
+**Action:** Create strategy overview scatter plot with performance clouds
+
+**Core Visualization Requirements:**
+```python
+def create_strategy_overview_scatter(tls_results_df, baseline_data):
+    """
+    Strategy Overview Scatter Plot:
+    
+    Layout:
+    - X-axis: Strategy names (categorical, rotated labels for readability)
+    - Y-axis: PnL percentages (continuous scale)
+    - Points: Individual TLS combination results (small semi-transparent dots)
+    - Highlights: 
+      * Green dot: Best TLS result per strategy (larger, fully opaque)
+      * Yellow dot: Best non-TLS result per strategy (medium, fully opaque)
+    
+    Interactive Features:
+    - Clickable strategy names trigger filtering for detailed grid view
+    - Hover tooltips: Strategy name, TP/SL/TLS parameters, PnL value
+    - Performance density visualization (point clustering indicates optimization "hotspots")
+    
+    Visual Design:
+    - Color intensity based on result frequency in top 10% performers
+    - Point size scaling: individual results (3px), best TLS (8px), best non-TLS (6px)
+    - Strategy name rotation: 45 degrees for readability with many strategies
+    """
+    
+    # Data preparation
+    strategy_groups = tls_results_df.groupby('strategy_instance_id')
+    scatter_data = []
+    
+    for strategy_id, group in strategy_groups:
+        # Individual combination points
+        for _, row in group.iterrows():
+            scatter_data.append({
+                'strategy': strategy_id,
+                'pnl': row['simulated_pnl'],
+                'tp': row['tp_level'],
+                'sl': row['sl_level'],
+                'tls_act': row['tls_activation'],
+                'tls_trail': row['tls_trail'],
+                'point_type': 'individual'
+            })
+        
+        # Best TLS result (green highlight)
+        best_tls = group.loc[group['simulated_pnl'].idxmax()]
+        scatter_data.append({
+            'strategy': strategy_id,
+            'pnl': best_tls['simulated_pnl'],
+            'tp': best_tls['tp_level'],
+            'sl': best_tls['sl_level'],
+            'tls_act': best_tls['tls_activation'],
+            'tls_trail': best_tls['tls_trail'],
+            'point_type': 'best_tls'
+        })
+        
+        # Best non-TLS result (yellow highlight)
+        baseline_pnl = baseline_data.get(strategy_id, 0)
+        scatter_data.append({
+            'strategy': strategy_id,
+            'pnl': baseline_pnl,
+            'point_type': 'best_non_tls'
+        })
+    
+    return create_plotly_scatter(scatter_data)
+```
+
+#### **Task 2.2: Global Top Combinations Table**
+**File:** `reporting/visualizations/interactive/tls_strategy_charts.py`
+**Action:** Create comprehensive ranking table with strategy navigation
+
+```python
+def create_global_top_combinations_table(tls_results_df, baseline_data, top_count=10):
+    """
+    Global Top 10 Combinations Table:
+    
+    Columns:
+    - Rank: 1-10 numeric ranking
+    - Strategy: Clickable strategy name (triggers grid filter)
+    - TP: Take profit percentage
+    - SL: Stop loss percentage
+    - TLS Act: TLS activation percentage
+    - TLS Trail: TLS trail percentage
+    - TLS PnL: Performance with TLS
+    - Baseline PnL: Best non-TLS performance for this strategy
+    - TLS Benefit: Percentage improvement ((tls_pnl - baseline_pnl) / baseline_pnl * 100)
+    
+    Features:
+    - Color-coded TLS Benefit: Green (positive), Red (negative), Gray (neutral ±1%)
+    - Clickable strategy names set filter for detailed 4D grid view
+    - Sort by TLS PnL descending (fixed, no user sorting needed)
+    - Responsive table design with proper column sizing
+    """
+    
+    # Calculate TLS benefit for all combinations
+    enriched_results = []
+    for _, row in tls_results_df.iterrows():
+        strategy_baseline = baseline_data.get(row['strategy_instance_id'], 0)
+        tls_benefit = ((row['simulated_pnl'] - strategy_baseline) / strategy_baseline * 100) if strategy_baseline > 0 else 0
+        
+        enriched_results.append({
+            'strategy_instance_id': row['strategy_instance_id'],
+            'tp_level': row['tp_level'],
+            'sl_level': row['sl_level'],
+            'tls_activation': row['tls_activation'],
+            'tls_trail': row['tls_trail'],
+            'tls_pnl': row['simulated_pnl'],
+            'baseline_pnl': strategy_baseline,
+            'tls_benefit': tls_benefit
+        })
+    
+    # Sort by TLS PnL and take top N
+    top_combinations = sorted(enriched_results, key=lambda x: x['tls_pnl'], reverse=True)[:top_count]
+    
+    return create_interactive_table(top_combinations)
+```
+
+#### **Task 2.3: Strategy Performance Summary Statistics**
+**File:** `reporting/visualizations/interactive/tls_strategy_charts.py`
+**Action:** Generate strategy-level performance insights
+
+```python
+def create_strategy_performance_summary(tls_results_df, baseline_data):
+    """
+    Strategy Performance Summary:
+    
+    Metrics per strategy:
+    - Best TLS Performance: Highest PnL with TLS enabled
+    - Best Baseline Performance: Best non-TLS performance
+    - TLS Advantage: Percentage improvement of best TLS vs baseline
+    - Optimization Potential: Range between worst and best TLS results
+    - Parameter Sensitivity: Standard deviation of TLS results
+    
+    Output format: Dictionary for integration with HTML template
+    """
+    
+    summary_stats = {}
+    
+    for strategy_id in tls_results_df['strategy_instance_id'].unique():
+        strategy_data = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_id]
+        baseline_pnl = baseline_data.get(strategy_id, 0)
+        
+        best_tls_pnl = strategy_data['simulated_pnl'].max()
+        worst_tls_pnl = strategy_data['simulated_pnl'].min()
+        avg_tls_pnl = strategy_data['simulated_pnl'].mean()
+        std_tls_pnl = strategy_data['simulated_pnl'].std()
+        
+        tls_advantage = ((best_tls_pnl - baseline_pnl) / baseline_pnl * 100) if baseline_pnl > 0 else 0
+        optimization_potential = best_tls_pnl - worst_tls_pnl
+        
+        summary_stats[strategy_id] = {
+            'best_tls_pnl': best_tls_pnl,
+            'baseline_pnl': baseline_pnl,
+            'tls_advantage': tls_advantage,
+            'optimization_potential': optimization_potential,
+            'parameter_sensitivity': std_tls_pnl,
+            'avg_performance': avg_tls_pnl,
+            'total_combinations': len(strategy_data)
+        }
+    
+    return summary_stats
+```
+
+#### **Task 2.4: Interactive Navigation System**
+**File:** `reporting/templates/comprehensive_report.html`
+**Action:** Add JavaScript for strategy filtering and navigation
+
+```javascript
+// Strategy Overview Navigation System
+function initializeStrategyOverview() {
+    // Strategy name click handlers
+    document.querySelectorAll('.strategy-name-clickable').forEach(element => {
+        element.addEventListener('click', function(e) {
+            const strategyId = e.target.getAttribute('data-strategy-id');
+            filterGridByStrategy(strategyId);
+            scrollToGridSection();
+            highlightSelectedStrategy(strategyId);
+        });
+    });
+    
+    // Global top combinations table strategy links
+    document.querySelectorAll('.top-combo-strategy-link').forEach(element => {
+        element.addEventListener('click', function(e) {
+            e.preventDefault();
+            const strategyId = e.target.getAttribute('data-strategy-id');
+            filterGridByStrategy(strategyId);
+            scrollToGridSection();
+            updateFilterIndicator(strategyId);
+        });
+    });
+}
+
+function filterGridByStrategy(strategyId) {
+    // Update strategy filter dropdown in grid section
+    const strategySelect = document.getElementById('strategyFilter');
+    if (strategySelect) {
+        strategySelect.value = strategyId;
+        strategySelect.dispatchEvent(new Event('change'));
+    }
+}
+
+function highlightSelectedStrategy(strategyId) {
+    // Visual feedback in scatter plot
+    document.querySelectorAll('.strategy-highlight').forEach(el => {
+        el.classList.remove('selected');
+    });
+    
+    const selectedElement = document.querySelector(`[data-strategy-id="${strategyId}"]`);
+    if (selectedElement) {
+        selectedElement.classList.add('selected');
+    }
+}
+
+function scrollToGridSection() {
+    // Smooth scroll to 4D grid section
+    const gridSection = document.getElementById('tls-4d-grid-section');
+    if (gridSection) {
+        gridSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+```
+
+#### **Task 2.5: HTML Template Integration**
+**File:** `reporting/templates/comprehensive_report.html`
+**Action:** Add Strategy Overview section to TLS analysis
+
+```html
+<!-- Strategy Overview Section (add to TLS analysis section) -->
+<div class="tls-strategy-overview">
+    <h3>📊 Strategy Performance Overview</h3>
+    <div class="overview-description">
+        <p>Compare TLS performance across all strategies. Click strategy names to filter the detailed grid below.</p>
+    </div>
+    
+    <!-- Strategy Scatter Plot -->
+    <div class="chart-container">
+        <div id="strategy-overview-scatter" style="height: 500px;"></div>
+        <div class="chart-legend">
+            <span class="legend-item">
+                <span class="legend-dot green"></span> Best TLS Result
+            </span>
+            <span class="legend-item">
+                <span class="legend-dot yellow"></span> Best Non-TLS Result
+            </span>
+            <span class="legend-item">
+                <span class="legend-dot gray"></span> Individual Combinations
+            </span>
+        </div>
+    </div>
+    
+    <!-- Global Top Combinations Table -->
+    <div class="top-combinations-section">
+        <h4>🏆 Top 10 TLS Combinations (All Strategies)</h4>
+        <div id="global-top-combinations-table"></div>
+    </div>
+    
+    <!-- Strategy Performance Summary -->
+    <div class="performance-summary-section">
+        <h4>📈 Strategy Performance Summary</h4>
+        <div id="strategy-performance-summary"></div>
+    </div>
+</div>
+```
+
+#### **Task 2.6: Chart Generation Integration**
+**File:** `reporting/html_report_generator.py`
+**Action:** Integrate strategy overview charts into report generation
+
+```python
+def generate_tls_strategy_overview_charts(self, tls_data, baseline_data):
+    """
+    Generate strategy overview visualization components:
+    1. Strategy scatter plot with performance clouds
+    2. Global top combinations table
+    3. Strategy performance summary statistics
+    """
+    
+    from reporting.visualizations.interactive.tls_strategy_charts import (
+        create_strategy_overview_scatter,
+        create_global_top_combinations_table,
+        create_strategy_performance_summary
+    )
+    
+    # Generate scatter plot
+    scatter_chart = create_strategy_overview_scatter(tls_data, baseline_data)
+    
+    # Generate top combinations table
+    top_combinations_table = create_global_top_combinations_table(tls_data, baseline_data)
+    
+    # Generate performance summary
+    performance_summary = create_strategy_performance_summary(tls_data, baseline_data)
+    
+    return {
+        'strategy_scatter_chart': scatter_chart,
+        'top_combinations_table': top_combinations_table,
+        'performance_summary': performance_summary
+    }
+```
+
+### **Validation & Testing Strategy**
+
+#### **Visual Validation Tests:**
+- Strategy scatter plot displays all data points correctly
+- Green/yellow highlights clearly distinguish best results
+- Clickable elements respond appropriately
+- Performance clouds show meaningful clustering patterns
+
+#### **Interactive Function Tests:**
+- Strategy name clicks correctly filter grid section
+- Top combinations table navigation works seamlessly
+- Scroll behavior is smooth and targets correct sections
+- Filter indicators update properly
+
+#### **Data Accuracy Tests:**
+```python
+# Test scenarios:
+test_scatter_plot_data_accuracy()      # All TLS results represented
+test_highlight_point_identification()  # Best results correctly highlighted  
+test_baseline_comparison_accuracy()    # Yellow dots match actual baseline
+test_top_combinations_ranking()        # Top 10 correctly sorted by PnL
+test_tls_benefit_calculation()         # TLS benefit percentages accurate
+test_strategy_navigation_flow()        # Click → filter → scroll flow works
+```
+
+### **Success Criteria:**
+- [ ] Strategy scatter plot enables rapid visual comparison of strategy performance
+- [ ] Clickable navigation seamlessly connects overview to detailed analysis
+- [ ] Top combinations table provides actionable insights with clear TLS benefits
+- [ ] Performance summary quantifies optimization opportunities per strategy
+- [ ] Interactive elements respond smoothly without performance degradation
+- [ ] Visual design supports identification of high-performing strategy clusters
+
+### **Risk Mitigation:**
+- **Performance Risk:** Optimize scatter plot rendering for large datasets (>1000 points)
+- **Usability Risk:** Ensure strategy names remain readable with rotation and truncation
+- **Navigation Risk:** Provide clear visual feedback for selected strategies
+- **Data Risk:** Validate baseline comparison accuracy against Phase 1 results
+
+### **Deliverables:**
+1. Complete strategy overview visualization module
+2. Interactive navigation system with filtering
+3. Global top combinations ranking table
+4. Strategy performance summary statistics
+5. HTML template integration
+6. JavaScript interaction handlers
+
+---
+
+## 🚀 Phase 2 Implementation Prompt
+
+**Use this prompt when starting Phase 2 implementation:**
+
+```
+You are implementing Phase 2 of the 4D TP/SL/TLS Optimization Module for the SOL Decoder LP Strategy Optimization Project.
+
+CONTEXT FROM PHASE 1 SUCCESS:
+- TLS simulation engine fully operational (simulations/tls_range_simulator.py)
+- Baseline comparison system working (simulations/baseline_comparator.py)
+- TLS analysis integrated into main menu (position 7)
+- Comprehensive report integration completed
+- Data models and configuration established
+
+PHASE 2 OBJECTIVE:
+Create strategy comparison interface enabling rapid identification of high-performing strategies through visual overview and clickable navigation.
+
+CRITICAL REQUIREMENTS:
+1. Strategy scatter plot: X-axis strategy names, Y-axis PnL, points for all combinations
+2. Dual highlights: Green dot (best TLS), Yellow dot (best non-TLS baseline) per strategy
+3. Clickable navigation: Strategy names filter 4D grid view (seamless connection)
+4. Global top 10 table: Best TLS combinations across all strategies with benefit calculation
+5. Performance summary: Per-strategy statistics and optimization insights
+
+REQUIRED MODULES FOR CONTEXT:
+- simulations/tls_range_simulator.py (TLS simulation results)
+- simulations/baseline_comparator.py (baseline comparison data)
+- reporting/visualizations/interactive/range_test_charts.py (chart infrastructure)
+- reporting/html_report_generator.py (report integration)
+- reporting/templates/comprehensive_report.html (template structure)
+- reporting/strategy_instance_detector.py (strategy naming)
+
+IMPLEMENTATION TASKS:
+1. Create tls_strategy_charts.py with scatter plot and table generation
+2. Add strategy overview section to HTML template
+3. Implement JavaScript navigation for strategy filtering
+4. Integrate chart generation into html_report_generator.py
+5. Add performance summary statistics calculation
+6. Test interactive navigation flow (click → filter → scroll)
+
+KEY DESIGN SPECIFICATIONS:
+- Point sizes: Individual (3px), Best TLS (8px), Best non-TLS (6px)
+- Color scheme: Green (best TLS), Yellow (best baseline), Gray (individual)
+- Strategy name rotation: 45 degrees for readability
+- TLS benefit calculation: (tls_pnl - baseline_pnl) / baseline_pnl * 100
+- Table sorting: Fixed by TLS PnL descending (no user sorting)
+
+VALIDATION TARGETS:
+- Visual clarity: Strategy performance differences easily identifiable
+- Navigation accuracy: Clicks correctly filter and scroll to grid section
+- Data integrity: All baseline comparisons match Phase 1 calculations
+- Performance: Smooth rendering with large datasets (1000+ combinations)
+- User experience: Intuitive workflow from overview to detailed analysis
+
+Start with Task 2.1 (Strategy Scatter Plot) and proceed systematically. Focus on creating clear visual hierarchy and seamless navigation flow.
+```
 
 **Visualization Specifications:**
 ```python
@@ -659,35 +1074,45 @@ def generate_tls_optimization_section(html_report):
 - Strategy-specific guidance enables targeted parameter optimization
 - Complexity analysis helps users understand cost/benefit trade-offs
 
-## 🚀 Implementation Timeline
+## 📊 Current Implementation Status
 
-**Phase 1 (TLS Engine):** 2-3 sessions
-- Core simulation logic implementation
-- Parameter validation and filtering
-- Baseline comparison integration
+### **Phase 1: TLS Simulation Engine** ✅ **COMPLETED** (2025-09-10)
+**Achievement Summary:**
+- Complete TLS simulation engine with dynamic trailing stop loss logic
+- Smart parameter filtering (TP > TLS_activation, TLS_trail < TLS_activation)
+- Per-strategy baseline comparison system using existing optimal TP/SL data
+- Main menu integration (position 7) with reorganized menu structure
+- Full data pipeline integration with comprehensive report generation
+- Performance optimization with 10,000 combinations per position circuit breaker
 
-**Phase 2 (Strategy Overview):** 1-2 sessions  
-- Scatter plot implementation
-- Global top combinations table
-- Interactive filtering integration
+**Technical Deliverables Completed:**
+- `simulations/tls_range_simulator.py` - Core TLS simulation engine
+- `reporting/lp_position_valuator.py` - Extended with TLS exit logic
+- `simulations/baseline_comparator.py` - Per-strategy baseline identification
+- `core/models.py` - TlsSimulationResult data model with CSV export
+- `portfolio_config.yaml` - Complete TLS configuration section
+- `main.py` - Menu reorganization and TLS analysis integration
+- `comprehensive_report.html` - TLS section placeholder with BETA status
 
-**Phase 3 (4D Grid):** 2-3 sessions
-- Grid layout and mini-heatmap generation
-- Shared color scaling implementation
-- Advanced filtering system
+**Validation Results:**
+- TLS logic accuracy: ✅ Proper activation and trailing behavior confirmed
+- Parameter validation: ✅ Invalid combinations correctly filtered
+- Performance target: ✅ Sub-10-minute analysis for typical datasets
+- Baseline comparison: ✅ 100% accuracy in per-strategy best non-TLS identification
+- Exit reason compatibility: ✅ TP, SL, TLS, OOR, END maintained
 
-**Phase 4 (Ranking Table):** 1-2 sessions
-- 4D grouping algorithm
-- Expandable table interface
-- TLS effectiveness metrics
+### **Phase 2: Strategy Overview Visualization** 🔲 **NEXT IMPLEMENTATION**
+**Target:** Strategy comparison interface with scatter plot and global top combinations table
+**Estimated Effort:** 1-2 sessions
 
-**Phase 5 (Integration):** 1 session
-- Report section integration
-- Executive summary generation
-- Final testing and validation
+### **Phase 3: 4D Grid Visualization** 🔲 **PLANNED**
+**Target:** Grid-based mini-heatmaps with shared color scaling and advanced filtering
 
-**Total Estimated Effort:** 7-11 sessions
-**Target Completion:** 2-3 weeks with regular development sessions
+### **Phase 4: Grouped Ranking Table** 🔲 **PLANNED** 
+**Target:** 4D parameter grouping with expandable interface and TLS effectiveness metrics
+
+### **Phase 5: Integration & Reporting** 🔲 **PLANNED**
+**Target:** Executive summary generation and final system integration
 
 ## 📚 Dependencies & Prerequisites
 

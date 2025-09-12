@@ -70,8 +70,6 @@ class TlsRangeSimulator:
         
         Business logic constraints:
         - TP > TLS_activation (must be able to reach activation level)
-        - TLS_trail < TLS_activation (trail distance should be reasonable)
-        - TLS_activation >= 3% (minimum meaningful activation level)
         
         Returns:
             List of valid (tp, sl, tls_activation, tls_trail) tuples
@@ -85,7 +83,7 @@ class TlsRangeSimulator:
                     for tls_trail in self.tls_trail_range:
                         if self.enable_smart_filtering:
                             # Apply business logic constraints
-                            if tp > tls_act and tls_trail < tls_act and tls_act >= 3:
+                            if tp > tls_act:
                                 valid_combinations.append((tp, sl, tls_act, tls_trail))
                         else:
                             valid_combinations.append((tp, sl, tls_act, tls_trail))
@@ -109,7 +107,7 @@ class TlsRangeSimulator:
         
         Business Logic:
         - TLS activates only when position reaches tls_activation profit level
-        - Once active, dynamic SL = max(original_SL, peak_PnL - tls_trail)
+        - Once active, dynamic SL = max(original_SL, tls_activation - tls_trail)
         - Exit on first condition: TP reached, SL/TLS triggered, OOR, or end of data
         
         Args:
@@ -166,10 +164,11 @@ class TlsRangeSimulator:
                 tls_activated = True
                 logger.debug(f"TLS activated at {peak_pnl:.2f}% for position {position.position_id}")
                 
-            # Update dynamic SL if TLS is active
+            # Update dynamic SL if TLS is active (FIXED: use activation-based, not peak-based)
             if tls_activated:
-                trailing_sl = peak_pnl - tls_trail
-                dynamic_sl = max(dynamic_sl, trailing_sl)
+                # TLS sets SL as fixed offset from activation point
+                tls_sl = tls_activation - tls_trail
+                dynamic_sl = max(dynamic_sl, tls_sl)
             
             # --- PRIORITY EXIT LOGIC (same as existing TP/SL) ---
             # 1. TP check (high price)

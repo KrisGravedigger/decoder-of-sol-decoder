@@ -141,12 +141,23 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.warning(f"Could not generate optimization charts: {e}")
 
-        # TLS Analysis Charts (Phase 1)
+        # TLS Analysis Charts (Phase 1 & 2)
         if tls_analysis and tls_analysis.get('status') == 'SUCCESS':
             try:
+                # Phase 1: Basic comparison charts
                 charts['tls_comparison_summary'] = self._create_tls_comparison_chart(tls_analysis)
                 charts['tls_strategy_effectiveness'] = self._create_tls_effectiveness_chart(tls_analysis)
-                logger.info("Generated TLS analysis charts")
+                
+                # Phase 2: Strategy overview visualizations
+                detailed_results = tls_analysis.get('detailed_results')
+                baseline_comparison = tls_analysis.get('baseline_comparison')
+                
+                if detailed_results is not None and baseline_comparison is not None:
+                    baseline_data = self._extract_baseline_data(baseline_comparison)
+                    strategy_overview_charts = self._generate_tls_strategy_overview_charts(detailed_results, baseline_data)
+                    charts.update(strategy_overview_charts)
+                    
+                logger.info("Generated TLS analysis charts (Phase 1 & 2)")
             except Exception as e:
                 logger.warning(f"Could not generate TLS charts: {e}")
 
@@ -380,6 +391,69 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.error(f"Failed to create TLS comparison chart: {e}")
             return f"<p>Error generating TLS comparison chart: {e}</p>"
+    
+    def _extract_baseline_data(self, baseline_comparison) -> Dict[str, float]:
+        """Extract baseline data from comparison results."""
+        baseline_data = {}
+        
+        if baseline_comparison is None:
+            return baseline_data
+            
+        try:
+            # Handle DataFrame
+            if hasattr(baseline_comparison, 'empty'):
+                if not baseline_comparison.empty:
+                    for _, row in baseline_comparison.iterrows():
+                        baseline_data[row['strategy_instance_id']] = row['baseline_pnl']
+            # Handle list of dicts
+            elif isinstance(baseline_comparison, list):
+                for row in baseline_comparison:
+                    baseline_data[row['strategy_instance_id']] = row['baseline_pnl']
+            # Handle dict
+            elif isinstance(baseline_comparison, dict):
+                baseline_data = baseline_comparison
+                
+        except Exception as e:
+            logger.warning(f"Failed to extract baseline data: {e}")
+            
+        return baseline_data
+    
+    def _generate_tls_strategy_overview_charts(self, detailed_results, baseline_data: Dict[str, float]) -> Dict[str, str]:
+        """Generate Phase 2 TLS strategy overview visualization components."""
+        try:
+            from reporting.visualizations.interactive.tls_strategy_charts import (
+                create_strategy_overview_scatter,
+                create_global_top_combinations_table,
+                create_strategy_performance_summary
+            )
+            
+            # Convert detailed_results to DataFrame if needed
+            if hasattr(detailed_results, 'empty'):
+                tls_df = detailed_results
+            elif isinstance(detailed_results, list):
+                tls_df = pd.DataFrame(detailed_results)
+            else:
+                logger.warning("Unexpected detailed_results format for TLS charts")
+                return {}
+            
+            if tls_df.empty:
+                logger.warning("No TLS detailed results available for strategy overview")
+                return {}
+            
+            # Generate strategy overview charts
+            strategy_scatter_chart = create_strategy_overview_scatter(tls_df, baseline_data)
+            top_combinations_table = create_global_top_combinations_table(tls_df, baseline_data)
+            performance_summary = create_strategy_performance_summary(tls_df, baseline_data)
+            
+            return {
+                'tls_strategy_scatter_chart': strategy_scatter_chart,
+                'tls_top_combinations_table': top_combinations_table,
+                'tls_performance_summary': performance_summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to generate TLS strategy overview charts: {e}")
+            return {}
     
     def _create_tls_effectiveness_chart(self, tls_analysis: Dict[str, Any]) -> str:
         """Create TLS effectiveness summary chart."""

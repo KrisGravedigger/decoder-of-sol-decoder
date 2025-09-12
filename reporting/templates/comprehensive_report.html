@@ -377,6 +377,101 @@
                         document.getElementById(id).addEventListener('change', updateWhatIfAnalysis);
                     });
                 });
+                
+                // TLS Strategy Overview Navigation System
+                function initializeTlsStrategyNavigation() {
+                    // Strategy name click handlers in scatter plot
+                    document.querySelectorAll('.strategy-name-clickable').forEach(element => {
+                        element.addEventListener('click', function(e) {
+                            const strategyId = e.target.getAttribute('data-strategy-id');
+                            filterTlsGridByStrategy(strategyId);
+                            scrollToTlsGridSection();
+                            highlightSelectedStrategy(strategyId);
+                        });
+                    });
+                    
+                    // Global top combinations table strategy links
+                    document.querySelectorAll('.top-combo-strategy-link').forEach(element => {
+                        element.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            const strategyId = e.target.getAttribute('data-strategy-id');
+                            // For now, just provide visual feedback since 4D grid isn't implemented yet
+                            highlightSelectedStrategy(strategyId);
+                            
+                            // Show notification that this will connect to 4D grid in future phases
+                            showTlsNavigationNotification(strategyId);
+                        });
+                    });
+                }
+                
+                function filterTlsGridByStrategy(strategyId) {
+                    // Placeholder for Phase 3: 4D grid filtering
+                    console.log(`TLS Grid filtering for strategy: ${strategyId} (Phase 3 feature)`);
+                }
+                
+                function scrollToTlsGridSection() {
+                    // Placeholder for Phase 3: Scroll to 4D grid section
+                    console.log('Scrolling to TLS 4D grid section (Phase 3 feature)');
+                }
+                
+                function highlightSelectedStrategy(strategyId) {
+                    // Visual feedback in scatter plot and table
+                    document.querySelectorAll('.strategy-highlight').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    
+                    // Highlight in scatter plot (if applicable)
+                    const selectedElement = document.querySelector(`[data-strategy-id="${strategyId}"]`);
+                    if (selectedElement) {
+                        selectedElement.style.fontWeight = 'bold';
+                        selectedElement.style.backgroundColor = '#e3f2fd';
+                        
+                        // Remove highlight after 3 seconds
+                        setTimeout(() => {
+                            selectedElement.style.fontWeight = '';
+                            selectedElement.style.backgroundColor = '';
+                        }, 3000);
+                    }
+                }
+                
+                function showTlsNavigationNotification(strategyId) {
+                    // Create and show temporary notification
+                    const notification = document.createElement('div');
+                    notification.style.cssText = `
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: #3498db;
+                        color: white;
+                        padding: 15px 20px;
+                        border-radius: 5px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                        z-index: 1000;
+                        max-width: 300px;
+                        font-size: 14px;
+                    `;
+                    notification.innerHTML = `
+                        <strong>Navigation Ready!</strong><br>
+                        Selected: ${strategyId}<br>
+                        <small>4D grid filtering will be available in Phase 3</small>
+                    `;
+                    
+                    document.body.appendChild(notification);
+                    
+                    // Auto-remove after 4 seconds
+                    setTimeout(() => {
+                        if (notification.parentNode) {
+                            notification.parentNode.removeChild(notification);
+                        }
+                    }, 4000);
+                }
+                
+                // Initialize TLS navigation when DOM is ready
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', initializeTlsStrategyNavigation);
+                } else {
+                    initializeTlsStrategyNavigation();
+                }
             </script>
         </div>
         {% endif %}
@@ -422,27 +517,86 @@
         </div>
         {% endif %}
         
-        <!-- TLS (Trailing Stop Loss) Analysis Section - TEMPORARY PLACEHOLDER -->
+        <!-- TLS (Trailing Stop Loss) Analysis Section -->
         {% if tls_analysis and not tls_analysis.get('error') %}
         <div class="section">
             <h2>
                 <span style="background: #3498db; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.7em; margin-right: 10px;">BETA</span>
                 TLS (Trailing Stop Loss) Analysis
-                <span style="background: #f39c12; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.6em; margin-left: 10px;">PLACEHOLDER</span>
             </h2>
             
-            <!-- Warning Box -->
-            <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin-bottom: 20px; color: #856404;">
-                <strong>⚠️ Development Preview:</strong> This section is a temporary placeholder for the upcoming TLS optimization feature. 
-                Current visualizations are basic and will be enhanced with advanced analytics in future releases.
+            <!-- Phase 2: Strategy Overview Section -->
+            {% if charts.get('tls_strategy_scatter_chart') %}
+            <div class="tls-strategy-overview">
+                <h3>📊 Strategy Performance Overview</h3>
+                <div class="overview-description">
+                    <p>Compare TLS performance across all strategies. Green dots show best TLS results, yellow dots show best non-TLS baseline performance for each strategy.</p>
+                </div>
+                
+                <!-- Strategy Scatter Plot -->
+                <div class="chart-container">
+                    <div id="strategy-overview-scatter" style="height: 600px;">{{ charts.tls_strategy_scatter_chart | safe }}</div>
+                    <div class="chart-legend" style="margin-top: 15px; text-align: center;">
+                        <span class="legend-item" style="margin-right: 20px;">
+                            <span style="display: inline-block; width: 12px; height: 12px; background-color: green; border-radius: 50%; margin-right: 5px;"></span> Best TLS Result
+                        </span>
+                        <span class="legend-item" style="margin-right: 20px;">
+                            <span style="display: inline-block; width: 10px; height: 10px; background-color: gold; border-radius: 50%; margin-right: 5px;"></span> Best Non-TLS Result
+                        </span>
+                        <span class="legend-item">
+                            <span style="display: inline-block; width: 8px; height: 8px; background-color: lightgray; border-radius: 50%; margin-right: 5px;"></span> Individual Combinations
+                        </span>
+                    </div>
+                </div>
+                
+                <!-- Global Top Combinations Table -->
+                <div class="top-combinations-section" style="margin-top: 30px;">
+                    <h4>🏆 Top 10 TLS Combinations (All Strategies)</h4>
+                    <div id="global-top-combinations-table">{{ charts.tls_top_combinations_table | safe }}</div>
+                </div>
+                
+                <!-- Strategy Performance Summary -->
+                {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_overall') %}
+                <div class="performance-summary-section" style="margin-top: 30px;">
+                    <h4>📈 TLS Performance Summary</h4>
+                    <div class="grid-container">
+                        <div class="metric-card">
+                            <h3>Total Strategies</h3>
+                            <p class="value">{{ charts.tls_performance_summary._overall.total_strategies }}</p>
+                            <p class="label">Analyzed in TLS testing</p>
+                        </div>
+                        <div class="metric-card">
+                            <h3>Strategies Improved</h3>
+                            <p class="value {% if charts.tls_performance_summary._overall.strategies_improved > 0 %}positive{% endif %}">{{ charts.tls_performance_summary._overall.strategies_improved }}</p>
+                            <p class="label">{{ "%.1f"|format(charts.tls_performance_summary._overall.improvement_rate) }}% improvement rate</p>
+                        </div>
+                        <div class="metric-card">
+                            <h3>Average TLS Advantage</h3>
+                            <p class="value {% if charts.tls_performance_summary._overall.avg_tls_advantage > 0 %}positive{% else %}negative{% endif %}">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.avg_tls_advantage) }}%</p>
+                            <p class="label">When TLS outperforms baseline</p>
+                        </div>
+                        <div class="metric-card">
+                            <h3>Best TLS Advantage</h3>
+                            <p class="value positive">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.best_tls_advantage) }}%</p>
+                            <p class="label">Maximum improvement achieved</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Strategy Performance Details Table -->
+                {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_table_html') %}
+                <div class="strategy-performance-details" style="margin-top: 30px;">
+                    {{ charts.tls_performance_summary._table_html | safe }}
+                </div>
+                {% endif %}
             </div>
+            {% endif %}
             
             <h3>TLS vs Baseline Performance Comparison</h3>
-            <!-- TODO: Replace with advanced scatter plot with strategy clustering and performance metrics -->
             <div id="tls_comparison_chart" class="plotly-chart">{{ charts.tls_comparison_chart | safe }}</div>
             
             <h3>Strategy Effectiveness Analysis</h3>
-            <!-- TODO: Add heatmap visualization showing TLS parameter effectiveness by strategy type -->
             <div id="tls_effectiveness_chart" class="plotly-chart">{{ charts.tls_effectiveness_chart | safe }}</div>
             
             <h3>Top TLS Improvements</h3>
