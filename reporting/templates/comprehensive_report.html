@@ -590,6 +590,126 @@
                     {{ charts.tls_performance_summary._table_html | safe }}
                 </div>
                 {% endif %}
+                
+                <!-- 4D TLS Grid Section (Phase 3) -->
+                {% if tls_4d_data and tls_4d_data.grid_data %}
+                <div class="tls-4d-grid-section" id="tls-4d-grid-section" style="margin-top: 40px;">
+                    <h4>🔢 4D TLS Parameter Grid Analysis (Phase 3)</h4>
+                    <div class="grid-description" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                        <p><strong>Interactive 4D Parameter Exploration:</strong> Each mini-heatmap shows TP×SL performance for a specific TLS combination. 
+                           All heatmaps use the same color scale for direct comparison. Click strategy names above to filter this grid.</p>
+                        <p><strong>Grid Organization:</strong> Rows = TLS Activation levels, Columns = TLS Trail levels</p>
+                    </div>
+                    
+                    <!-- Grid Filter Controls -->
+                    <div class="grid-filter-controls" style="background: #e9ecef; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+                        <h5 style="margin-top: 0;">🎛️ Grid Filters</h5>
+                        <div class="filter-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; align-items: end;">
+                            <div>
+                                <label for="grid-min-performance" style="display: block; margin-bottom: 5px; font-weight: bold;">Min Performance (%):</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="range" id="grid-min-performance" min="-5" max="20" step="0.25" value="-5" style="flex: 1;">
+                                    <span id="grid-performance-value" style="min-width: 50px; font-weight: bold;">-5%</span>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label for="grid-strategy-filter" style="display: block; margin-bottom: 5px; font-weight: bold;">Strategy:</label>
+                                <select id="grid-strategy-filter" style="width: 100%; padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+                                    <option value="all">All Strategies</option>
+                                    {% for strategy in tls_4d_data.available_strategies %}
+                                    <option value="{{ strategy }}">{{ strategy }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label for="grid-min-winrate" style="display: block; margin-bottom: 5px; font-weight: bold;">Min Win Rate (%):</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <input type="range" id="grid-min-winrate" min="0" max="100" step="5" value="0" style="flex: 1;">
+                                    <span id="grid-winrate-value" style="min-width: 50px; font-weight: bold;">0%</span>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center;">
+                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                    <input type="checkbox" id="grid-show-improvements">
+                                    <span style="font-weight: bold;">Show Only TLS Improvements</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 10px; padding: 10px; background: #d1ecf1; border-radius: 3px; font-size: 0.9em;">
+                            <strong>Active Filters:</strong> <span id="active-filter-count">0</span> | 
+                            <strong>Visible Cells:</strong> <span id="visible-cell-count">{{ tls_4d_data.grid_data.total_combinations if tls_4d_data.grid_data.total_combinations else 'N/A' }}</span>
+                            <div id="baseline-info" style="margin-top: 5px; display: none; color: #0c5460; font-weight: bold;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- TLS Grid Container -->
+                    {% if tls_4d_data.grid_data.error %}
+                    <div class="skipped">{{ tls_4d_data.grid_data.error }}</div>
+                    {% else %}
+                    <div class="tls-grid-container" style="background: white; border: 1px solid #dee2e6; border-radius: 5px; padding: 20px;">
+                        <div class="grid-header" style="display: grid; grid-template-columns: 80px repeat({{ tls_4d_data.grid_data.tls_trail_range | length }}, 1fr); gap: 10px; margin-bottom: 15px; align-items: center;">
+                            <div class="grid-corner" style="font-weight: bold; text-align: center;">TLS\Trail</div>
+                            <!-- TLS Trail headers -->
+                            {% for trail in tls_4d_data.grid_data.tls_trail_range %}
+                            <div class="trail-header" style="font-weight: bold; text-align: center; background: #f8f9fa; padding: 5px; border-radius: 3px;">{{ trail }}%</div>
+                            {% endfor %}
+                        </div>
+                        
+                        <div class="grid-body" id="tls-grid-body">
+                            <!-- TLS Activation rows with mini-heatmaps -->
+                            {% for row_data in tls_4d_data.grid_data.grid_data %}
+                            <div class="grid-row" style="display: grid; grid-template-columns: 80px repeat({{ tls_4d_data.grid_data.tls_trail_range | length }}, 1fr); gap: 10px; margin-bottom: 15px; align-items: start;">
+                                <!-- Row header (TLS Activation level) -->
+                                <div class="activation-header" style="font-weight: bold; text-align: center; background: #f8f9fa; padding: 10px; border-radius: 3px; writing-mode: vertical-rl; text-orientation: mixed;">{{ row_data[0].tls_activation }}%</div>
+                                
+                                <!-- Mini-heatmap cells -->
+                                {% for cell in row_data %}
+                                <div class="mini-heatmap-cell {{ cell.header_class }}" 
+                                     data-cell-info='{"tls_activation": {{ cell.tls_activation }}, "tls_trail": {{ cell.tls_trail }}, "avg_performance": {{ cell.avg_performance }}, "has_data": {{ cell.has_data | lower }}, "strategy_id": "{{ cell.strategy_id if cell.strategy_id else "" }}", "tls_improvement": {{ cell.tls_improvement if cell.tls_improvement is not none else "null" }}}'
+                                     style="border: 2px solid {% if cell.header_class == 'performance-excellent' %}#27ae60{% elif cell.header_class == 'performance-good' %}#f39c12{% else %}#e74c3c{% endif %}; border-radius: 5px; padding: 5px; background: {% if cell.header_class == 'performance-excellent' %}#e8f5e8{% elif cell.header_class == 'performance-good' %}#fef9e7{% else %}#fdf2f2{% endif %};">
+                                    {% if cell.has_data %}
+                                        <div class="cell-header" style="text-align: center; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: {% if cell.header_class == 'performance-excellent' %}#27ae60{% elif cell.header_class == 'performance-good' %}#f39c12{% else %}#e74c3c{% endif %};">{{ cell.title }}</div>
+                                        <div class="cell-performance" style="text-align: center; font-size: 0.7em; margin-bottom: 5px;">Avg: {{ "{:.2f}".format(cell.avg_performance) }}%</div>
+                                        <div class="mini-heatmap-content" style="height: 150px; overflow: hidden;">
+                                            {{ cell.heatmap_html | safe }}
+                                        </div>
+                                    {% else %}
+                                        <div class="cell-header" style="text-align: center; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #6c757d;">{{ cell.title }}</div>
+                                        <div class="no-data-message" style="text-align: center; color: #6c757d; padding: 20px; font-style: italic;">No Data</div>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Global Color Scale Legend -->
+                    {% if not tls_4d_data.grid_data.error %}
+                    <div class="color-scale-legend" style="margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <h5 style="margin-top: 0;">🎨 Performance Scale (Global)</h5>
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <div class="legend-gradient" style="width: 200px; height: 20px; background: linear-gradient(to right, #e74c3c 0%, #f39c12 50%, #27ae60 100%); border-radius: 10px;"></div>
+                            <div class="legend-labels" style="display: flex; gap: 20px; font-size: 0.9em;">
+                                <span class="legend-min" style="color: #e74c3c; font-weight: bold;">Worst ({{ "{:.2f}".format(tls_4d_data.grid_data.global_color_config.global_min_pnl) }}%)</span>
+                                <span class="legend-mid" style="color: #f39c12; font-weight: bold;">Average</span>
+                                <span class="legend-max" style="color: #27ae60; font-weight: bold;">Best ({{ "{:.2f}".format(tls_4d_data.grid_data.global_color_config.global_max_pnl) }}%)</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="tls-4d-grid-section" style="margin-top: 40px;">
+                    <h4>🔢 4D TLS Parameter Grid Analysis (Phase 3)</h4>
+                    <div class="skipped">4D TLS grid data not available. This feature requires completed TLS simulation results.</div>
+                </div>
+                {% endif %}
             </div>
             {% endif %}
             
@@ -672,5 +792,209 @@
         {% endif %}
 
     </div>
+    
+    <!-- JavaScript for Interactive Controls -->
+    <script>
+        // 4D Grid Interactive Controls for TLS Analysis
+        function initialize4DGrid() {
+            // Grid filter event listeners
+            const performanceSlider = document.getElementById('grid-min-performance');
+            const strategySelect = document.getElementById('grid-strategy-filter');
+            const winrateSlider = document.getElementById('grid-min-winrate');
+            const improvementsCheckbox = document.getElementById('grid-show-improvements');
+            
+            if (performanceSlider) {
+                performanceSlider.addEventListener('input', updateGridFilters);
+            }
+            if (strategySelect) {
+                strategySelect.addEventListener('change', updateGridFilters);
+            }
+            if (winrateSlider) {
+                winrateSlider.addEventListener('input', updateGridFilters);
+            }
+            if (improvementsCheckbox) {
+                improvementsCheckbox.addEventListener('change', updateGridFilters);
+            }
+            
+            // Strategy filter integration from Phase 2
+            window.addEventListener('strategy-filter-changed', function(e) {
+                if (strategySelect) {
+                    strategySelect.value = e.detail.strategyId || 'all';
+                    updateGridFilters();
+                }
+            });
+            
+            // Phase 2 strategy navigation integration
+            initializeStrategyNavigation();
+        }
+        
+        function initializeStrategyNavigation() {
+            // Strategy name click handlers from Phase 2 charts
+            document.querySelectorAll('.strategy-name-clickable, .top-combo-strategy-link, .strategy-detail-link').forEach(element => {
+                element.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const strategyId = e.target.getAttribute('data-strategy-id');
+                    if (strategyId) {
+                        filterGridByStrategy(strategyId);
+                        scrollToGridSection();
+                        highlightSelectedStrategy(strategyId);
+                    }
+                });
+            });
+        }
+        
+        function filterGridByStrategy(strategyId) {
+            // Update strategy filter dropdown in grid section
+            const strategySelect = document.getElementById('grid-strategy-filter');
+            if (strategySelect) {
+                strategySelect.value = strategyId;
+                strategySelect.dispatchEvent(new Event('change'));
+            }
+        }
+        
+        function scrollToGridSection() {
+            // Smooth scroll to 4D grid section
+            const gridSection = document.getElementById('tls-4d-grid-section');
+            if (gridSection) {
+                gridSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+        
+        function highlightSelectedStrategy(strategyId) {
+            // Visual feedback in scatter plot and other charts
+            document.querySelectorAll('.strategy-highlight').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            const selectedElement = document.querySelector(`[data-strategy-id="${strategyId}"]`);
+            if (selectedElement) {
+                selectedElement.classList.add('selected');
+            }
+        }
+        
+        function updateGridFilters() {
+            const performanceSlider = document.getElementById('grid-min-performance');
+            const strategySelect = document.getElementById('grid-strategy-filter');
+            const winrateSlider = document.getElementById('grid-min-winrate');
+            const improvementsCheckbox = document.getElementById('grid-show-improvements');
+            
+            const filters = {
+                minPerformance: performanceSlider ? parseFloat(performanceSlider.value) : -5,
+                strategy: strategySelect ? strategySelect.value : 'all',
+                minWinRate: winrateSlider ? parseInt(winrateSlider.value) : 0,
+                showOnlyImprovements: improvementsCheckbox ? improvementsCheckbox.checked : false
+            };
+            
+            // Update filter value displays
+            const performanceValue = document.getElementById('grid-performance-value');
+            const winrateValue = document.getElementById('grid-winrate-value');
+            
+            if (performanceValue) {
+                performanceValue.textContent = filters.minPerformance + '%';
+            }
+            if (winrateValue) {
+                winrateValue.textContent = filters.minWinRate + '%';
+            }
+            
+            // Apply filters to grid display
+            applyFiltersToGrid(filters);
+            
+            // Update filter indicators
+            updateFilterIndicators(filters);
+        }
+        
+        function applyFiltersToGrid(filters) {
+            const cells = document.querySelectorAll('.mini-heatmap-cell');
+            let visibleCount = 0;
+            let currentBaseline = null;
+            
+            cells.forEach(cell => {
+                try {
+                    const cellInfo = JSON.parse(cell.getAttribute('data-cell-info') || '{}');
+                    
+                    // Check all filter conditions
+                    let passesFilters = true;
+                    
+                    // Performance filter
+                    if (cellInfo.avg_performance < filters.minPerformance) {
+                        passesFilters = false;
+                    }
+                    
+                    // Strategy filter (if specific strategy selected)
+                    if (filters.strategy !== 'all') {
+                        // For now, strategy filtering would be handled at grid generation level
+                        // But we can still filter based on strategy data in cells
+                        if (cellInfo.strategy_id && cellInfo.strategy_id !== filters.strategy) {
+                            passesFilters = false;
+                        }
+                    }
+                    
+                    // TLS improvement filter
+                    if (filters.showOnlyImprovements) {
+                        if (cellInfo.tls_improvement === null || cellInfo.tls_improvement <= 0) {
+                            passesFilters = false;
+                        } else {
+                            // Store baseline info for display
+                            if (currentBaseline === null) {
+                                // Calculate baseline from TLS improvement and current performance
+                                currentBaseline = cellInfo.avg_performance - cellInfo.tls_improvement;
+                            }
+                        }
+                    }
+                    
+                    // Apply visual filtering
+                    if (passesFilters) {
+                        cell.style.opacity = '1.0';
+                        cell.style.pointerEvents = 'auto';
+                        if (cellInfo.has_data) {
+                            visibleCount++;
+                        }
+                    } else {
+                        cell.style.opacity = '0.3';
+                        cell.style.pointerEvents = 'none';
+                    }
+                } catch (e) {
+                    console.warn('Error processing cell filter:', e);
+                }
+            });
+            
+            // Update visible cell count
+            const visibleCellCount = document.getElementById('visible-cell-count');
+            if (visibleCellCount) {
+                visibleCellCount.textContent = visibleCount;
+            }
+            
+            // Update baseline info display
+            const baselineInfo = document.getElementById('baseline-info');
+            if (baselineInfo) {
+                if (filters.showOnlyImprovements && currentBaseline !== null) {
+                    baselineInfo.textContent = `Baseline to beat: ${currentBaseline.toFixed(2)}%`;
+                    baselineInfo.style.display = 'block';
+                } else {
+                    baselineInfo.style.display = 'none';
+                }
+            }
+        }
+        
+        function updateFilterIndicators(filters) {
+            let activeFilters = 0;
+            
+            // Count active filters
+            if (filters.minPerformance > -5) activeFilters++;
+            if (filters.strategy !== 'all') activeFilters++;
+            if (filters.minWinRate > 0) activeFilters++;
+            if (filters.showOnlyImprovements) activeFilters++;
+            
+            const activeFilterCount = document.getElementById('active-filter-count');
+            if (activeFilterCount) {
+                activeFilterCount.textContent = activeFilters;
+            }
+        }
+        
+        // Initialize everything when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            initialize4DGrid();
+        });
+    </script>
 </body>
 </html>

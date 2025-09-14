@@ -141,7 +141,7 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.warning(f"Could not generate optimization charts: {e}")
 
-        # TLS Analysis Charts (Phase 1 & 2)
+        # TLS Analysis Charts (Phase 1, 2 & 3)
         if tls_analysis and tls_analysis.get('status') == 'SUCCESS':
             try:
                 # Phase 1: Basic comparison charts
@@ -157,7 +157,11 @@ class HTMLReportGenerator:
                     strategy_overview_charts = self._generate_tls_strategy_overview_charts(detailed_results, baseline_data)
                     charts.update(strategy_overview_charts)
                     
-                logger.info("Generated TLS analysis charts (Phase 1 & 2)")
+                    # Phase 3: 4D Grid Visualization
+                    grid_charts = self._generate_tls_4d_grid_charts(detailed_results)
+                    charts.update(grid_charts)
+                    
+                logger.info("Generated TLS analysis charts (Phase 1, 2 & 3)")
             except Exception as e:
                 logger.warning(f"Could not generate TLS charts: {e}")
 
@@ -196,6 +200,7 @@ class HTMLReportGenerator:
         
         # Prepare TLS analysis data for template
         tls_summary = None
+        tls_4d_data = None
         if tls_analysis and tls_analysis.get('status') == 'SUCCESS':
             baseline_comparison = tls_analysis.get('baseline_comparison')
             if baseline_comparison is not None:
@@ -236,6 +241,14 @@ class HTMLReportGenerator:
                         'avg_benefit': avg_benefit,
                         'top_improvements': top_improvements
                     }
+            
+            # Prepare TLS 4D grid data for template
+            if charts.get('tls_4d_grid_data'):
+                tls_4d_data = {
+                    'grid_data': charts['tls_4d_grid_data'],
+                    'filter_config': charts.get('tls_grid_filter_config', {}),
+                    'available_strategies': charts.get('tls_available_strategies', [])
+                }
 
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -245,6 +258,7 @@ class HTMLReportGenerator:
             'strategy_simulations': strategy_simulations,
             'tls_analysis': tls_analysis,  # Add TLS analysis data
             'tls_summary': tls_summary,    # Add processed TLS summary
+            'tls_4d_data': tls_4d_data,    # Add TLS 4D grid data
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
             'config': self.config,
@@ -453,6 +467,67 @@ class HTMLReportGenerator:
             
         except Exception as e:
             logger.error(f"Failed to generate TLS strategy overview charts: {e}")
+            return {}
+    
+    def _generate_tls_4d_grid_charts(self, detailed_results) -> Dict[str, Any]:
+        """Generate Phase 3 TLS 4D grid visualization components."""
+        try:
+            from reporting.visualizations.interactive.tls_4d_grid_charts import (
+                create_4d_tls_grid,
+                create_grid_filter_controls
+            )
+            
+            # Convert detailed_results to DataFrame if needed
+            if hasattr(detailed_results, 'empty'):
+                tls_df = detailed_results
+            elif isinstance(detailed_results, list):
+                tls_df = pd.DataFrame(detailed_results)
+            else:
+                logger.warning("Unexpected detailed_results format for TLS 4D grid")
+                return {}
+            
+            if tls_df.empty:
+                logger.warning("No TLS detailed results available for 4D grid")
+                return {}
+            
+            # Load strategy instances data for percentage calculations
+            strategy_instances_df = None
+            try:
+                import os
+                if os.path.exists("strategy_instances.csv"):
+                    strategy_instances_df = pd.read_csv("strategy_instances.csv")
+            except Exception as e:
+                logger.warning(f"Could not load strategy instances data: {e}")
+            
+            # Load baseline data for TLS improvement calculations
+            baseline_data = {}
+            try:
+                import os
+                if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                    agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                    # Find best combination for each strategy based on total_pnl
+                    optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')['total_pnl'].idxmax()]
+                    baseline_data = optimal_df.set_index('strategy_instance_id')['total_pnl'].to_dict()
+            except Exception as e:
+                logger.warning(f"Could not load baseline data: {e}")
+            
+            # Generate 4D grid (no strategy filter for full grid)
+            grid_data = create_4d_tls_grid(tls_df, strategy_instances_df=strategy_instances_df, baseline_data=baseline_data)
+            
+            # Generate filter controls configuration
+            filter_config = create_grid_filter_controls()
+            
+            # Get available strategies for filter dropdown
+            available_strategies = sorted(tls_df['strategy_instance_id'].unique())
+            
+            return {
+                'tls_4d_grid_data': grid_data,
+                'tls_grid_filter_config': filter_config,
+                'tls_available_strategies': available_strategies
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to generate TLS 4D grid charts: {e}")
             return {}
     
     def _create_tls_effectiveness_chart(self, tls_analysis: Dict[str, Any]) -> str:

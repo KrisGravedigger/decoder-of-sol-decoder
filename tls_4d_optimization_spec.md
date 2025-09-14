@@ -1094,19 +1094,556 @@ def generate_tls_optimization_section(html_report):
 - `main.py` - Menu reorganization and TLS analysis integration
 - `comprehensive_report.html` - TLS section placeholder with BETA status
 
+### **Phase 2: Strategy Overview Visualization** ✅ **COMPLETED** (2025-09-11/12)
+**Achievement Summary:**
+- Complete strategy visualization system with 4 interactive components
+- Critical TLS logic bug fix: corrected dynamic SL calculation from peak-based to activation-based
+- Parameter constraint optimization: removed restrictive limits to enable aggressive TLS testing
+- Enhanced UI/UX with proper formatting and performance optimization
+- Comprehensive mathematical validation across multiple market scenarios
+
+**Technical Deliverables Completed:**
+- `reporting/visualizations/interactive/tls_strategy_charts.py` - Complete strategy visualization suite
+- **Strategy Performance Overview** - Scatter plot with grey bars for performance density
+- **Top 10 TLS Combinations** - Global ranking table with deduplication and baseline comparison
+- **Strategy Performance Summary** - Per-strategy metrics with TLS advantage calculation
+- **TLS Parameter Distribution** - Analysis of parameter effectiveness across strategies
+- **Critical Logic Fix** - `dynamic_sl = tls_activation - tls_trail` (fixed offset from activation)
+- **Parameter Liberation** - Removed `tls_trail < tls_act` and `tls_act >= 3` constraints
+- **UI Improvements** - Fixed formatting issues (+/-12.7% → -12.7%) and performance optimization
+
 **Validation Results:**
-- TLS logic accuracy: ✅ Proper activation and trailing behavior confirmed
-- Parameter validation: ✅ Invalid combinations correctly filtered
-- Performance target: ✅ Sub-10-minute analysis for typical datasets
-- Baseline comparison: ✅ 100% accuracy in per-strategy best non-TLS identification
-- Exit reason compatibility: ✅ TP, SL, TLS, OOR, END maintained
+- TLS logic verification: ✅ 10 differentiated market scenarios tested successfully
+- Mathematical correctness: ✅ TLS 1/2 vs TLS 4/2 behavior properly differentiated
+- Performance optimization: ✅ Grey bar visualization improves rendering while maintaining clarity
+- User experience: ✅ Proper formatting and intuitive strategy comparison interface
 
-### **Phase 2: Strategy Overview Visualization** 🔲 **NEXT IMPLEMENTATION**
-**Target:** Strategy comparison interface with scatter plot and global top combinations table
-**Estimated Effort:** 1-2 sessions
+## 📋 Phase 3: 4D Grid Visualization - Detailed Implementation Plan
 
-### **Phase 3: 4D Grid Visualization** 🔲 **PLANNED**
-**Target:** Grid-based mini-heatmaps with shared color scaling and advanced filtering
+### **Goal:** Implement sophisticated grid-based mini-heatmaps with global color scaling and advanced filtering
+
+**Target Completion Time:** 2-3 sessions
+
+### **Prerequisites & Context Analysis**
+**Required Modules for Context:**
+- `simulations/tls_range_simulator.py` - TLS simulation results data
+- `reporting/visualizations/interactive/tls_strategy_charts.py` - Strategy overview navigation
+- `reporting/visualizations/interactive/range_test_charts.py` - Existing heatmap infrastructure
+- `reporting/html_report_generator.py` - Report integration pipeline
+- `reporting/templates/comprehensive_report.html` - HTML template structure
+- `reporting/config/portfolio_config.yaml` - TLS configuration with actual tested ranges
+
+### **Implementation Tasks**
+
+#### **Task 3.1: Dynamic TLS Range Detection**
+**File:** `simulations/tls_range_simulator.py`
+**Action:** Extract actual tested TLS ranges from simulation results
+
+```python
+def detect_tested_tls_ranges(tls_results_df):
+    """
+    Extract actual TLS ranges from simulation results to ensure grid matches data:
+    
+    Returns:
+    - tls_activation_range: Sorted unique values from simulation results
+    - tls_trail_range: Sorted unique values from simulation results
+    
+    Critical: Grid must display exactly what was tested, not config defaults
+    """
+    tls_activation_range = sorted(tls_results_df['tls_activation'].unique())
+    tls_trail_range = sorted(tls_results_df['tls_trail'].unique())
+    
+    return tls_activation_range, tls_trail_range
+```
+
+#### **Task 3.2: Global Color Scale Calculator**
+**File:** `reporting/visualizations/interactive/tls_4d_grid_charts.py` (NEW)
+**Action:** Create shared color scaling system for all mini-heatmaps
+
+```python
+def calculate_global_color_scale(tls_results_df):
+    """
+    Calculate global min/max PnL values across all TLS combinations:
+    
+    Critical Requirements:
+    - Single color scale used by ALL mini-heatmaps
+    - Ensures visual comparability between different TLS combinations
+    - Scale: Red (worst PnL) → Yellow (medium) → Green (best PnL)
+    
+    Returns:
+    - global_min_pnl: Minimum PnL across all combinations
+    - global_max_pnl: Maximum PnL across all combinations
+    - color_scale_config: Plotly colorscale configuration
+    """
+    global_min_pnl = tls_results_df['simulated_pnl'].min()
+    global_max_pnl = tls_results_df['simulated_pnl'].max()
+    
+    # Plotly colorscale with consistent red-yellow-green mapping
+    color_scale = [
+        [0.0, '#e74c3c'],    # Red for worst performance
+        [0.5, '#f39c12'],    # Yellow for medium performance  
+        [1.0, '#27ae60']     # Green for best performance
+    ]
+    
+    return global_min_pnl, global_max_pnl, color_scale
+```
+
+#### **Task 3.3: Mini-Heatmap Generation Engine**
+**File:** `reporting/visualizations/interactive/tls_4d_grid_charts.py`
+**Action:** Create individual TP×SL heatmaps for each TLS combination
+
+```python
+def create_mini_heatmap(tls_activation, tls_trail, tls_results_df, global_color_scale):
+    """
+    Generate individual TP×SL heatmap for specific TLS combination:
+    
+    Layout:
+    - X-axis: TP levels (from simulation data)
+    - Y-axis: SL levels (from simulation data)  
+    - Z-values: Average PnL for each TP×SL combination
+    - Color scale: Global scale (shared across all mini-heatmaps)
+    
+    Header Styling:
+    - Background color based on average performance of this TLS combination
+    - Title format: "TLS(activation%, trail%)"
+    - Performance indicator: Green (excellent), Yellow (good), Red (poor)
+    
+    Returns:
+    - plotly_heatmap: Mini-heatmap chart object
+    - avg_performance: Average PnL for header coloring
+    """
+    
+    # Filter data for this specific TLS combination
+    filtered_data = tls_results_df[
+        (tls_results_df['tls_activation'] == tls_activation) & 
+        (tls_results_df['tls_trail'] == tls_trail)
+    ]
+    
+    if filtered_data.empty:
+        return None, 0
+    
+    # Create TP×SL matrix
+    tp_levels = sorted(filtered_data['tp_level'].unique())
+    sl_levels = sorted(filtered_data['sl_level'].unique())
+    
+    # Build Z-matrix for heatmap
+    z_matrix = []
+    for sl in sl_levels:
+        row = []
+        for tp in tp_levels:
+            cell_data = filtered_data[
+                (filtered_data['tp_level'] == tp) & 
+                (filtered_data['sl_level'] == sl)
+            ]
+            avg_pnl = cell_data['simulated_pnl'].mean() if not cell_data.empty else None
+            row.append(avg_pnl)
+        z_matrix.append(row)
+    
+    # Calculate average performance for header coloring
+    avg_performance = filtered_data['simulated_pnl'].mean()
+    
+    # Create Plotly heatmap with global color scale
+    heatmap = go.Heatmap(
+        z=z_matrix,
+        x=tp_levels,
+        y=sl_levels,
+        colorscale=global_color_scale['scale'],
+        zmin=global_color_scale['min'],
+        zmax=global_color_scale['max'],
+        showscale=False,  # Only show scale once for entire grid
+        hoverongaps=False,
+        hovertemplate='TP: %{x}%<br>SL: %{y}%<br>PnL: %{z:.1f}%<extra></extra>'
+    )
+    
+    return heatmap, avg_performance
+```
+
+#### **Task 3.4: Grid Layout & Organization**
+**File:** `reporting/visualizations/interactive/tls_4d_grid_charts.py`
+**Action:** Organize mini-heatmaps in logical grid structure
+
+```python
+def create_4d_tls_grid(tls_results_df, strategy_filter=None):
+    """
+    Create complete 4D grid of mini-heatmaps:
+    
+    Grid Organization:
+    - Rows: TLS_activation levels (ascending order)
+    - Columns: TLS_trail levels (ascending order)
+    - Each cell: TP×SL mini-heatmap for that TLS combination
+    
+    Header Coloring Logic:
+    - Calculate average PnL for each TLS combination
+    - Apply color coding: >10% = Green, 5-10% = Yellow, <5% = Red
+    - Color intensity reflects relative performance within grid
+    
+    Features:
+    - Strategy filtering: Show only selected strategy if filter applied
+    - Global color scale: All mini-heatmaps use same scale for comparability
+    - Missing data handling: Empty cells for untested combinations
+    """
+    
+    # Apply strategy filter if specified
+    if strategy_filter:
+        filtered_df = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_filter]
+    else:
+        filtered_df = tls_results_df
+    
+    # Detect actual TLS ranges from data
+    tls_activation_range, tls_trail_range = detect_tested_tls_ranges(filtered_df)
+    
+    # Calculate global color scale
+    global_min, global_max, color_scale = calculate_global_color_scale(filtered_df)
+    global_color_config = {
+        'scale': color_scale,
+        'min': global_min,
+        'max': global_max
+    }
+    
+    # Generate grid of mini-heatmaps
+    grid_data = []
+    
+    for activation in tls_activation_range:
+        row_data = []
+        for trail in tls_trail_range:
+            heatmap, avg_performance = create_mini_heatmap(
+                activation, trail, filtered_df, global_color_config
+            )
+            
+            # Determine header color based on performance
+            if avg_performance > 10:
+                header_class = 'performance-excellent'
+            elif avg_performance > 5:
+                header_class = 'performance-good'
+            else:
+                header_class = 'performance-average'
+            
+            row_data.append({
+                'tls_activation': activation,
+                'tls_trail': trail,
+                'heatmap': heatmap,
+                'avg_performance': avg_performance,
+                'header_class': header_class,
+                'title': f'TLS({activation}%, {trail}%)'
+            })
+        
+        grid_data.append(row_data)
+    
+    return {
+        'grid_data': grid_data,
+        'global_color_config': global_color_config,
+        'tls_activation_range': tls_activation_range,
+        'tls_trail_range': tls_trail_range
+    }
+```
+
+#### **Task 3.5: Advanced Filtering System**
+**File:** `reporting/visualizations/interactive/tls_4d_grid_charts.py`
+**Action:** Implement sophisticated filtering with 0.25% granularity
+
+```python
+def create_grid_filter_controls():
+    """
+    Generate filtering interface for 4D grid:
+    
+    Filter Controls:
+    - Min Performance: Range slider (0-20%, step 0.25%)
+    - Strategy Filter: Dropdown with all available strategies + "All Strategies" option
+    - Min Win Rate: Range slider (30-95%, step 5%) 
+    - Show Only Improvements: Checkbox (TLS better than baseline)
+    
+    JavaScript Integration:
+    - Real-time filtering without page reload
+    - Visual feedback: Filtered cells fade out, active cells remain prominent
+    - Filter state preservation: Maintain filters when navigating from Phase 2
+    """
+    
+    filter_config = {
+        'min_performance': {
+            'type': 'range',
+            'min': 0,
+            'max': 20,
+            'step': 0.25,
+            'default': 0,
+            'label': 'Min Performance (%)'
+        },
+        'strategy_filter': {
+            'type': 'dropdown',
+            'options': ['All Strategies'] + get_available_strategies(),
+            'default': 'All Strategies',
+            'label': 'Strategy'
+        },
+        'min_win_rate': {
+            'type': 'range',
+            'min': 30,
+            'max': 95,
+            'step': 5,
+            'default': 30,
+            'label': 'Min Win Rate (%)'
+        },
+        'show_only_improvements': {
+            'type': 'checkbox',
+            'default': False,
+            'label': 'Show Only TLS Improvements'
+        }
+    }
+    
+    return filter_config
+
+def apply_grid_filters(grid_data, filters):
+    """
+    Apply active filters to grid display:
+    
+    Filtering Logic:
+    - Performance threshold: Hide cells below minimum
+    - Strategy filter: Show only selected strategy data
+    - Win rate filter: Hide cells with insufficient win rate
+    - Improvement filter: Show only cells where TLS > baseline
+    
+    Visual Effects:
+    - Filtered cells: opacity 0.3, pointer-events disabled
+    - Active cells: opacity 1.0, full interactivity
+    - Filter indicator: Show active filter count in UI
+    """
+    pass  # Implementation details for filtering logic
+```
+
+#### **Task 3.6: HTML Template Integration**
+**File:** `reporting/templates/comprehensive_report.html`
+**Action:** Add 4D grid section with filtering controls
+
+```html
+<!-- 4D TLS Grid Section (add to TLS analysis section) -->
+<div class="tls-4d-grid-section" id="tls-4d-grid-section">
+    <h3>🔢 4D TLS Parameter Grid Analysis</h3>
+    <div class="grid-description">
+        <p>Each mini-heatmap shows TP×SL performance for a specific TLS combination. 
+           All heatmaps use the same color scale for direct comparison.</p>
+    </div>
+    
+    <!-- Grid Filter Controls -->
+    <div class="grid-filter-controls">
+        <div class="filter-row">
+            <label>Min Performance:</label>
+            <input type="range" id="grid-min-performance" min="0" max="20" step="0.25" value="0">
+            <span id="grid-performance-value">0%</span>
+            
+            <label>Strategy:</label>
+            <select id="grid-strategy-filter">
+                <option value="all">All Strategies</option>
+                <!-- Strategy options populated dynamically -->
+            </select>
+            
+            <label>Min Win Rate:</label>
+            <input type="range" id="grid-min-winrate" min="30" max="95" step="5" value="30">
+            <span id="grid-winrate-value">30%</span>
+            
+            <label><input type="checkbox" id="grid-show-improvements"> Show Only TLS Improvements</label>
+        </div>
+    </div>
+    
+    <!-- TLS Grid Container -->
+    <div class="tls-grid-container">
+        <div class="grid-header">
+            <div class="grid-corner"></div>
+            <!-- TLS Trail headers -->
+            <div class="trail-headers" id="trail-headers">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+        
+        <div class="grid-body" id="tls-grid-body">
+            <!-- TLS Activation rows with mini-heatmaps -->
+            <!-- Populated dynamically -->
+        </div>
+    </div>
+    
+    <!-- Global Color Scale Legend -->
+    <div class="color-scale-legend">
+        <h4>Performance Scale (Global)</h4>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels">
+            <span class="legend-min">Worst</span>
+            <span class="legend-mid">Average</span>
+            <span class="legend-max">Best</span>
+        </div>
+    </div>
+</div>
+```
+
+#### **Task 3.7: JavaScript Interactive Controls**
+**File:** `reporting/templates/comprehensive_report.html` (JavaScript section)
+**Action:** Implement real-time filtering and grid interaction
+
+```javascript
+// 4D Grid Interactive Controls
+function initialize4DGrid() {
+    // Grid filter event listeners
+    document.getElementById('grid-min-performance').addEventListener('input', updateGridFilters);
+    document.getElementById('grid-strategy-filter').addEventListener('change', updateGridFilters);
+    document.getElementById('grid-min-winrate').addEventListener('input', updateGridFilters);
+    document.getElementById('grid-show-improvements').addEventListener('change', updateGridFilters);
+    
+    // Strategy filter integration from Phase 2
+    window.addEventListener('strategy-filter-changed', function(e) {
+        const strategySelect = document.getElementById('grid-strategy-filter');
+        strategySelect.value = e.detail.strategyId;
+        updateGridFilters();
+    });
+}
+
+function updateGridFilters() {
+    const filters = {
+        minPerformance: parseFloat(document.getElementById('grid-min-performance').value),
+        strategy: document.getElementById('grid-strategy-filter').value,
+        minWinRate: parseInt(document.getElementById('grid-min-winrate').value),
+        showOnlyImprovements: document.getElementById('grid-show-improvements').checked
+    };
+    
+    // Update filter value displays
+    document.getElementById('grid-performance-value').textContent = filters.minPerformance + '%';
+    document.getElementById('grid-winrate-value').textContent = filters.minWinRate + '%';
+    
+    // Apply filters to grid display
+    applyFiltersToGrid(filters);
+}
+
+function applyFiltersToGrid(filters) {
+    document.querySelectorAll('.mini-heatmap-cell').forEach(cell => {
+        const cellData = JSON.parse(cell.getAttribute('data-cell-info'));
+        
+        // Check all filter conditions
+        const passesFilters = (
+            cellData.avgPerformance >= filters.minPerformance &&
+            (filters.strategy === 'all' || cellData.strategy === filters.strategy) &&
+            cellData.winRate >= filters.minWinRate &&
+            (!filters.showOnlyImprovements || cellData.tlsAdvantage > 0)
+        );
+        
+        // Apply visual filtering
+        if (passesFilters) {
+            cell.style.opacity = '1.0';
+            cell.style.pointerEvents = 'auto';
+        } else {
+            cell.style.opacity = '0.3';
+            cell.style.pointerEvents = 'none';
+        }
+    });
+}
+```
+
+### **Validation & Testing Strategy**
+
+#### **Visual Validation Tests:**
+- Global color scale consistency across all mini-heatmaps
+- Grid organization matches actual TLS ranges tested
+- Header coloring accurately reflects average performance
+- Filtering provides smooth, responsive visual feedback
+
+#### **Data Integrity Tests:**
+- TP×SL matrix accuracy within each mini-heatmap
+- Color scale mapping corresponds to actual PnL values
+- Strategy filtering shows correct subset without data loss
+- Performance calculations match source simulation data
+
+#### **Interactive Function Tests:**
+```python
+# Test scenarios:
+test_global_color_scale_consistency()    # All heatmaps use same scale
+test_strategy_filter_integration()       # Phase 2 → Phase 3 navigation
+test_real_time_filtering_performance()   # <100ms response for filter changes
+test_missing_data_handling()             # Empty cells display appropriately
+test_grid_responsiveness()               # Layout adapts to different screen sizes
+test_hover_tooltip_accuracy()           # Tooltips show correct TP/SL/PnL data
+```
+
+### **Success Criteria:**
+- [ ] Grid layout clearly organizes TLS combinations with logical row/column structure
+- [ ] Global color scale enables meaningful comparison between all mini-heatmaps
+- [ ] Filtering system provides responsive, granular control (0.25% performance steps)
+- [ ] Strategy filtering integration works seamlessly with Phase 2 navigation
+- [ ] Visual identification of parameter "islands" possible through color patterns
+- [ ] Performance remains smooth with large datasets (>1000 TLS combinations)
+
+### **Risk Mitigation:**
+- **Performance Risk:** Optimize mini-heatmap rendering for large grids (lazy loading if needed)
+- **Usability Risk:** Ensure grid remains readable on 14" screens without excessive scrolling
+- **Color Scale Risk:** Validate global scale provides sufficient contrast across performance ranges
+- **Filter Risk:** Maintain filter state consistency during navigation between phases
+
+### **Deliverables:**
+1. Complete 4D grid visualization system with mini-heatmaps
+2. Global color scaling engine ensuring visual comparability
+3. Advanced filtering system with 0.25% granularity
+4. HTML template integration with responsive grid layout
+5. JavaScript interactive controls for real-time filtering
+6. Strategy filter integration with Phase 2 navigation
+
+---
+
+## 🚀 Phase 3 Implementation Prompt
+
+**Use this prompt when starting Phase 3 implementation:**
+
+```
+You are implementing Phase 3 of the 4D TP/SL/TLS Optimization Module for the SOL Decoder LP Strategy Optimization Project.
+
+CONTEXT FROM PHASES 1 & 2 SUCCESS:
+- Phase 1: Complete TLS simulation engine with verified mathematical logic
+- Phase 2: Strategy overview visualization with corrected TLS logic and interactive navigation
+- Available data: TLS simulation results with actual tested parameter ranges
+- Integration points: Strategy filtering from Phase 2 overview to Phase 3 grid
+
+PHASE 3 OBJECTIVE:
+Create sophisticated grid-based mini-heatmaps enabling visual identification of optimal parameter "islands" across 4D TLS space.
+
+CRITICAL REQUIREMENTS:
+1. Grid organization: Rows = TLS_activation levels, Columns = TLS_trail levels (from actual data)
+2. Mini-heatmaps: TP×SL performance for each TLS combination
+3. Global color scale: Single scale across ALL mini-heatmaps for comparability
+4. Header coloring: TLS combination performance indicator (Green/Yellow/Red)
+5. Advanced filtering: Min performance (0.25% steps), strategy, win rate, improvements only
+6. Phase 2 integration: Strategy clicks filter entire grid seamlessly
+
+REQUIRED MODULES FOR CONTEXT:
+- simulations/tls_range_simulator.py (TLS simulation data)
+- reporting/visualizations/interactive/tls_strategy_charts.py (Phase 2 charts)
+- reporting/visualizations/interactive/range_test_charts.py (existing heatmap infrastructure)
+- reporting/html_report_generator.py (report integration)
+- reporting/templates/comprehensive_report.html (template structure)
+
+IMPLEMENTATION TASKS:
+1. Create tls_4d_grid_charts.py with grid generation engine
+2. Implement global color scale calculation across all combinations
+3. Build mini-heatmap generation for each TLS combination
+4. Add advanced filtering system (performance 0.25% steps, strategy, win rate)
+5. Integrate with HTML template including responsive grid layout
+6. Connect Phase 2 strategy navigation to grid filtering
+
+KEY DESIGN SPECIFICATIONS:
+- Grid layout: Detect actual TLS ranges from simulation data (not config defaults)
+- Color scale: Red (worst) → Yellow (medium) → Green (best) applied globally
+- Header colors: Based on average performance of each TLS combination
+- Filtering: Real-time with visual feedback (opacity 0.3 for filtered cells)
+- Integration: Strategy filter from Phase 2 sets grid strategy filter
+
+VALIDATION TARGETS:
+- Visual consistency: All mini-heatmaps comparable through shared color scale
+- Performance identification: Clear visual "islands" of optimal parameters
+- Interactive responsiveness: <100ms filter response time
+- Data integrity: 100% accuracy between simulation data and grid display
+- Navigation flow: Seamless Phase 2 → Phase 3 strategy filtering
+
+USER REQUIREMENTS CONFIRMED:
+- Grid organization: Rows = TLS_activation, Columns = TLS_trail ✅
+- Color scale: Global only (no local scaling option) ✅  
+- Filtering: Min performance 0.25% + strategy + win rate ✅
+- Header styling: Performance-based coloring as in prototype ✅
+- Layout: Desktop-first for 14" screens as in prototype ✅
+- Integration: Strategy clicks filter entire grid ✅
+
+Start with Task 3.1 (Dynamic TLS Range Detection) and proceed systematically. Focus on global color scale consistency and visual identification of parameter optimization patterns.
+```
 
 ### **Phase 4: Grouped Ranking Table** 🔲 **PLANNED** 
 **Target:** 4D parameter grouping with expandable interface and TLS effectiveness metrics
