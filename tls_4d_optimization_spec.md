@@ -1645,8 +1645,534 @@ USER REQUIREMENTS CONFIRMED:
 Start with Task 3.1 (Dynamic TLS Range Detection) and proceed systematically. Focus on global color scale consistency and visual identification of parameter optimization patterns.
 ```
 
-### **Phase 4: Grouped Ranking Table** 🔲 **PLANNED** 
-**Target:** 4D parameter grouping with expandable interface and TLS effectiveness metrics
+### **Phase 4: Grouped Ranking Table** 🔲
+**Goal:** Implement sophisticated grouping and ranking system for 4D parameter combinations enabling efficient analysis of similar TLS configurations
+
+### **Prerequisites & Context Analysis**
+**Required Modules for Context:**
+- `simulations/tls_range_simulator.py` - Complete TLS simulation results data
+- `reporting/visualizations/interactive/tls_4d_grid_charts.py` - Phase 3 grid system for navigation integration
+- `reporting/visualizations/interactive/tls_strategy_charts.py` - Phase 2 strategy overview for comparison
+- `reporting/html_report_generator.py` - Report integration pipeline
+- `reporting/templates/comprehensive_report.html` - HTML template structure
+
+### **Implementation Tasks**
+
+#### **Task 4.1: 4D Parameter Similarity Algorithm**
+**File:** `reporting/visualizations/interactive/tls_grouped_ranking.py` (NEW)
+**Action:** Create Euclidean distance-based grouping system
+
+```python
+def calculate_4d_similarity(combination1, combination2, tolerance_config):
+    """
+    Calculate similarity between two 4D TLS combinations using Euclidean distance:
+    
+    Parameters compared:
+    - TP level (weighted by tolerance_config['tp_weight'])
+    - SL level (weighted by tolerance_config['sl_weight']) 
+    - TLS activation (weighted by tolerance_config['tls_activation_weight'])
+    - TLS trail (weighted by tolerance_config['tls_trail_weight'])
+    
+    Returns:
+    - similarity_score: Float (0-1, where 1 = identical, 0 = maximally different)
+    - is_similar: Boolean (True if within tolerance threshold)
+    
+    Business Logic:
+    - Combinations within tolerance considered "similar enough" for grouping
+    - Representative = highest performing member of each group
+    """
+    # Normalize parameters to 0-1 scale based on actual data ranges
+    tp_diff = abs(combination1['tp'] - combination2['tp']) / tolerance_config['tp_range']
+    sl_diff = abs(combination1['sl'] - combination2['sl']) / tolerance_config['sl_range'] 
+    tls_act_diff = abs(combination1['tls_activation'] - combination2['tls_activation']) / tolerance_config['tls_activation_range']
+    tls_trail_diff = abs(combination1['tls_trail'] - combination2['tls_trail']) / tolerance_config['tls_trail_range']
+    
+    # Weighted Euclidean distance
+    weighted_distance = math.sqrt(
+        (tp_diff * tolerance_config['tp_weight'])**2 + 
+        (sl_diff * tolerance_config['sl_weight'])**2 + 
+        (tls_act_diff * tolerance_config['tls_activation_weight'])**2 + 
+        (tls_trail_diff * tolerance_config['tls_trail_weight'])**2
+    )
+    
+    similarity_score = 1 - weighted_distance
+    is_similar = similarity_score >= tolerance_config['similarity_threshold']
+    
+    return similarity_score, is_similar
+```
+
+#### **Task 4.2: Smart Grouping Engine**
+**File:** `reporting/visualizations/interactive/tls_grouped_ranking.py`
+**Action:** Create intelligent clustering system for parameter combinations
+
+```python
+def group_similar_combinations(tls_results_df, tolerance_config):
+    """
+    Group similar 4D parameter combinations using clustering algorithm:
+    
+    Grouping Strategy:
+    1. Calculate pairwise similarities for all combinations
+    2. Use agglomerative clustering to form groups
+    3. Select highest-performing representative per group
+    4. Calculate group statistics (avg_pnl, consistency, size)
+    
+    Group Metrics:
+    - representative: Best performing combination in group
+    - avg_pnl: Average performance across all group members
+    - tls_effectiveness: % of group where TLS > baseline
+    - stability: Standard deviation of results within group
+    - group_size: Number of combinations in group
+    """
+    
+    # Get unique parameter combinations
+    unique_combinations = tls_results_df[['tp_level', 'sl_level', 'tls_activation', 'tls_trail']].drop_duplicates()
+    
+    # Calculate similarity matrix
+    similarity_matrix = np.zeros((len(unique_combinations), len(unique_combinations)))
+    
+    for i, combo1 in unique_combinations.iterrows():
+        for j, combo2 in unique_combinations.iterrows():
+            if i <= j:  # Only calculate upper triangle (symmetric matrix)
+                similarity, _ = calculate_4d_similarity(combo1, combo2, tolerance_config)
+                similarity_matrix[i][j] = similarity
+                similarity_matrix[j][i] = similarity
+    
+    # Perform clustering
+    from sklearn.cluster import AgglomerativeClustering
+    
+    # Convert similarity to distance (1 - similarity)
+    distance_matrix = 1 - similarity_matrix
+    
+    clustering = AgglomerativeClustering(
+        n_clusters=None, 
+        distance_threshold=1 - tolerance_config['similarity_threshold'],
+        metric='precomputed',
+        linkage='average'
+    )
+    
+    cluster_labels = clustering.fit_predict(distance_matrix)
+    
+    # Create group data structure
+    groups = {}
+    for idx, (_, combination) in enumerate(unique_combinations.iterrows()):
+        group_id = cluster_labels[idx]
+        
+        if group_id not in groups:
+            groups[group_id] = {
+                'combinations': [],
+                'results': []
+            }
+        
+        # Get all results for this combination
+        combo_results = tls_results_df[
+            (tls_results_df['tp_level'] == combination['tp_level']) &
+            (tls_results_df['sl_level'] == combination['sl_level']) &
+            (tls_results_df['tls_activation'] == combination['tls_activation']) &
+            (tls_results_df['tls_trail'] == combination['tls_trail'])
+        ]
+        
+        groups[group_id]['combinations'].append(combination)
+        groups[group_id]['results'].extend(combo_results.to_dict('records'))
+    
+    # Calculate group statistics
+    group_statistics = []
+    
+    for group_id, group_data in groups.items():
+        results = group_data['results']
+        
+        # Calculate metrics
+        pnl_values = [r['simulated_pnl'] for r in results]
+        avg_pnl = np.mean(pnl_values)
+        stability = np.std(pnl_values)
+        
+        # Find representative (best performing combination)
+        best_result = max(results, key=lambda x: x['simulated_pnl'])
+        
+        # Calculate TLS effectiveness
+        tls_effectiveness = calculate_tls_effectiveness_for_group(results, baseline_data)
+        
+        group_statistics.append({
+            'group_id': group_id,
+            'representative': {
+                'tp': best_result['tp_level'],
+                'sl': best_result['sl_level'], 
+                'tls_activation': best_result['tls_activation'],
+                'tls_trail': best_result['tls_trail'],
+                'pnl': best_result['simulated_pnl']
+            },
+            'avg_pnl': avg_pnl,
+            'stability': stability,
+            'tls_effectiveness': tls_effectiveness,
+            'group_size': len(group_data['combinations']),
+            'all_combinations': group_data['combinations'],
+            'all_results': results
+        })
+    
+    return group_statistics
+```
+
+#### **Task 4.3: TLS Effectiveness Calculator** 
+**File:** `reporting/visualizations/interactive/tls_grouped_ranking.py`
+**Action:** Calculate TLS benefit metrics for each group
+
+```python
+def calculate_tls_effectiveness_for_group(group_results, baseline_data):
+    """
+    Calculate TLS effectiveness metrics for a parameter group:
+    
+    TLS Effectiveness Metrics:
+    - improvement_rate: % of positions where TLS > baseline
+    - avg_improvement: Average % improvement when TLS helps
+    - risk_reduction: Average loss reduction when TLS prevents deeper losses
+    - consistency: How consistent TLS benefits are within group
+    
+    Returns:
+    - effectiveness_score: Composite score (0-100)
+    - detailed_metrics: Breakdown of all metrics
+    """
+    
+    improvements = []
+    
+    for result in group_results:
+        strategy_id = result['strategy_instance_id']
+        tls_pnl = result['simulated_pnl']
+        baseline_pnl = baseline_data.get(strategy_id, 0)
+        
+        if baseline_pnl > 0:
+            improvement_pct = ((tls_pnl - baseline_pnl) / baseline_pnl) * 100
+            improvements.append({
+                'improvement_pct': improvement_pct,
+                'tls_better': improvement_pct > 0,
+                'tls_pnl': tls_pnl,
+                'baseline_pnl': baseline_pnl
+            })
+    
+    if not improvements:
+        return {'effectiveness_score': 0, 'detailed_metrics': {}}
+    
+    # Calculate metrics
+    improvement_rate = sum(1 for imp in improvements if imp['tls_better']) / len(improvements) * 100
+    
+    positive_improvements = [imp['improvement_pct'] for imp in improvements if imp['tls_better']]
+    avg_improvement = np.mean(positive_improvements) if positive_improvements else 0
+    
+    # Risk reduction: average improvement for cases where both TLS and baseline are negative
+    risk_reductions = [imp['improvement_pct'] for imp in improvements 
+                      if imp['tls_pnl'] < 0 and imp['baseline_pnl'] < 0 and imp['tls_better']]
+    avg_risk_reduction = np.mean(risk_reductions) if risk_reductions else 0
+    
+    # Consistency: inverse of standard deviation
+    improvement_values = [imp['improvement_pct'] for imp in improvements]
+    consistency = max(0, 100 - np.std(improvement_values)) if len(improvement_values) > 1 else 100
+    
+    # Composite effectiveness score
+    effectiveness_score = (
+        improvement_rate * 0.4 +           # 40% weight on how often TLS helps
+        max(0, avg_improvement) * 0.3 +    # 30% weight on magnitude of improvement  
+        max(0, avg_risk_reduction) * 0.2 + # 20% weight on risk reduction
+        consistency * 0.1                  # 10% weight on consistency
+    )
+    
+    detailed_metrics = {
+        'improvement_rate': improvement_rate,
+        'avg_improvement': avg_improvement,
+        'avg_risk_reduction': avg_risk_reduction,
+        'consistency': consistency,
+        'sample_size': len(improvements)
+    }
+    
+    return {
+        'effectiveness_score': effectiveness_score,
+        'detailed_metrics': detailed_metrics
+    }
+```
+
+#### **Task 4.4: Expandable Group Table Interface**
+**File:** `reporting/visualizations/interactive/tls_grouped_ranking.py`
+**Action:** Create interactive table with expand/collapse functionality
+
+```python
+def create_grouped_ranking_table(group_statistics, sort_by='effectiveness_score'):
+    """
+    Create expandable table showing parameter groups:
+    
+    Table Structure:
+    - Collapsed view: Representative combination + group summary
+    - Expanded view: All combinations within group
+    - Sort options: Effectiveness, PnL, Group size, Stability
+    
+    Columns (Collapsed):
+    - Rank: Position in sorted list
+    - Representative: Best TP/SL/TLS_Act/TLS_Trail combination
+    - Group PnL: Average performance across group
+    - TLS Effectiveness: Composite effectiveness score
+    - Group Size: Number of similar combinations
+    - Expand Button: Toggle to show all group members
+    
+    Columns (Expanded):  
+    - All individual combinations with their specific metrics
+    - Color coding: Green (TLS better), Red (TLS worse), Gray (neutral)
+    - Baseline comparison for each combination
+    """
+    
+    # Sort groups by specified metric
+    sorted_groups = sorted(group_statistics, 
+                          key=lambda x: x[sort_by], 
+                          reverse=True)
+    
+    table_data = []
+    
+    for rank, group in enumerate(sorted_groups, 1):
+        # Representative row (always visible)
+        rep = group['representative']
+        table_data.append({
+            'row_type': 'representative',
+            'group_id': group['group_id'],
+            'rank': rank,
+            'tp': rep['tp'],
+            'sl': rep['sl'],
+            'tls_activation': rep['tls_activation'],
+            'tls_trail': rep['tls_trail'],
+            'representative_pnl': rep['pnl'],
+            'avg_group_pnl': group['avg_pnl'],
+            'effectiveness_score': group['tls_effectiveness']['effectiveness_score'],
+            'group_size': group['group_size'],
+            'stability': group['stability'],
+            'is_expandable': True,
+            'is_expanded': False
+        })
+        
+        # Individual combination rows (initially hidden)
+        for combo in group['all_combinations']:
+            # Get results for this specific combination
+            combo_results = [r for r in group['all_results'] 
+                           if (r['tp_level'] == combo['tp_level'] and
+                               r['sl_level'] == combo['sl_level'] and
+                               r['tls_activation'] == combo['tls_activation'] and
+                               r['tls_trail'] == combo['tls_trail'])]
+            
+            avg_combo_pnl = np.mean([r['simulated_pnl'] for r in combo_results])
+            
+            table_data.append({
+                'row_type': 'individual',
+                'group_id': group['group_id'],
+                'rank': f"{rank}.{len([r for r in table_data if r['group_id'] == group['group_id'] and r['row_type'] == 'individual']) + 1}",
+                'tp': combo['tp_level'],
+                'sl': combo['sl_level'],
+                'tls_activation': combo['tls_activation'],
+                'tls_trail': combo['tls_trail'],
+                'individual_pnl': avg_combo_pnl,
+                'baseline_comparison': 'Calculate based on baseline_data',
+                'is_expandable': False,
+                'is_expanded': False,
+                'initially_hidden': True
+            })
+    
+    return table_data
+```
+
+#### **Task 4.5: Interactive JavaScript Controls**
+**File:** `reporting/templates/comprehensive_report.html`
+**Action:** Add expand/collapse and sorting functionality
+
+```javascript
+// Grouped Ranking Table Interactive Controls
+function initializeGroupedRanking() {
+    // Expand/collapse functionality
+    document.querySelectorAll('.group-expand-button').forEach(button => {
+        button.addEventListener('click', function(e) {
+            const groupId = e.target.getAttribute('data-group-id');
+            const groupRows = document.querySelectorAll(`[data-group-id="${groupId}"][data-row-type="individual"]`);
+            const isExpanded = e.target.getAttribute('data-expanded') === 'true';
+            
+            if (isExpanded) {
+                // Collapse group
+                groupRows.forEach(row => row.style.display = 'none');
+                e.target.textContent = '+';
+                e.target.setAttribute('data-expanded', 'false');
+            } else {
+                // Expand group
+                groupRows.forEach(row => row.style.display = 'table-row');
+                e.target.textContent = '-';
+                e.target.setAttribute('data-expanded', 'true');
+            }
+        });
+    });
+    
+    // Sorting functionality
+    document.querySelectorAll('.sortable-header').forEach(header => {
+        header.addEventListener('click', function(e) {
+            const sortBy = e.target.getAttribute('data-sort-by');
+            const currentOrder = e.target.getAttribute('data-sort-order') || 'desc';
+            const newOrder = currentOrder === 'desc' ? 'asc' : 'desc';
+            
+            sortGroupedTable(sortBy, newOrder);
+            
+            // Update sort indicators
+            document.querySelectorAll('.sortable-header').forEach(h => {
+                h.classList.remove('sort-asc', 'sort-desc');
+            });
+            e.target.classList.add(`sort-${newOrder}`);
+            e.target.setAttribute('data-sort-order', newOrder);
+        });
+    });
+}
+
+function sortGroupedTable(sortBy, order) {
+    // Re-sort table data and re-render
+    // Implementation depends on data structure
+}
+
+function toggleAllGroups(expand) {
+    document.querySelectorAll('.group-expand-button').forEach(button => {
+        if ((expand && button.getAttribute('data-expanded') === 'false') ||
+            (!expand && button.getAttribute('data-expanded') === 'true')) {
+            button.click();
+        }
+    });
+}
+
+Prompt
+You are implementing Phase 4 of the 4D TP/SL/TLS Optimization Module for the SOL Decoder LP Strategy Optimization Project.
+
+CONTEXT FROM PHASES 1-3 SUCCESS:
+- Phase 1: Complete TLS simulation engine with verified mathematical logic (simulations/tls_range_simulator.py)
+- Phase 2: Strategy overview with corrected TLS logic and performance visualization (tls_strategy_charts.py)
+- Phase 3: 4D grid visualization with global color scaling and interactive filtering (tls_4d_grid_charts.py)
+- Outstanding Phase 3 enhancements requiring completion: Always-visible baseline, strategy filter fixes, win rate filtering, slider improvements
+
+PHASE 4 DUAL OBJECTIVE:
+1. Create sophisticated 4D parameter grouping with expandable ranking table interface
+2. Complete ALL pending Phase 3 enhancements for comprehensive user experience
+
+CRITICAL GROUPING REQUIREMENTS:
+
+**4D Grouping Algorithm Specifications:**
+- Combined tolerance calculation: |tp1-tp2| + |sl1-sl2| + |tls_act1-tls_act2| + |tls_trail1-tls_trail2| ≤ 4 points
+- Representative selection: Highest PnL combination becomes group representative
+- Group focus: Analyze best representative only, similar weaker combinations less important
+- Output limits: Top 20 groups ranked by representative PnL, max 10 similar combinations per group
+
+**Group Metrics Requirements:**
+- avg_pnl: Average percentage PnL across all group members
+- group_size: Total number of similar combinations in group
+- tls_effectiveness: (Representative_PnL - Strategy_Baseline_PnL) / Strategy_Baseline_PnL × 100
+- win_rate: Win rate percentage for representative combination
+- baseline_pnl: Best non-TLS performance for representative's strategy
+
+**Expandable Table Interface:**
+- Main table: 20 rows showing group representatives with expand (+) buttons
+- Sub-rows: Max 10 similar combinations per group, sorted by PnL descending
+- No additional interactivity: Focus on information display and group analysis
+- Color coding: Green for positive TLS effectiveness, red for negative
+
+MANDATORY PHASE 3 ENHANCEMENTS:
+
+**1. Always-Visible Baseline Information:**
+- Display "Current baseline to beat: X.XX%" permanently above grid controls
+- Update content dynamically based on selected strategy filter
+- Remove dependency on "Show Only TLS Improvements" checkbox for baseline visibility
+
+**2. Complete Strategy Filter Integration:**
+- Populate strategy dropdown from actual simulation data (not hardcoded)
+- Fix table-to-filter navigation from Phase 2 strategy overview
+- Ensure dropdown reflects current filter state accurately
+
+**3. Win Rate Filter Implementation:**
+- Calculate and add win rate data to all grid cell data attributes
+- Enable min win rate threshold filtering with visual feedback
+- Integrate win rate filtering with existing filter system
+
+**4. Min Performance Slider Enhancements:**
+- Add 0% marker prominently on slider scale
+- Add percentage indicators: 0%, 5%, 10%, 15%, 20% below slider
+- Improve visual orientation and user feedback
+
+REQUIRED MODULES FOR CONTEXT:
+- reporting/visualizations/interactive/tls_4d_grid_charts.py (Phase 3 grid infrastructure)
+- simulations/tls_range_simulator.py (TLS simulation data source)
+- simulations/baseline_comparator.py (baseline comparison system)
+- reporting/visualizations/interactive/tls_strategy_charts.py (Phase 2 navigation)
+- reporting/html_report_generator.py (report integration pipeline)
+- reporting/templates/comprehensive_report.html (HTML template structure)
+
+IMPLEMENTATION TASKS (Execute in Order):
+
+**Task 4.1: Create 4D Grouping Algorithm**
+- File: reporting/visualizations/interactive/tls_grouped_ranking.py (NEW)
+- Function: group_4d_combinations(tls_results_df, baseline_data, max_combined_distance=4)
+- Logic: Combined distance calculation, representative selection, group metrics computation
+
+**Task 4.2: Build Expandable Table Interface**
+- File: reporting/visualizations/interactive/tls_grouped_ranking.py
+- Function: create_grouped_ranking_table(grouped_data)
+- Output: HTML table with expandable rows, color-coded effectiveness, proper formatting
+
+**Task 4.3: Integrate Phase 3 Enhancements**
+- File: reporting/visualizations/interactive/tls_4d_grid_charts.py (MODIFY)
+- Enhancements: Always-visible baseline, strategy filter fixes, win rate implementation, slider improvements
+- Critical: Maintain backward compatibility with existing Phase 3 functionality
+
+**Task 4.4: Add JavaScript Interactive Controls**
+- File: reporting/templates/comprehensive_report.html (JavaScript section)
+- Functions: toggleGroup(), enhanced filtering logic, baseline display updates
+- Integration: Phase 3 enhancement JavaScript with Phase 4 expand/collapse
+
+**Task 4.5: HTML Template Integration**
+- File: reporting/templates/comprehensive_report.html
+- Additions: Grouped ranking section, enhanced Phase 3 controls, improved slider styling
+- Structure: Logical flow from Phase 2 → Phase 3 → Phase 4 sections
+
+**Task 4.6: Report Generation Integration**
+- File: reporting/html_report_generator.py (MODIFY)
+- Function: generate_tls_grouped_ranking_section()
+- Pipeline: Integrate grouping analysis into comprehensive report generation
+
+VALIDATION REQUIREMENTS:
+
+**Grouping Algorithm Validation:**
+- Combined distance calculation accuracy (test edge cases: isolated combinations, large groups)
+- Representative selection correctness (highest PnL identification)
+- Group size limits enforced (max 10 members, top 20 groups)
+- TLS effectiveness calculation accuracy (representative vs strategy baseline)
+
+**Phase 3 Enhancement Validation:**
+- Always-visible baseline displays correctly and updates with strategy selection
+- Strategy dropdown populates from actual data and navigation works from Phase 2
+- Win rate filtering functional with proper data integration and visual feedback
+- Min Performance slider enhanced with scale markers and 0% indicator
+
+**User Experience Validation:**
+- Expand/collapse functionality smooth and intuitive
+- Table performance acceptable with 20 groups × 10 members potential expansion
+- All Phase 3 enhancements working without breaking existing functionality
+- Visual hierarchy clear for identifying best representatives vs similar combinations
+
+KEY SUCCESS METRICS:
+- Grouping effectiveness: Similar combinations properly clustered with 4-point tolerance
+- Representative focus: Best combination clearly highlighted per group with actionable metrics
+- Phase 3 completion: All outstanding enhancements fully operational
+- Data integrity: 100% accuracy in baseline comparisons and TLS effectiveness calculations
+- User workflow: Seamless progression from strategy overview → grid analysis → grouped ranking
+
+TECHNICAL SPECIFICATIONS:
+- Data pipeline: Use strategy_instances_data for percentage calculations throughout
+- Baseline integration: Leverage existing baseline_comparator.py for strategy baselines
+- Performance: Optimize for datasets with 1000+ TLS combinations and 50+ strategies
+- Code quality: Follow established patterns and maintain module organization consistency
+
+USER REQUIREMENTS CONFIRMED:
+- Combined tolerance grouping (4 points max difference) ✅
+- Highest PnL representative selection ✅
+- Specific group metrics: avg_pnl, group_size, tls_effectiveness, win_rate, baseline_pnl ✅
+- TLS effectiveness = Representative vs strategy baseline comparison ✅
+- Display limits: 20 groups, 10 members, PnL sorting ✅
+- No additional interactivity beyond expand/collapse ✅
+- Phase 3 enhancements integration mandatory ✅
+- Focus on best representatives, similar weaker combinations less important ✅
+
+Begin with Task 4.1 (4D Grouping Algorithm) and proceed systematically through all tasks. Prioritize creating meaningful group clusters that highlight optimization opportunities while completing all Phase 3 enhancement integration for comprehensive user experience.
+
 
 ### **Phase 5: Integration & Reporting** 🔲 **PLANNED**
 **Target:** Executive summary generation and final system integration

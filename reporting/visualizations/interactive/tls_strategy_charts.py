@@ -45,7 +45,7 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
     
     try:
         # Sort strategies by date (newest first)
-        strategies = sort_strategies_by_date_descending(tls_results_df['strategy_instance_id'].unique().tolist())
+        strategies = sort_strategies_by_date_descending([str(x) for x in tls_results_df['strategy_instance_id'].unique()])
         
         if not strategies:
             return "<p>No strategies found in TLS data</p>"
@@ -435,7 +435,7 @@ def create_strategy_performance_summary(tls_results_df: pd.DataFrame, baseline_d
         table_rows = []
         
         # Sort strategies by date (newest first) for consistent ordering
-        strategies = sort_strategies_by_date_descending(tls_results_df['strategy_instance_id'].unique().tolist())
+        strategies = sort_strategies_by_date_descending([str(x) for x in tls_results_df['strategy_instance_id'].unique()])
         
         # Load strategy instances data for total_invested values
         import pandas as pd

@@ -17,6 +17,8 @@ from typing import Dict, Any, Optional, List
 import plotly.offline as pyo
 from jinja2 import Environment, FileSystemLoader
 import pandas as pd
+import numpy as np
+import concurrent.futures
 
 from .visualizations import interactive as interactive_charts
 from .visualizations.interactive import range_test_charts
@@ -161,6 +163,10 @@ class HTMLReportGenerator:
                     grid_charts = self._generate_tls_4d_grid_charts(detailed_results)
                     charts.update(grid_charts)
                     
+                    # Phase 4: Grouped Ranking
+                    grouped_charts = self._generate_tls_grouped_ranking_charts(detailed_results, baseline_data)
+                    charts.update(grouped_charts)
+                    
                 logger.info("Generated TLS analysis charts (Phase 1, 2 & 3)")
             except Exception as e:
                 logger.warning(f"Could not generate TLS charts: {e}")
@@ -243,12 +249,26 @@ class HTMLReportGenerator:
                     }
             
             # Prepare TLS 4D grid data for template
+            # AIDEV-FIX-GEMINI: Prepare data for JS, ensuring the 'all strategies' grid is stored separately
             if charts.get('tls_4d_grid_data'):
+                strategy_grids = charts.get('tls_strategy_grids', {})
+                # Store the main grid under a special key for JS to easily access
+                strategy_grids['__all_strategies__'] = charts['tls_4d_grid_data']
+                
                 tls_4d_data = {
-                    'grid_data': charts['tls_4d_grid_data'],
-                    'filter_config': charts.get('tls_grid_filter_config', {}),
-                    'available_strategies': charts.get('tls_available_strategies', [])
+                    'grid_data': charts['tls_4d_grid_data'], # Main grid for initial render
+                    'available_strategies': charts.get('tls_available_strategies', []),
+                    'strategy_grids': strategy_grids # Contains all individual grids + the main one
                 }
+        
+        # Prepare TLS grouped ranking data for template
+        tls_grouped_data = None
+        if tls_analysis and tls_analysis.get('status') == 'SUCCESS' and charts.get('tls_grouped_table'):
+            tls_grouped_data = {
+                'table_html': charts['tls_grouped_table'],
+                'summary': charts.get('tls_grouped_summary', {}),
+                'grouped_combinations': True  # Flag to show section
+            }
 
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -259,6 +279,7 @@ class HTMLReportGenerator:
             'tls_analysis': tls_analysis,  # Add TLS analysis data
             'tls_summary': tls_summary,    # Add processed TLS summary
             'tls_4d_data': tls_4d_data,    # Add TLS 4D grid data
+            'tls_grouped_data': tls_grouped_data,  # Add TLS grouped ranking data
             'best_sim_strategy': best_sim_strategy,
             'charts': charts,
             'config': self.config,
@@ -469,65 +490,87 @@ class HTMLReportGenerator:
             logger.error(f"Failed to generate TLS strategy overview charts: {e}")
             return {}
     
-    def _generate_tls_4d_grid_charts(self, detailed_results) -> Dict[str, Any]:
-        """Generate Phase 3 TLS 4D grid visualization components."""
+    def _generate_tls_4d_grid_charts(self, tls_detailed_results: pd.DataFrame) -> Dict[str, Any]:
+        """
+        AIDEV-FIX-CLAUDE: Create complete 4D grid, now with parallel processing for performance.
+        
+        - Generates grid data for "All Strategies".
+        - Generates grid data for EACH individual strategy in parallel using ProcessPoolExecutor.
+        - Passes all generated grids to the template for dynamic JS switching.
+        """
         try:
             from reporting.visualizations.interactive.tls_4d_grid_charts import (
                 create_4d_tls_grid,
-                create_grid_filter_controls
+                get_strategy_list_for_dropdown,
+                calculate_global_color_scale
+            )
+        except ImportError as e:
+            logger.error(f"DIAGNOSTYKA: KRYTYCZNY BŁĄD importu z tls_4d_grid_charts: {e}")
+            return {}
+
+        try:
+            strategy_instances_df = pd.read_csv("strategy_instances.csv") if os.path.exists("strategy_instances.csv") else None
+            baseline_data = None
+            if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')['total_pnl'].idxmax()]
+                baseline_data = optimal_df.set_index('strategy_instance_id')['total_pnl'].to_dict()
+
+            # 1. AIDEV-FIX-CLAUDE: Calculate a single, global, diverging color scale for ALL charts.
+            logger.info("Calculating global diverging color scale for all TLS data...")
+            global_color_config = calculate_global_color_scale(
+                tls_detailed_results, 
+                strategy_instances_df
             )
             
-            # Convert detailed_results to DataFrame if needed
-            if hasattr(detailed_results, 'empty'):
-                tls_df = detailed_results
-            elif isinstance(detailed_results, list):
-                tls_df = pd.DataFrame(detailed_results)
-            else:
-                logger.warning("Unexpected detailed_results format for TLS 4D grid")
-                return {}
+            # 2. Generate the main "All Strategies" grid.
+            logger.info("Generating grid for 'All Strategies' view...")
+            all_strategies_grid_data = create_4d_tls_grid(
+                tls_detailed_results,
+                strategy_filter=None,
+                strategy_instances_df=strategy_instances_df,
+                baseline_data=baseline_data,
+                include_win_rate_data=True,
+                global_color_config_override=global_color_config
+            )
             
-            if tls_df.empty:
-                logger.warning("No TLS detailed results available for 4D grid")
-                return {}
+            # 3. AIDEV-FIX-CLAUDE: Generate grids for each strategy in parallel.
+            strategy_grids = {}
+            available_strategies = get_strategy_list_for_dropdown(tls_detailed_results)
+            logger.info(f"Generating individual grids for {len(available_strategies)} strategies in parallel...")
             
-            # Load strategy instances data for percentage calculations
-            strategy_instances_df = None
-            try:
-                import os
-                if os.path.exists("strategy_instances.csv"):
-                    strategy_instances_df = pd.read_csv("strategy_instances.csv")
-            except Exception as e:
-                logger.warning(f"Could not load strategy instances data: {e}")
-            
-            # Load baseline data for TLS improvement calculations
-            baseline_data = {}
-            try:
-                import os
-                if os.path.exists("reporting/output/range_test_aggregated.csv"):
-                    agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
-                    # Find best combination for each strategy based on total_pnl
-                    optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')['total_pnl'].idxmax()]
-                    baseline_data = optimal_df.set_index('strategy_instance_id')['total_pnl'].to_dict()
-            except Exception as e:
-                logger.warning(f"Could not load baseline data: {e}")
-            
-            # Generate 4D grid (no strategy filter for full grid)
-            grid_data = create_4d_tls_grid(tls_df, strategy_instances_df=strategy_instances_df, baseline_data=baseline_data)
-            
-            # Generate filter controls configuration
-            filter_config = create_grid_filter_controls()
-            
-            # Get available strategies for filter dropdown
-            available_strategies = sorted(tls_df['strategy_instance_id'].unique())
+            # Using ProcessPoolExecutor for CPU-bound tasks (Pandas operations)
+            with concurrent.futures.ProcessPoolExecutor() as executor:
+                # Map strategies to future jobs
+                future_to_strategy = {
+                    executor.submit(
+                        create_4d_tls_grid,
+                        tls_detailed_results,
+                        strategy_id, # Pass strategy_id as the filter
+                        strategy_instances_df,
+                        baseline_data,
+                        True,
+                        global_color_config # Pass the SAME global config to all processes
+                    ): strategy_id for strategy_id in available_strategies
+                }
+                
+                for future in concurrent.futures.as_completed(future_to_strategy):
+                    strategy_id = future_to_strategy[future]
+                    try:
+                        strategy_grids[strategy_id] = future.result()
+                    except Exception as exc:
+                        logger.error(f"Generating grid for strategy {strategy_id} failed: {exc}")
+
+            logger.info("Successfully finished generating all TLS 4D grid visualizations.")
             
             return {
-                'tls_4d_grid_data': grid_data,
-                'tls_grid_filter_config': filter_config,
-                'tls_available_strategies': available_strategies
+                'tls_4d_grid_data': all_strategies_grid_data,
+                'tls_available_strategies': available_strategies,
+                'tls_strategy_grids': strategy_grids  # This contains grids for EACH strategy
             }
             
         except Exception as e:
-            logger.error(f"Failed to generate TLS 4D grid charts: {e}")
+            logger.error(f"Failed to generate TLS 4D grid charts: {e}", exc_info=True)
             return {}
     
     def _create_tls_effectiveness_chart(self, tls_analysis: Dict[str, Any]) -> str:
@@ -589,3 +632,56 @@ class HTMLReportGenerator:
         except Exception as e:
             logger.error(f"Failed to create TLS effectiveness chart: {e}")
             return f"<p>Error generating TLS effectiveness chart: {e}</p>"
+    
+    def _generate_tls_grouped_ranking_charts(self, tls_detailed_results: pd.DataFrame, baseline_data: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Generate TLS grouped ranking visualizations for Phase 4.
+        
+        Args:
+            tls_detailed_results: DataFrame with TLS simulation results
+            baseline_data: Dictionary mapping strategy_id -> best_non_tls_pnl
+            
+        Returns:
+            Dictionary with grouped ranking charts and data
+        """
+        try:
+            from reporting.visualizations.interactive.tls_grouped_ranking import (
+                group_4d_combinations,
+                create_grouped_ranking_table,
+                create_group_summary_statistics
+            )
+            
+            # Load strategy instances data for percentage calculations
+            strategy_instances_df = None
+            if os.path.exists("strategy_instances.csv"):
+                strategy_instances_df = pd.read_csv("strategy_instances.csv")
+            
+            # Generate 4D groupings
+            grouped_combinations = group_4d_combinations(
+                tls_detailed_results, 
+                baseline_data, 
+                strategy_instances_df=strategy_instances_df,
+                max_combined_distance=4.0
+            )
+            
+            if not grouped_combinations:
+                logger.warning("No TLS grouped combinations generated")
+                return {}
+            
+            # Create grouped ranking table
+            grouped_table_html = create_grouped_ranking_table(grouped_combinations)
+            
+            # Generate summary statistics
+            grouped_summary = create_group_summary_statistics(grouped_combinations)
+            
+            logger.info(f"Generated TLS grouped ranking with {len(grouped_combinations)} groups")
+            
+            return {
+                'tls_grouped_table': grouped_table_html,
+                'tls_grouped_summary': grouped_summary,
+                'tls_grouped_combinations': grouped_combinations
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to generate TLS grouped ranking charts: {e}")
+            return {}
