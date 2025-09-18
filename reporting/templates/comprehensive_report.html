@@ -468,13 +468,13 @@
                             <p class="label">{{ "%.1f"|format(charts.tls_performance_summary._overall.improvement_rate) }}% improvement rate</p>
                         </div>
                         <div class="metric-card">
-                            <h3>Average TLS Advantage</h3>
-                            <p class="value {% if charts.tls_performance_summary._overall.avg_tls_advantage > 0 %}positive{% else %}negative{% endif %}">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.avg_tls_advantage) }}%</p>
-                            <p class="label">When TLS outperforms baseline</p>
+                            <h3>Average TSL Advantage</h3>
+                            <p class="value {% if charts.tls_performance_summary._overall.avg_tsl_advantage > 0 %}positive{% else %}negative{% endif %}">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.avg_tsl_advantage) }}%</p>
+                            <p class="label">Comparing best stable setups</p>
                         </div>
                         <div class="metric-card">
-                            <h3>Best TLS Advantage</h3>
-                            <p class="value positive">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.best_tls_advantage) }}%</p>
+                            <h3>Best TSL Advantage</h3>
+                            <p class="value positive">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.best_tsl_advantage) }}%</p>
                             <p class="label">Maximum improvement achieved</p>
                         </div>
                     </div>
@@ -484,6 +484,18 @@
                 <!-- Strategy Performance Details Table -->
                 {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_table_html') %}
                 <div class="strategy-performance-details" style="margin-top: 30px;">
+                    
+                    <!-- AIDEV-FINAL-CLAUDE: Explanation for the detailed table -->
+                    <div class="table-explanation" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9em; border-left: 4px solid #3498db;">
+                        <h5 style="margin-top: 0;">🔍 How to Read This Table:</h5>
+                        <ul>
+                            <li><strong>Best (%)</strong>: Shows the result of the single, most profitable position (potential peak performance).</li>
+                            <li><strong>Best Avg (%)</strong>: Shows the average result from the most consistently profitable parameter combination (stable performance). This value corresponds to the best result seen on the heatmaps.</li>
+                            <li><strong>Avg TSL Advantage</strong>: Compares the <strong>Best Avg TSL</strong> to the <strong>Best Avg Baseline</strong> to measure the real, repeatable benefit of using TSL.</li>
+                            <li><strong>Note on Parameters</strong>: The optimal TP/SL for the Baseline may differ from the TP/SL shown in the optimal TSL parameter set. This table finds the best overall combination for TSL.</li>
+                        </ul>
+                    </div>
+                    
                     {{ charts.tls_performance_summary._table_html | safe }}
                 </div>
                 {% endif %}

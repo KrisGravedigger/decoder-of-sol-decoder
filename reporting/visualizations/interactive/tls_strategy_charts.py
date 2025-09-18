@@ -12,6 +12,7 @@ from typing import Dict, Any, List
 import numpy as np
 from utils.common import sort_strategies_by_date_descending
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -411,180 +412,168 @@ def create_global_top_combinations_table(tls_results_df: pd.DataFrame, baseline_
 
 def create_strategy_performance_summary(tls_results_df: pd.DataFrame, baseline_data: Dict[str, float]) -> Dict[str, Any]:
     """
-    Generate strategy-level performance insights.
-    
-    Metrics per strategy:
-    - Best TLS Performance: Highest PnL with TLS enabled
-    - Best Baseline Performance: Best TP/SL performance as percentage of total invested
-    - TLS Advantage: Percentage improvement of best TLS vs baseline
-    - Optimization Potential: Range between worst and best TLS results
-    - Parameter Sensitivity: Standard deviation of TLS results
-    
-    Args:
-        tls_results_df: DataFrame with TLS simulation results
-        baseline_data: Dictionary mapping strategy_id -> best_non_tls_pnl
-        
-    Returns:
-        Dictionary with summary statistics and HTML table for HTML template
+    AIDEV-ULTIMATE-FIX-CLAUDE: Final, robust, and consistent strategy performance summary.
+    - Guarantees that "Best Baseline" >= "Best Avg Baseline" by deriving them from the same data subset.
+    - All other features (naming, position counts) are preserved.
     """
     if tls_results_df.empty:
         return {}
     
     try:
-        summary_stats = {}
         table_rows = []
-        
-        # Sort strategies by date (newest first) for consistent ordering
         strategies = sort_strategies_by_date_descending([str(x) for x in tls_results_df['strategy_instance_id'].unique()])
-        
-        # Load strategy instances data for total_invested values
-        import pandas as pd
-        import os
-        strategy_instances_df = None
-        if os.path.exists("strategy_instances.csv"):
-            strategy_instances_df = pd.read_csv("strategy_instances.csv")
-        
-        # Load optimal TP/SL data for correct baseline calculation
-        optimal_tp_sl_data = {}
-        if os.path.exists("reporting/output/range_test_aggregated.csv"):
-            agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
-            # Find best combination for each strategy based on total_pnl
-            optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')['total_pnl'].idxmax()]
-            optimal_tp_sl_data = optimal_df.set_index('strategy_instance_id')['total_pnl'].to_dict()
-        
+
+        # --- Data Loading (One time, for efficiency) ---
+        strategy_instances_df = pd.read_csv("strategy_instances.csv") if os.path.exists("strategy_instances.csv") else pd.DataFrame()
+        detailed_baseline_df = pd.read_csv("reporting/output/range_test_detailed_results.csv") if os.path.exists("reporting/output/range_test_detailed_results.csv") else pd.DataFrame()
+
+        # --- Main Loop per Strategy ---
         for strategy_id in strategies:
-            strategy_data = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_id]
-            baseline_pnl = baseline_data.get(strategy_id, 0.0)
-            
-            if strategy_data.empty:
+            strategy_data_tsl = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_id]
+            if strategy_data_tsl.empty:
                 continue
-            
-            # Get total_invested for this strategy for correct baseline percentage calculation
-            total_invested = 1.0  # Default fallback
-            if strategy_instances_df is not None:
+
+            # Get total_invested and position count for this strategy
+            total_invested = 1.0
+            position_count = len(strategy_data_tsl['position_id'].unique())
+            if not strategy_instances_df.empty:
                 strategy_row = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
                 if not strategy_row.empty:
                     total_invested = strategy_row.iloc[0]['total_invested']
+                    position_count = strategy_row.iloc[0].get('analyzed_position_count', position_count)
+
+            # --- TSL Calculations (Logic is correct) ---
+            best_tsl_pnl_single_pos = strategy_data_tsl['simulated_pnl'].max()
+            avg_pnl_per_combo_tsl = strategy_data_tsl.groupby(['tp_level', 'sl_level', 'tls_activation', 'tls_trail'])['simulated_pnl'].mean()
+            best_avg_tsl_pnl = avg_pnl_per_combo_tsl.max() if not avg_pnl_per_combo_tsl.empty else 0.0
+            best_combo_params_tsl = avg_pnl_per_combo_tsl.idxmax() if not avg_pnl_per_combo_tsl.empty else (0,0,0,0)
             
-            best_tls_pnl = strategy_data['simulated_pnl'].max()
-            worst_tls_pnl = strategy_data['simulated_pnl'].min()
-            avg_tls_pnl = strategy_data['simulated_pnl'].mean()
-            std_tls_pnl = strategy_data['simulated_pnl'].std()
-            
-            # Calculate correct baseline PnL percentage: (best_tp_sl_pnl / total_invested) * 100
-            optimal_tp_sl_pnl = optimal_tp_sl_data.get(strategy_id, baseline_pnl)
-            baseline_pnl_pct = (optimal_tp_sl_pnl / total_invested * 100) if total_invested > 0 else 0.0
-            
-            # Convert to percentage using total_invested as denominator for consistency
+            # --- Baseline Calculations (NEW, ROBUST LOGIC) ---
+            best_avg_baseline_pnl, best_baseline_pnl_single_pos = 0.0, 0.0
+            if not detailed_baseline_df.empty:
+                strategy_baseline_details = detailed_baseline_df[detailed_baseline_df['strategy_instance_id'] == strategy_id]
+                if not strategy_baseline_details.empty:
+                    # 1. Group all baseline positions by TP/SL and find the mean PnL for each group.
+                    avg_pnl_per_combo_baseline = strategy_baseline_details.groupby(['tp_level', 'sl_level'])['simulated_pnl'].mean()
+                    
+                    if not avg_pnl_per_combo_baseline.empty:
+                        # 2. Find the best AVERAGE PnL and the TP/SL parameters that produced it.
+                        best_avg_baseline_pnl = avg_pnl_per_combo_baseline.max()
+                        optimal_tp, optimal_sl = avg_pnl_per_combo_baseline.idxmax()
+
+                        # 3. Filter the detailed data to get ONLY the positions from that best-performing group.
+                        positions_in_best_avg_group = strategy_baseline_details[
+                            (strategy_baseline_details['tp_level'] == optimal_tp) &
+                            (strategy_baseline_details['sl_level'] == optimal_sl)
+                        ]
+                        
+                        # 4. Find the maximum PnL within that specific group. This guarantees Best >= Best Avg.
+                        if not positions_in_best_avg_group.empty:
+                            best_baseline_pnl_single_pos = positions_in_best_avg_group['simulated_pnl'].max()
+                        else: # Should not happen, but as a fallback
+                            best_baseline_pnl_single_pos = best_avg_baseline_pnl
+
+            # --- Percentage Conversions ---
             if total_invested > 0:
-                best_tls_pnl_pct = (best_tls_pnl / total_invested) * 100
-                avg_tls_pnl_pct = (avg_tls_pnl / total_invested) * 100
-                optimization_potential_pct = ((best_tls_pnl - worst_tls_pnl) / total_invested) * 100
+                best_tsl_pct = (best_tsl_pnl_single_pos / total_invested) * 100
+                best_avg_tsl_pct = (best_avg_tsl_pnl / total_invested) * 100
+                best_baseline_pct = (best_baseline_pnl_single_pos / total_invested) * 100
+                best_avg_baseline_pct = (best_avg_baseline_pnl / total_invested) * 100
             else:
-                # Fallback: treat values as percentage-like
-                best_tls_pnl_pct = best_tls_pnl * 100
-                avg_tls_pnl_pct = avg_tls_pnl * 100
-                optimization_potential_pct = (best_tls_pnl - worst_tls_pnl) * 100
-            
-            # Calculate TLS Advantage using the PERCENTAGE values (not raw values)
-            # Formula: ((Best_TLS_PnL% - Baseline_PnL%) / Baseline_PnL%) * 100
-            if baseline_pnl_pct != 0:
-                tls_advantage = ((best_tls_pnl_pct - baseline_pnl_pct) / abs(baseline_pnl_pct)) * 100
+                best_tsl_pct, best_avg_tsl_pct, best_baseline_pct, best_avg_baseline_pct = 0, 0, 0, 0
+
+            # --- Final Calculations ---
+            if abs(best_avg_baseline_pct) > 1e-6:
+                avg_tsl_advantage = ((best_avg_tsl_pct - best_avg_baseline_pct) / abs(best_avg_baseline_pct)) * 100
             else:
-                tls_advantage = 0.0
+                avg_tsl_advantage = best_avg_tsl_pct
             
-            optimization_potential = best_tls_pnl - worst_tls_pnl
-            
-            summary_stats[strategy_id] = {
-                'best_tls_pnl': best_tls_pnl,
-                'baseline_pnl': baseline_pnl,
-                'tls_advantage': tls_advantage,
-                'optimization_potential': optimization_potential,
-                'parameter_sensitivity': std_tls_pnl,
-                'avg_performance': avg_tls_pnl,
-                'total_combinations': len(strategy_data)
-            }
-            
-            # Add row for HTML table
+            params_str = f"TP:{best_combo_params_tsl[0]} SL:{best_combo_params_tsl[1]}<br>Act:{best_combo_params_tsl[2]} Trl:{best_combo_params_tsl[3]}"
+
             table_rows.append({
                 'strategy_id': strategy_id,
-                'best_tls_pnl_pct': best_tls_pnl_pct,
-                'baseline_pnl_pct': baseline_pnl_pct,
-                'tls_advantage': tls_advantage,
-                'avg_performance_pct': avg_tls_pnl_pct,
-                'optimization_potential_pct': optimization_potential_pct,
-                'total_combinations': len(strategy_data)
+                'position_count': position_count,
+                'best_tsl_pct': best_tsl_pct,
+                'best_avg_tsl_pct': best_avg_tsl_pct,
+                'best_baseline_pct': best_baseline_pct,
+                'best_avg_baseline_pct': best_avg_baseline_pct,
+                'avg_tsl_advantage': avg_tsl_advantage,
+                'optimal_parameters': params_str
             })
         
-        # Calculate overall summary metrics
-        if summary_stats:
-            strategies_improved = len([s for s in summary_stats.values() if s['tls_advantage'] > 0])
-            total_strategies = len(summary_stats)
+        # --- Overall Summary ---
+        summary_stats = {}
+        if table_rows:
+            strategies_improved = len([r for r in table_rows if r['avg_tsl_advantage'] > 0])
+            total_strategies = len(table_rows)
             improvement_rate = (strategies_improved / total_strategies * 100) if total_strategies > 0 else 0
-            
-            avg_advantage = np.mean([s['tls_advantage'] for s in summary_stats.values()])
-            best_advantage = max([s['tls_advantage'] for s in summary_stats.values()])
-            
+            advantages = [r['avg_tsl_advantage'] for r in table_rows]
             summary_stats['_overall'] = {
                 'total_strategies': total_strategies,
                 'strategies_improved': strategies_improved,
                 'improvement_rate': improvement_rate,
-                'avg_tls_advantage': avg_advantage,
-                'best_tls_advantage': best_advantage
+                'avg_tsl_advantage': np.mean(advantages) if advantages else 0,
+                'best_tsl_advantage': max(advantages) if advantages else 0
             }
-        
-        # Generate HTML table for per-strategy details
+
+        # --- Generate Final HTML Table ---
         table_html = """
         <div class="strategy-performance-table" style="margin-top: 20px;">
             <h4>📋 Strategy Performance Details</h4>
+            <div class="table-explanation" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9em; border-left: 4px solid #3498db;">
+                <h5 style="margin-top: 0;">🔍 How to Read This Table:</h5>
+                <ul>
+                    <li><strong>Best (%)</strong>: Shows the result of the single, most profitable position (potential peak performance).</li>
+                    <li><strong>Best Avg (%)</strong>: Shows the average result from the most consistently profitable parameter combination (stable performance). This value corresponds to the best result seen on the heatmaps.</li>
+                    <li><strong>Avg TSL Advantage</strong>: Compares the <strong>Best Avg TSL</strong> to the <strong>Best Avg Baseline</strong> to measure the real, repeatable benefit of using TSL.</li>
+                    <li><strong>Note on Parameters</strong>: The optimal TP/SL for the Baseline may differ from the TP/SL shown in the optimal TSL parameter set. This table finds the best overall combination for TSL.</li>
+                </ul>
+            </div>
             <table class="table table-striped table-hover" id="strategy_performance_detail_table">
                 <thead>
                     <tr>
-                        <th>Strategy</th>
-                        <th>Best TLS (%)</th>
-                        <th>Baseline (%)</th>
-                        <th>TLS Advantage</th>
-                        <th>Avg Performance (%)</th>
-                        <th>Optimization Range (%)</th>
-                        <th>Combinations Tested</th>
+                        <th rowspan="2">Strategy</th>
+                        <th colspan="2" style="text-align: center; border-bottom: 1px solid #dee2e6;">TSL Performance</th>
+                        <th colspan="2" style="text-align: center; border-bottom: 1px solid #dee2e6;">Baseline Performance</th>
+                        <th rowspan="2">Avg TSL Advantage</th>
+                        <th rowspan="2">TP/SL/TSL Trigger/TSL Distance</th>
+                    </tr>
+                    <tr>
+                        <th style="font-weight: normal; font-size: 0.9em;">Best (%)</th>
+                        <th style="font-weight: normal; font-size: 0.9em;">Best Avg (%)</th>
+                        <th style="font-weight: normal; font-size: 0.9em;">Best (%)</th>
+                        <th style="font-weight: normal; font-size: 0.9em;">Best Avg (%)</th>
                     </tr>
                 </thead>
                 <tbody>
         """
         
         for row in table_rows:
-            # Color-code TLS advantage
-            advantage_class = 'positive' if row['tls_advantage'] > 1 else ('negative' if row['tls_advantage'] < -1 else '')
-            best_tls_class = 'positive' if row['best_tls_pnl_pct'] >= 0 else 'negative'
-            baseline_class = 'positive' if row['baseline_pnl_pct'] >= 0 else 'negative'
-            
+            def pnl_class(val): return 'positive' if val >= 0 else 'negative'
+            advantage_class = 'positive' if row['avg_tsl_advantage'] > 1 else ('negative' if row['avg_tsl_advantage'] < -1 else '')
+            strategy_display_name = f"{row['strategy_id']} ({row['position_count']})"
             table_html += f"""
                 <tr>
                     <td>
                         <a href="#" class="strategy-detail-link" data-strategy-id="{row['strategy_id']}" 
                            style="text-decoration: none; color: #3498db; font-weight: bold;">
-                            {row['strategy_id']}
+                            {strategy_display_name}
                         </a>
                     </td>
-                    <td class="{best_tls_class}">{row['best_tls_pnl_pct']:.2f}%</td>
-                    <td class="{baseline_class}">{row['baseline_pnl_pct']:.2f}%</td>
-                    <td class="{advantage_class}"><strong>{row['tls_advantage']:+.2f}%</strong></td>
-                    <td>{row['avg_performance_pct']:.2f}%</td>
-                    <td>{row['optimization_potential_pct']:.2f}%</td>
-                    <td>{row['total_combinations']}</td>
+                    <td class="{pnl_class(row['best_tsl_pct'])}">{row['best_tsl_pct']:.2f}%</td>
+                    <td class="{pnl_class(row['best_avg_tsl_pct'])}"><b>{row['best_avg_tsl_pct']:.2f}%</b></td>
+                    <td class="{pnl_class(row['best_baseline_pct'])}">{row['best_baseline_pct']:.2f}%</td>
+                    <td class="{pnl_class(row['best_avg_baseline_pct'])}"><b>{row['best_avg_baseline_pct']:.2f}%</b></td>
+                    <td class="{advantage_class}"><strong>{row['avg_tsl_advantage']:+.2f}%</strong></td>
+                    <td style="font-size: 0.8em; line-height: 1.4;">{row['optimal_parameters']}</td>
                 </tr>
             """
         
-        table_html += """
-                </tbody>
-            </table>
-        </div>
-        """
+        table_html += "</tbody></table></div>"
         
         summary_stats['_table_html'] = table_html
-        
         return summary_stats
         
     except Exception as e:
-        logger.error(f"Failed to create strategy performance summary: {e}")
+        logger.error(f"Failed to create strategy performance summary: {e}", exc_info=True)
         return {}
