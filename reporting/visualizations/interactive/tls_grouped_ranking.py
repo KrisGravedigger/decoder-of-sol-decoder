@@ -182,17 +182,9 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
     AIDEV-4D-VIZ-CLAUDE: Create expandable table interface for grouped parameter combinations.
     
     Table Structure:
-    - Main table: 20 rows showing group representatives with expand (+) buttons
-    - Sub-rows: Max 10 similar combinations per group, sorted by PnL descending
-    - No additional interactivity: Focus on information display and group analysis
+    - Main table shows group representatives with expand (+) buttons
+    - Sub-rows show similar combinations per group, sorted by PnL descending
     - Color coding: Green for positive TLS effectiveness, red for negative
-    
-    Group Metrics Display:
-    - avg_pnl: Average percentage PnL across all group members
-    - group_size: Total number of similar combinations in group
-    - tls_effectiveness: (Representative_PnL - Strategy_Baseline_PnL) / Strategy_Baseline_PnL × 100
-    - win_rate: Win rate percentage for representative combination
-    - baseline_pnl: Best non-TLS performance for representative's strategy
     
     Args:
         grouped_data: List of grouped combinations with metrics
@@ -210,7 +202,7 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
         table_html = """
         <div class="grouped-ranking-table-container">
             <div class="table-header">
-                <h4>🏆 Top 20 TLS Parameter Groups - Grouped by Similarity (Max 4-Point Distance)</h4>
+                <h4>🏆 Top TLS Parameter Groups - Grouped by Similarity (Max 4-Point Distance)</h4>
                 <p class="table-description">
                     Groups show best representative combination with expandable similar alternatives. 
                     Click (+) to expand group details.
@@ -222,6 +214,7 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
                     <tr>
                         <th style="width: 40px;"></th>
                         <th>Rank</th>
+                        <th>Strategy</th>
                         <th>Representative Parameters</th>
                         <th>Rep. PnL (%)</th>
                         <th>Avg Group PnL (%)</th>
@@ -240,12 +233,9 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
             metrics = group['group_metrics']
             
             # Color coding for TLS effectiveness
-            if metrics['tls_effectiveness'] > 0:
-                effectiveness_class = 'positive'
-            else:
-                effectiveness_class = 'negative'
+            effectiveness_class = 'positive' if metrics['tls_effectiveness'] > 0 else 'negative'
             
-            # Color coding for representative PnL
+            # Color coding for PnL values
             rep_pnl_class = 'positive' if rep['representative_pnl'] >= 0 else 'negative'
             avg_pnl_class = 'positive' if metrics['avg_pnl'] >= 0 else 'negative'
             baseline_class = 'positive' if metrics['baseline_pnl'] >= 0 else 'negative'
@@ -261,6 +251,7 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
                         </button>
                     </td>
                     <td><strong>{rank}</strong></td>
+                    <td><small>{rep['strategy_id']}</small></td>
                     <td>
                         <div class="parameter-display">
                             <span class="param-group">TP: {rep['tp_level']}%</span>
@@ -281,7 +272,6 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
             
             # Sub-rows for similar combinations (initially hidden)
             if group['similar_combinations']:
-                # Sort similar combinations by PnL descending
                 sorted_similar = sorted(group['similar_combinations'], 
                                       key=lambda x: x['representative_pnl'], reverse=True)
                 
@@ -293,6 +283,7 @@ def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
                         <tr class="group-sub-row" data-group-id="{group['group_id']}" style="display: none;">
                             <td></td>
                             <td class="sub-rank">{rank}.{i+1}</td>
+                            <td><small>{similar_combo['strategy_id']}</small></td>
                             <td class="sub-params">
                                 <div class="parameter-display similar-params">
                                     <span class="param-group">TP: {similar_combo['tp_level']}%</span>

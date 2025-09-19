@@ -417,9 +417,8 @@
         <!-- TLS (Trailing Stop Loss) Analysis Section -->
         {% if tls_analysis and not tls_analysis.get('error') %}
         <div class="section">
-            <h2>
-                <span style="background: #3498db; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.7em; margin-right: 10px;">BETA</span>
-                TLS (Trailing Stop Loss) Analysis
+            <h2 style="margin-top: 20px;">
+            TLS (Trailing Stop Loss) Analysis
             </h2>
             
             <!-- Phase 2: Strategy Overview Section -->
@@ -445,57 +444,8 @@
                         </span>
                     </div>
                 </div>
-                
-                <!-- Global Top Combinations Table -->
-                <div class="top-combinations-section" style="margin-top: 30px;">
-                    <h4>🏆 Top 10 TLS Combinations (All Strategies)</h4>
-                    <div id="global-top-combinations-table">{{ charts.tls_top_combinations_table | safe }}</div>
-                </div>
-                
-                <!-- Strategy Performance Summary -->
-                {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_overall') %}
-                <div class="performance-summary-section" style="margin-top: 30px;">
-                    <h4>📈 TLS Performance Summary</h4>
-                    <div class="grid-container">
-                        <div class="metric-card">
-                            <h3>Total Strategies</h3>
-                            <p class="value">{{ charts.tls_performance_summary._overall.total_strategies }}</p>
-                            <p class="label">Analyzed in TLS testing</p>
-                        </div>
-                        <div class="metric-card">
-                            <h3>Strategies Improved</h3>
-                            <p class="value {% if charts.tls_performance_summary._overall.strategies_improved > 0 %}positive{% endif %}">{{ charts.tls_performance_summary._overall.strategies_improved }}</p>
-                            <p class="label">{{ "%.1f"|format(charts.tls_performance_summary._overall.improvement_rate) }}% improvement rate</p>
-                        </div>
-                        <div class="metric-card">
-                            <h3>Average TSL Advantage</h3>
-                            <p class="value {% if charts.tls_performance_summary._overall.avg_tsl_advantage > 0 %}positive{% else %}negative{% endif %}">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.avg_tsl_advantage) }}%</p>
-                            <p class="label">Comparing best stable setups</p>
-                        </div>
-                        <div class="metric-card">
-                            <h3>Best TSL Advantage</h3>
-                            <p class="value positive">{{ "{:+.1f}".format(charts.tls_performance_summary._overall.best_tsl_advantage) }}%</p>
-                            <p class="label">Maximum improvement achieved</p>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-                
-                <!-- Strategy Performance Details Table -->
-                {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_table_html') %}
-                <div class="strategy-performance-details" style="margin-top: 30px;">
-                    
-                    <!-- AIDEV-FINAL-CLAUDE: Explanation for the detailed table -->
-                    <div class="table-explanation" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9em; border-left: 4px solid #3498db;">
-                        <h5 style="margin-top: 0;">🔍 How to Read This Table:</h5>
-                        <ul>
-                            <li><strong>Best (%)</strong>: Shows the result of the single, most profitable position (potential peak performance).</li>
-                            <li><strong>Best Avg (%)</strong>: Shows the average result from the most consistently profitable parameter combination (stable performance). This value corresponds to the best result seen on the heatmaps.</li>
-                            <li><strong>Avg TSL Advantage</strong>: Compares the <strong>Best Avg TSL</strong> to the <strong>Best Avg Baseline</strong> to measure the real, repeatable benefit of using TSL.</li>
-                            <li><strong>Note on Parameters</strong>: The optimal TP/SL for the Baseline may differ from the TP/SL shown in the optimal TSL parameter set. This table finds the best overall combination for TSL.</li>
-                        </ul>
-                    </div>
-                    
+                                          
+                                   
                     {{ charts.tls_performance_summary._table_html | safe }}
                 </div>
                 {% endif %}
@@ -675,46 +625,7 @@
                 {% endif %}
             </div>
             {% endif %}
-            
-            <h3>TLS vs Baseline Performance Comparison</h3>
-            <div id="tls_comparison_chart" class="plotly-chart">{{ charts.tls_comparison_chart | safe }}</div>
-            
-            <h3>Strategy Effectiveness Analysis</h3>
-            <div id="tls_effectiveness_chart" class="plotly-chart">{{ charts.tls_effectiveness_chart | safe }}</div>
-            
-            <h3>Top TLS Improvements</h3>
-            <!-- TODO: Enhanced table with confidence intervals and statistical significance indicators -->
-            {% if tls_analysis.effectiveness_df is not none and (tls_analysis.effectiveness_df | length) > 0 %}
-                <div style="overflow-x: auto;">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Strategy</th>
-                                <th>Baseline PnL (SOL)</th>
-                                <th>Best TLS PnL (SOL)</th>
-                                <th>Improvement (%)</th>
-                                <th>TLS Parameters</th>
-                                <th>Recommended</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for _, row in tls_analysis.effectiveness_df.head(5).iterrows() %}
-                            <tr>
-                                <td>{{ row.strategy_instance_id }}</td>
-                                <td class="{% if row.baseline_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ "%.4f"|format(row.baseline_pnl) }}</td>
-                                <td class="{% if row.best_tls_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ "%.4f"|format(row.best_tls_pnl) }}</td>
-                                <td class="{% if row.best_tls_benefit_pct >= 0 %}positive{% else %}negative{% endif %}">{{ "%.2f"|format(row.best_tls_benefit_pct) }}%</td>
-                                <td>TP: {{ row.best_tls_tp }}%, SL: {{ row.best_tls_sl }}%, Act: {{ row.best_tls_activation }}%, Trail: {{ row.best_tls_trail }}%</td>
-                                <td>{{ "✅ Yes" if row.tls_recommended else "❌ No" }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            {% else %}
-                <div class="skipped">No TLS effectiveness data available for display.</div>
-            {% endif %}
-            
+                                    
             <!-- Smart Recommendations Section -->
             {% if tls_analysis.summary %}
             <div class="recommendation" style="background-color: #e8f5e8; color: #2d5016; border: 1px solid #c3e6c3;">
@@ -729,19 +640,7 @@
                 </ul>
                 <!-- TODO: Add machine learning insights and pattern recognition results -->
             </div>
-            {% endif %}
-            
-            <!-- Coming Soon Features -->
-            <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 15px; margin-top: 20px;">
-                <h4 style="color: #6c757d; margin-top: 0;">🚀 Coming Soon (Phase 2+)</h4>
-                <ul style="color: #6c757d;">
-                    <li>Real-time TLS parameter optimization with confidence intervals</li>
-                    <li>Monte Carlo simulations for risk assessment</li>
-                    <li>Strategy clustering and pattern recognition</li>
-                    <li>Market condition adaptive TLS parameters</li>
-                    <li>Advanced backtesting with walk-forward analysis</li>
-                </ul>
-            </div>
+            {% endif %}                      
         </div>
         {% else %}
         <div class="section">

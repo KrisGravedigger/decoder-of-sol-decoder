@@ -1,6 +1,6 @@
-# SOL Decoder Strategy Analyzer v5.0
+# SOL Decoder Strategy Analyzer v6.0
 
-A comprehensive Python tool for analyzing SOL Decoder bot performance with **complete TP/SL optimization capabilities**, advanced portfolio analytics, and ML-ready strategy optimization.
+A comprehensive Python tool for analyzing SOL Decoder bot performance with **complete TP/SL and TSL optimization capabilities**, advanced portfolio analytics, and ML-ready strategy optimization.
 
 ## Overview
 
@@ -17,29 +17,12 @@ This tool has evolved into a **complete portfolio analytics and optimization pla
 
 The tool analyzes **1-sided LP strategies** with different distribution patterns using official Meteora DLMM mathematical formulas with automatic step size detection.
 
-## 🆕 Version 5.0 Major Updates
+## 🆕 Version 6.0 Major Updates
 
-**Complete TP/SL Optimization Pipeline:**
-- ✅ **Peak PnL Extraction**: Maximum profit/loss percentages during position lifetime parsed from bot logs
-- ✅ **Post-Close Analysis Engine**: "What-if" simulation using historical price data after position closure
-- ✅ **LP Position Valuation**: Mathematical accuracy with impermanent loss and fee calculations
-- ✅ **OCHLV+Volume Infrastructure**: Offline-first cache system with monthly organization
-- ✅ **TP/SL Range Testing**: Grid-based parameter optimization with user-defined ranges
-- ✅ **Interactive What-If Tool**: Browser-based dynamic explorer with real-time filtering
-- ✅ **Per-Strategy Heatmaps**: Visual identification of optimal TP/SL regions
-- ✅ **ML Dataset Export**: Structured features ready for machine learning model training
-
-**Advanced Simulation Capabilities:**
-- ✅ **Volume-Proportional Fee Simulation**: Realistic fee allocation based on historical patterns
-- ✅ **Missed Opportunity Analysis**: Quantification of profit potential beyond actual close timing
-- ✅ **Strategy Instance Detection**: Automated grouping and optimization per strategy configuration
-- ✅ **Mathematical Precision**: Research-verified LP valuation formulas for accurate position tracking
-
-**Architecture & User Experience:**
-- ✅ **Offline-First Analysis**: Complete functionality using cached data without API dependency
-- ✅ **Interactive Parameter Matching**: Euclidean distance algorithm for closest TP/SL combinations  
-- ✅ **Real-Time Filtering**: Date ranges, strategy counts, and dynamic result updates
-- ✅ **Actionable Recommendations**: Direct optimal TP/SL parameter suggestions per strategy
+**Advanced 4D TLS (Trailing Stop Loss) Optimization:**
+- ✅ **4D Grid Visualization**: Sophisticated mini-heatmaps with global color scaling and interactive filters to explore TP/SL/TLS Activation/TLS Trail parameters.
+- ✅ **Parameter Grouping & Ranking**: A smart clustering algorithm that identifies robust, high-performing parameter "islands" and presents them in an intuitive, expandable table.
+- ✅ **Baseline Comparison**: Clear, quantitative comparison of TLS-enabled strategies against the best non-TLS performance.
 
 ## Features
 
