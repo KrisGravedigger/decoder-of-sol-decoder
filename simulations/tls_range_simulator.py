@@ -11,6 +11,11 @@ import numpy as np
 from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime
 from tqdm import tqdm
+import multiprocessing
+from itertools import chain
+
+from core.models import TlsSimulationResult
+from reporting.lp_position_valuator import simulate_position_exit_with_tls
 
 from simulations.range_test_simulator import TpSlRangeSimulator
 from core.models import Position, TlsSimulationResult
@@ -18,6 +23,62 @@ from reporting.post_close_analyzer import PostCloseAnalyzer
 
 logger = logging.getLogger(__name__)
 
+# AIDEV-NOTE-GEMINI: These functions must be at the module's top-level
+# so they can be "pickled" and sent to subprocesses.
+
+# Global variables for each worker process
+worker_simulator = None
+worker_combinations = None
+
+def init_worker(simulator_instance, combinations):
+    """
+    Initializes a worker process by setting global (for that process)
+    variables to avoid passing large objects on each task.
+    """
+    global worker_simulator, worker_combinations
+    worker_simulator = simulator_instance
+    worker_combinations = combinations
+
+def process_single_position(position_row_dict: Dict) -> List[Dict]:
+    """
+    A worker function that processes a single position (one row from the DataFrame).
+    It executes the logic that was originally inside the main for loop.
+    """
+    global worker_simulator, worker_combinations
+
+    # Convert dict back to Series to use the existing _row_to_position method
+    position = worker_simulator._row_to_position(pd.Series(position_row_dict))
+    strategy_id = position_row_dict['strategy_instance_id']
+    
+    # This efficient logic remains: timeline is generated only once per position.
+    timeline = worker_simulator._get_position_timeline(position)
+    if not timeline:
+        return []
+
+    results_for_position = []
+    # Use the global, pre-initialized list of combinations
+    for tp_level, sl_level, tls_activation, tls_trail in worker_combinations:
+        sim_result = simulate_position_exit_with_tls(
+            timeline, tp_level, sl_level, tls_activation, tls_trail, position.initial_investment
+        )
+        
+        tls_result_obj = TlsSimulationResult(
+            position_id=position.position_id,
+            strategy_instance_id=strategy_id,
+            tp_level=tp_level,
+            sl_level=sl_level,
+            tls_activation=tls_activation,
+            tls_trail=tls_trail,
+            simulated_pnl=sim_result['final_pnl'],
+            exit_reason=sim_result['exit_reason'],
+            # AIDEV-NOTE-GEMINI: This is a placeholder. The correct value will be mapped
+            # in the main process after all results are collected, as workers don't have
+            # access to the complete `strategy_baselines` dict.
+            strategy_best_non_tls_pnl=0.0
+        )
+        results_for_position.append(tls_result_obj.to_csv_row())
+        
+    return results_for_position
 
 class TlsRangeSimulator:
     """
@@ -96,279 +157,74 @@ class TlsRangeSimulator:
             valid_combinations = valid_combinations[:self.max_combinations_per_position]
             
         return valid_combinations
-    
-    def simulate_position_with_tls(self, position: Position, timeline: List[Dict], 
-                                  tp_level: float, sl_level: float, 
-                                  tls_activation: float, tls_trail: float) -> Dict[str, Any]:
-        """
-        AIDEV-TLS-CLAUDE: Core TLS simulation logic.
-        
-        Simulates position with Trailing Stop Loss logic.
-        
-        Business Logic:
-        - TLS activates only when position reaches tls_activation profit level
-        - Once active, dynamic SL = max(original_SL, tls_activation - tls_trail)
-        - Exit on first condition: TP reached, SL/TLS triggered, OOR, or end of data
-        
-        Args:
-            position: Position object
-            timeline: Complete price timeline with PnL data
-            tp_level: Take profit level (%)
-            sl_level: Stop loss level (%)
-            tls_activation: TLS activation level (%)
-            tls_trail: TLS trail distance (%)
-            
-        Returns:
-            Dictionary with simulation results
-        """
-        if not timeline:
-            return {
-                'simulated_pnl': 0.0,
-                'simulated_pnl_pct': 0.0,
-                'exit_reason': 'NO_DATA',
-                'days_to_exit': 0.0,
-                'tls_activated': False,
-                'peak_pnl_reached': 0.0
-            }
-        
-        # TLS state tracking
-        peak_pnl = 0.0
-        tls_activated = False
-        dynamic_sl = -sl_level  # Start with original SL
-        
-        # OOR tracking (reuse existing logic)
-        oor_timeout_minutes = position.oor_timeout_minutes if pd.notna(position.oor_timeout_minutes) else 30.0
-        min_price = getattr(position, 'min_bin_price', None)
-        max_price = getattr(position, 'max_bin_price', None)
-        oor_start_timestamp = None
-        
-        exit_point = None
-        exit_reason = 'END'
-        final_pnl_pct = 0.0
-        
-        for i, point in enumerate(timeline):
-            pnl_pct_high = point.get('pnl_pct_high', point['pnl_pct'])
-            pnl_pct_low = point.get('pnl_pct_low', point['pnl_pct'])
-            pnl_pct_close = point['pnl_pct']
-            
-            current_price = point['price']  # Close price
-            current_timestamp = point['timestamp']
-            
-            # Update peak PnL and check TLS activation
-            current_max_pnl = max(pnl_pct_high, peak_pnl)
-            if current_max_pnl > peak_pnl:
-                peak_pnl = current_max_pnl
-                
-            # TLS activation check
-            if not tls_activated and peak_pnl >= tls_activation:
-                tls_activated = True
-                logger.debug(f"TLS activated at {peak_pnl:.2f}% for position {position.position_id}")
-                
-            # Update dynamic SL if TLS is active (FIXED: use activation-based, not peak-based)
-            if tls_activated:
-                # TLS sets SL as fixed offset from activation point
-                tls_sl = tls_activation - tls_trail
-                dynamic_sl = max(dynamic_sl, tls_sl)
-            
-            # --- PRIORITY EXIT LOGIC (same as existing TP/SL) ---
-            # 1. TP check (high price)
-            if pnl_pct_high >= tp_level:
-                exit_reason = 'TP'
-                final_pnl_pct = tp_level  # Exit at exact TP level
-                exit_point = point
-                break
-            
-            # 2. SL/TLS check (low price)
-            if pnl_pct_low <= dynamic_sl:
-                if tls_activated and dynamic_sl > -sl_level:
-                    exit_reason = 'TLS'
-                else:
-                    exit_reason = 'SL'
-                final_pnl_pct = dynamic_sl  # Exit at exact SL/TLS level
-                exit_point = point
-                break
-            
-            # 3. OOR check (close price)
-            is_out_of_range = (min_price is not None and current_price < min_price) or \
-                              (max_price is not None and current_price > max_price)
-            
-            if is_out_of_range:
-                if oor_start_timestamp is None:
-                    oor_start_timestamp = current_timestamp
-                
-                time_in_oor = (current_timestamp - oor_start_timestamp).total_seconds() / 60
-                if time_in_oor >= oor_timeout_minutes:
-                    exit_reason = 'OOR'
-                    final_pnl_pct = pnl_pct_close
-                    exit_point = point
-                    break
-            else:
-                oor_start_timestamp = None
-        
-        # If no exit condition was met, position runs to end
-        if exit_point is None:
-            exit_reason = 'END'
-            exit_point = timeline[-1]
-            final_pnl_pct = exit_point['pnl_pct']
-        
-        # Calculate final results
-        simulated_pnl = position.initial_investment * (final_pnl_pct / 100.0)
-        days_to_exit = (exit_point['timestamp'] - position.open_timestamp).total_seconds() / 86400
-        
-        return {
-            'simulated_pnl': simulated_pnl,
-            'simulated_pnl_pct': final_pnl_pct,
-            'exit_reason': exit_reason,
-            'days_to_exit': days_to_exit,
-            'tls_activated': tls_activated,
-            'peak_pnl_reached': peak_pnl
-        }
-    
-    def calculate_strategy_baseline(self, strategy_positions: List[Dict], existing_tp_sl_results: Optional[pd.DataFrame] = None) -> Dict[str, float]:
-        """
-        AIDEV-BASELINE-CLAUDE: Find best non-TLS performance per strategy.
-        
-        Args:
-            strategy_positions: List of positions for a strategy
-            existing_tp_sl_results: Optional pre-computed TP/SL results to use as baseline
-            
-        Returns:
-            Dictionary mapping strategy_instance_id to best non-TLS PnL
-        """
-        strategy_baselines = {}
-        
-        if existing_tp_sl_results is not None and not existing_tp_sl_results.empty:
-            # Use existing TP/SL results as baseline
-            for strategy_id in existing_tp_sl_results['strategy_instance_id'].unique():
-                strategy_results = existing_tp_sl_results[existing_tp_sl_results['strategy_instance_id'] == strategy_id]
-                best_pnl = strategy_results['simulated_pnl'].max()
-                strategy_baselines[strategy_id] = best_pnl
-                logger.debug(f"Baseline for {strategy_id}: {best_pnl:.4f} SOL")
-        else:
-            # Run baseline TP/SL simulation if needed
-            logger.info("No existing TP/SL results provided, running baseline simulation...")
-            positions_df = pd.DataFrame(strategy_positions)
-            baseline_results = self.baseline_simulator.run_simulation(positions_df)
-            
-            if 'detailed_results' in baseline_results:
-                detailed_df = baseline_results['detailed_results']
-                for strategy_id in detailed_df['strategy_instance_id'].unique():
-                    strategy_results = detailed_df[detailed_df['strategy_instance_id'] == strategy_id]
-                    best_pnl = strategy_results['simulated_pnl'].max()
-                    strategy_baselines[strategy_id] = best_pnl
-                    logger.debug(f"Computed baseline for {strategy_id}: {best_pnl:.4f} SOL")
-        
-        return strategy_baselines
-    
+          
     def run_tls_analysis(self, positions_df: pd.DataFrame, existing_tp_sl_results: Optional[pd.DataFrame] = None) -> Dict[str, pd.DataFrame]:
         """
-        Main TLS analysis orchestrator.
-        
-        Args:
-            positions_df: Enriched positions DataFrame with strategy_instance_id
-            existing_tp_sl_results: Optional existing TP/SL results for baseline comparison
-            
-        Returns:
-            Dictionary with 'detailed_results' and 'baseline_comparison' DataFrames
+        AIDEV-NOTE-GEMINI: Main TLS analysis orchestrator, using multiprocessing
+        to process positions in parallel for a significant speedup.
         """
         if 'strategy_instance_id' not in positions_df.columns:
             raise ValueError("positions_df must contain strategy_instance_id column. Run strategy detection first.")
-        
-        # Calculate baseline performance per strategy
-        strategy_baselines = self.calculate_strategy_baseline(
-            positions_df.to_dict('records'), 
+
+        from simulations.baseline_comparator import StrategyBaselineComparator
+        baseline_comparator = StrategyBaselineComparator()
+
+        # 1. Baseline calculation remains in the main process as it requires access to all data.
+        strategy_baselines = baseline_comparator.identify_best_non_tls_performance(
+            positions_df.to_dict('records'),
             existing_tp_sl_results
         )
-        
-        # Generate valid parameter combinations
+
+        # 2. Parameter combinations are also generated once in the main process.
         valid_combinations = self.generate_valid_combinations()
-        total_simulations = len(positions_df) * len(valid_combinations)
-        
-        logger.info(f"Starting TLS simulation: {len(positions_df)} positions × {len(valid_combinations)} combinations = {total_simulations} simulations")
-        
-        detailed_results = []
-        
-        # Process each position
-        with tqdm(total=len(positions_df), desc="Processing TLS simulations") as pbar:
-            for idx, row in positions_df.iterrows():
-                position = self._row_to_position(row)
-                strategy_id = row['strategy_instance_id']
-                baseline_pnl = strategy_baselines.get(strategy_id, 0.0)
-                
-                # Get position timeline once (expensive operation)
-                timeline = self._get_position_timeline(position)
-                
-                if not timeline:
-                    logger.debug(f"Position {position.position_id} excluded from TLS analysis - no timeline data")
+        positions_data = positions_df.to_dict('records')
+        total_simulations = len(positions_data) * len(valid_combinations)
+        logger.info(f"Starting TLS simulation: {len(positions_data)} positions × {len(valid_combinations)} combinations = {total_simulations} simulations")
+
+        # 3. Launch the pool of worker processes.
+        # Use one less core than available to keep the OS responsive.
+        num_processes = max(1, multiprocessing.cpu_count() - 1)
+        logger.info(f"Using {num_processes} worker processes for simulation...")
+
+        all_results = []
+        # The 'with' statement ensures the pool is properly closed.
+        with multiprocessing.Pool(processes=num_processes, initializer=init_worker, initargs=(self, valid_combinations)) as pool:
+            # imap_unordered is more efficient as it yields results as soon as they are ready,
+            # rather than waiting for the batch to complete in order.
+            # This integrates perfectly with tqdm.
+            results_iterator = pool.imap_unordered(process_single_position, positions_data)
+            
+            with tqdm(total=len(positions_data), desc="Processing positions (in parallel)") as pbar:
+                for single_position_results in results_iterator:
+                    if single_position_results:
+                        all_results.extend(single_position_results)
                     pbar.update(1)
-                    continue
-                
-                # Test all TLS combinations
-                for tp_level, sl_level, tls_activation, tls_trail in valid_combinations:
-                    sim_result = self.simulate_position_with_tls(
-                        position, timeline, tp_level, sl_level, tls_activation, tls_trail
-                    )
-                    
-                    # Create TLS simulation result
-                    tls_result = TlsSimulationResult(
-                        position_id=position.position_id,
-                        strategy_instance_id=strategy_id,
-                        tp_level=tp_level,
-                        sl_level=sl_level,
-                        tls_activation=tls_activation,
-                        tls_trail=tls_trail,
-                        simulated_pnl=sim_result['simulated_pnl'],
-                        exit_reason=sim_result['exit_reason'],
-                        strategy_best_non_tls_pnl=baseline_pnl
-                    )
-                    
-                    detailed_results.append(tls_result.to_csv_row())
-                
-                pbar.update(1)
+
+        if not all_results:
+            logger.warning("No TLS simulation results were generated.")
+            return {
+                'detailed_results': pd.DataFrame(),
+                'baseline_comparison': pd.DataFrame()
+            }
+            
+        detailed_df = pd.DataFrame(all_results)
         
-        # Convert to DataFrame
-        detailed_df = pd.DataFrame(detailed_results)
+        # 4. Post-process: Fill in the correct baseline_pnl after collecting all results.
+        detailed_df['strategy_best_non_tls_pnl'] = detailed_df['strategy_instance_id'].map(strategy_baselines).fillna(0.0)
         
-        # Calculate baseline comparison metrics
-        baseline_comparison_df = self._calculate_baseline_comparison(detailed_df, strategy_baselines)
+        # Recalculate tls_benefit_pct with the correct baseline.
+        detailed_df['tls_benefit_pct'] = detailed_df.apply(
+            lambda row: ((row['simulated_pnl'] - row['strategy_best_non_tls_pnl']) / abs(row['strategy_best_non_tls_pnl']) * 100) if row['strategy_best_non_tls_pnl'] != 0 else 0,
+            axis=1
+        )
         
+        # 5. Delegate the effectiveness calculation to the comparator.
+        effectiveness_df = baseline_comparator.calculate_strategy_effectiveness(detailed_df, strategy_baselines)
+
         return {
             'detailed_results': detailed_df,
-            'baseline_comparison': baseline_comparison_df
+            'baseline_comparison': effectiveness_df
         }
-    
-    def _calculate_baseline_comparison(self, detailed_df: pd.DataFrame, strategy_baselines: Dict[str, float]) -> pd.DataFrame:
-        """Calculate TLS vs baseline comparison metrics."""
-        if detailed_df.empty:
-            return pd.DataFrame()
-        
-        # Group by strategy and find best TLS performance
-        strategy_comparisons = []
-        
-        for strategy_id in detailed_df['strategy_instance_id'].unique():
-            strategy_results = detailed_df[detailed_df['strategy_instance_id'] == strategy_id]
-            baseline_pnl = strategy_baselines.get(strategy_id, 0.0)
-            
-            # Find best TLS combination for this strategy
-            best_tls_idx = strategy_results['simulated_pnl'].idxmax()
-            best_tls_result = strategy_results.loc[best_tls_idx]
-            
-            # Calculate improvement metrics
-            tls_benefit_pct = ((best_tls_result['simulated_pnl'] - baseline_pnl) / abs(baseline_pnl) * 100) if baseline_pnl != 0 else 0
-            
-            strategy_comparisons.append({
-                'strategy_instance_id': strategy_id,
-                'baseline_pnl': baseline_pnl,
-                'best_tls_pnl': best_tls_result['simulated_pnl'],
-                'best_tls_tp': best_tls_result['tp_level'],
-                'best_tls_sl': best_tls_result['sl_level'],
-                'best_tls_activation': best_tls_result['tls_activation'],
-                'best_tls_trail': best_tls_result['tls_trail'],
-                'tls_benefit_pct': tls_benefit_pct,
-                'tls_improves_performance': best_tls_result['simulated_pnl'] > baseline_pnl
-            })
-        
-        return pd.DataFrame(strategy_comparisons)
     
     def _get_position_timeline(self, position: Position) -> List[Dict]:
         """

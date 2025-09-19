@@ -101,6 +101,23 @@ class LPPositionValuator:
         is_oor = False
         oor_value = 0.0
 
+        # AIDEV-NOTE-GEMINI: Critical Business Logic for OOR (Out of Range).
+        # This loop simulates the position's value over time, applying the unique OOR
+        # logic specific to the SOL Decoder bot's 1-sided (SOL-only) entry strategy.
+        #
+        # Key Principles:
+        # 1. 1-Sided Entry: The position is entered entirely with SOL.
+        # 2. OOR Condition: For this strategy, OOR only occurs when the price moves
+        #    ABOVE the upper bin range. A move below the range would trigger the Stop Loss first.
+        # 3. OOR Value Lock: When OOR happens, the entire liquidity has been converted
+        #    back to SOL. The position's value becomes "locked" at the initial SOL investment
+        #    plus any fees accumulated up to that point. The position stops earning fees
+        #    but its value in SOL no longer changes until the price re-enters the range.
+        #
+        # This implementation "bakes" the OOR effect directly into the generated timeline's
+        # PnL values, making subsequent TP/SL/TLS checks much simpler as they don't need
+        # to re-evaluate the OOR state.
+
         for i, price_point in enumerate(price_data):
             timestamp = datetime.fromtimestamp(price_point['timestamp'])
             
@@ -123,6 +140,7 @@ class LPPositionValuator:
             if not is_oor and is_currently_out_of_range:
                 # Transition to OOR: lock the value based on this candle's close
                 is_oor = True
+                # AIDEV-NOTE-GEMINI: Value is locked to SOL principal + earned fees, per bot's strategy.
                 oor_value = initial_investment + accumulated_fees
                 position_value = oor_value
             elif is_oor:
@@ -157,94 +175,81 @@ class LPPositionValuator:
         return timeline
 
 
-def simulate_position_exit_with_tls(position_data: List[Dict], tp_level: float, sl_level: float, 
-                                   tls_activation: float, tls_trail: float, 
+def simulate_position_exit_with_tls(position_data: List[Dict], tp_level: float, sl_level: float,
+                                   tls_activation: float, tls_trail: float,
                                    initial_investment: float) -> Dict[str, Any]:
     """
-    AIDEV-TLS-CLAUDE: Simulate position exit with TLS logic.
-    
-    Extends existing simulate_position_exit function with TLS activation and trailing.
-    
+    Simulates a position exit with TP, SL, and fixed-reference Trailing Stop Loss (TLS).
+    AIDEV-NOTE-GEMINI: This is the centralized, authoritative implementation of the TLS exit logic.
+
     Args:
-        position_data: Timeline data with pnl_pct, pnl_pct_high, pnl_pct_low
-        tp_level: Take profit level (%)
-        sl_level: Stop loss level (%)
-        tls_activation: TLS activation level (%)
-        tls_trail: TLS trail distance (%)
-        initial_investment: Initial investment amount
-        
+        position_data: Timeline data with pnl_pct, pnl_pct_high, pnl_pct_low.
+        tp_level: Take profit level (%).
+        sl_level: Stop loss level (%).
+        tls_activation: TLS activation profit level (%).
+        tls_trail: TLS trail distance from activation level (%).
+        initial_investment: The initial investment amount in SOL.
+
     Returns:
-        Dictionary with exit results including TLS-specific information
+        A dictionary with simulation exit results.
     """
     if not position_data:
         return {
-            'exit_reason': 'NO_DATA',
-            'final_pnl': 0.0,
-            'final_pnl_pct': 0.0,
-            'exit_price': 0.0,
-            'tls_activated': False,
-            'peak_pnl_reached': 0.0
+            'exit_reason': 'NO_DATA', 'final_pnl': 0.0, 'final_pnl_pct': 0.0,
+            'exit_price': 0.0, 'tls_activated': False, 'peak_pnl_reached': 0.0
         }
-    
-    # TLS state tracking
-    peak_pnl = 0.0
-    tls_activated = False
-    dynamic_sl = -sl_level  # Start with original SL
-    
+
+    # AIDEV-TLS-GEMINI: State tracking for the simulation lifetime.
+    peak_pnl_achieved = 0.0
+    tls_is_activated = False
+    # AIDEV-TLS-GEMINI: The dynamic_sl starts as the original SL. It can only increase.
+    dynamic_sl_level = -sl_level
+
     for point in position_data:
-        pnl_pct_high = point.get('pnl_pct_high', point['pnl_pct'])
-        pnl_pct_low = point.get('pnl_pct_low', point['pnl_pct'])
-        pnl_pct_close = point['pnl_pct']
-        
-        # Update peak PnL
-        current_max_pnl = max(pnl_pct_high, peak_pnl)
-        if current_max_pnl > peak_pnl:
-            peak_pnl = current_max_pnl
-            
-        # TLS activation check
-        if not tls_activated and peak_pnl >= tls_activation:
-            tls_activated = True
-            
-        # Update dynamic SL if TLS is active
-        if tls_activated:
-            trailing_sl = peak_pnl - tls_trail
-            dynamic_sl = max(dynamic_sl, trailing_sl)
-        
-        # Exit condition checks (priority order)
-        # 1. TP check (high price)
-        if pnl_pct_high >= tp_level:
-            final_pnl = initial_investment * (tp_level / 100.0)
-            return {
-                'exit_reason': 'TP',
-                'final_pnl': final_pnl,
-                'final_pnl_pct': tp_level,
-                'exit_price': point['price'],
-                'tls_activated': tls_activated,
-                'peak_pnl_reached': peak_pnl
-            }
-        
-        # 2. SL/TLS check (low price)
-        if pnl_pct_low <= dynamic_sl:
-            exit_reason = 'TLS' if (tls_activated and dynamic_sl > -sl_level) else 'SL'
-            final_pnl = initial_investment * (dynamic_sl / 100.0)
-            return {
-                'exit_reason': exit_reason,
-                'final_pnl': final_pnl,
-                'final_pnl_pct': dynamic_sl,
-                'exit_price': point['price'],
-                'tls_activated': tls_activated,
-                'peak_pnl_reached': peak_pnl
-            }
+        pnl_high = point.get('pnl_pct_high', point['pnl_pct'])
+        pnl_low = point.get('pnl_pct_low', point['pnl_pct'])
+
+        # 1. Update the highest PnL achieved so far during this candle's lifetime.
+        peak_pnl_achieved = max(peak_pnl_achieved, pnl_high)
+
+        # 2. Check for TLS activation. This happens only once.
+        if not tls_is_activated and peak_pnl_achieved >= tls_activation:
+            tls_is_activated = True
+            # AIDEV-TLS-GEMINI: CRITICAL LOGIC - The new SL is a fixed reference from the ACTIVATION point, not the peak.
+            # This prevents the SL from creeping up too aggressively with every minor price spike.
+            new_sl_from_tls = tls_activation - tls_trail
+            dynamic_sl_level = max(dynamic_sl_level, new_sl_from_tls)
+
+        # --- EXIT CONDITION CHECKS (IN ORDER OF PRIORITY) ---
+
+        # A. Take Profit check (on the candle's high)
+        if pnl_high >= tp_level:
+            # AIDEV-NOTE-GEMINI: We assume the exit happens at the exact TP level for consistent PnL calculation.
+            final_pnl_pct = tp_level
+            exit_reason = 'TP'
+            break
+
+        # B. Stop Loss / Trailing Stop Loss check (on the candle's low)
+        if pnl_low <= dynamic_sl_level:
+            final_pnl_pct = dynamic_sl_level
+            # AIDEV-TLS-GEMINI: The reason is 'TLS' only if the dynamic SL was improved by the TLS activation.
+            exit_reason = 'TLS' if tls_is_activated and dynamic_sl_level > -sl_level else 'SL'
+            break
     
-    # No exit condition met - position runs to end
-    final_point = position_data[-1]
-    final_pnl = initial_investment * (final_point['pnl_pct'] / 100.0)
-    
+    else: # This 'else' belongs to the 'for' loop, executing only if no 'break' occurred.
+        # Position ran to the end of the data without hitting TP or SL/TLS.
+        final_point = position_data[-1]
+        final_pnl_pct = final_point['pnl_pct']
+        exit_reason = 'END'
+        point = final_point # Use the final point for exit price info
+
+    final_pnl = initial_investment * (final_pnl_pct / 100.0)
+
     return {
-        'exit_reason': 'END',
+        'exit_reason': exit_reason,
         'final_pnl': final_pnl,
-        'final_pnl_pct': final_point['pnl_pct'],
-        'exit_price': final_point['price'],
-        'tls_activated': tls_activated,
-        'peak_pnl_reached': peak_pnl
+        'final_pnl_pct': final_pnl_pct,
+        'exit_price': point['price'],
+        'tls_activated': tls_is_activated,
+        'peak_pnl_reached': peak_pnl_achieved
     }

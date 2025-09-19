@@ -444,8 +444,11 @@
                         </span>
                     </div>
                 </div>
-                                          
-                                   
+                                               
+                <!-- Strategy Performance Details Table -->
+                {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_table_html') %}
+                <div class="strategy-performance-details" style="margin-top: 30px;">
+                                                           
                     {{ charts.tls_performance_summary._table_html | safe }}
                 </div>
                 {% endif %}
