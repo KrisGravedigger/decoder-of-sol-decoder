@@ -177,6 +177,98 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
         return []
 
 
+def prepare_grouped_ranking_data(grouped_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    AIDEV-4D-VIZ-CLAUDE: Prepares structured data for the expandable ranking table.
+    
+    This function separates data preparation from HTML rendering. It sorts the data,
+    calculates display-specific values (like CSS classes), and returns a list of
+    dictionaries ready for a Jinja2 template.
+    
+    Args:
+        grouped_data: List of grouped combinations from group_4d_combinations.
+        
+    Returns:
+        A list of dictionaries, where each dictionary represents a group
+        with its representative and similar combinations, structured for rendering.
+    """
+    if not grouped_data:
+        logger.warning("No grouped TLS data provided to prepare_grouped_ranking_data")
+        return []
+    
+    try:
+        # Sort groups by representative PnL for final display
+        sorted_groups = sorted(grouped_data, key=lambda x: x['representative']['representative_pnl'], reverse=True)
+        
+        prepared_table_data = []
+        
+        for rank, group in enumerate(sorted_groups, 1):
+            rep = group['representative']
+            metrics = group['group_metrics']
+            
+            # Prepare representative data
+            representative_data = {
+                'strategy_id': rep['strategy_id'],
+                'tp_level': rep['tp_level'],
+                'sl_level': rep['sl_level'],
+                'tls_activation': rep['tls_activation'],
+                'tls_trail': rep['tls_trail'],
+                'pnl_pct': rep['representative_pnl'],
+                'pnl_class': 'positive' if rep['representative_pnl'] >= 0 else 'negative',
+            }
+            
+            # Prepare group metrics data
+            group_metrics_data = {
+                'avg_pnl': metrics['avg_pnl'],
+                'avg_pnl_class': 'positive' if metrics['avg_pnl'] >= 0 else 'negative',
+                'group_size': metrics['group_size'],
+                'tls_effectiveness': metrics['tls_effectiveness'],
+                'effectiveness_class': 'positive' if metrics['tls_effectiveness'] > 0 else 'negative',
+                'win_rate': metrics['win_rate'],
+                'baseline_pnl': metrics['baseline_pnl'],
+                'baseline_class': 'positive' if metrics['baseline_pnl'] >= 0 else 'negative',
+                'actual_similar_count': metrics['actual_similar_count'],
+            }
+            
+            # Prepare similar combinations data
+            similar_combos_data = []
+            if group['similar_combinations']:
+                sorted_similar = sorted(group['similar_combinations'], 
+                                      key=lambda x: x['representative_pnl'], reverse=True)
+                
+                for i, similar_combo in enumerate(sorted_similar):
+                    similar_combos_data.append({
+                        'sub_rank': f"{rank}.{i+1}",
+                        'strategy_id': similar_combo['strategy_id'],
+                        'tp_level': similar_combo['tp_level'],
+                        'sl_level': similar_combo['sl_level'],
+                        'tls_activation': similar_combo['tls_activation'],
+                        'tls_trail': similar_combo['tls_trail'],
+                        'pnl_pct': similar_combo['representative_pnl'],
+                        'pnl_class': 'positive' if similar_combo['representative_pnl'] >= 0 else 'negative',
+                        'group_size': similar_combo['group_size'],
+                        'tls_effectiveness': similar_combo['tls_effectiveness'],
+                        'effectiveness_class': 'positive' if similar_combo['tls_effectiveness'] > 0 else 'negative',
+                        'win_rate': similar_combo['win_rate'],
+                        'baseline_pnl': similar_combo['baseline_pnl'],
+                    })
+
+            prepared_table_data.append({
+                'group_id': group['group_id'],
+                'rank': rank,
+                'representative': representative_data,
+                'group_metrics': group_metrics_data,
+                'similar_combinations': similar_combos_data
+            })
+        
+        logger.info(f"Prepared structured data for {len(prepared_table_data)} ranking groups")
+        return prepared_table_data
+        
+    except Exception as e:
+        logger.error(f"Failed to prepare grouped ranking data: {e}")
+        return []
+
+
 def create_grouped_ranking_table(grouped_data: List[Dict[str, Any]]) -> str:
     """
     AIDEV-4D-VIZ-CLAUDE: Create expandable table interface for grouped parameter combinations.

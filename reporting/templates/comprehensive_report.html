@@ -34,6 +34,18 @@
         .skipped { background-color: #bdc3c7; color: #7f8c8d; padding: 15px; border-radius: 5px; text-align: center; }
         ul { padding-left: 20px; }
         li { margin-bottom: 10px; }
+        /* CSS for Grouped Ranking Table */
+        .grouped-ranking-table-container { margin: 20px 0; }
+        .parameter-display { font-family: 'Courier New', monospace; font-size: 0.9em; }
+        .param-group { display: inline-block; margin-right: 8px; padding: 2px 6px; background-color: #f8f9fa; border-radius: 3px; border: 1px solid #dee2e6; }
+        .similar-params .param-group { background-color: #e9ecef; font-size: 0.85em; }
+        .group-main-row { font-weight: bold; border-left: 3px solid #007bff; }
+        .group-sub-row { background-color: #f8f9fa; font-size: 0.9em; border-left: 3px solid #28a745; }
+        .sub-rank { color: #6c757d; font-style: italic; }
+        .expand-btn { border: none; background: none; font-weight: bold; cursor: pointer; transition: transform 0.3s ease; }
+        .expand-btn:hover { background-color: #f8f9fa; }
+        .expand-btn.expanded { transform: rotate(45deg); }
+        .table-description { color: #6c757d; margin-bottom: 15px; font-style: italic; }
     </style>
 </head>
 <body>
@@ -478,6 +490,7 @@
                             <div>
                                 <label for="grid-strategy-filter" style="display: block; margin-bottom: 5px; font-weight: bold;">Strategy:</label>
                                 <select id="grid-strategy-filter" style="width: 100%; padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+                                    <option value="__all_strategies__">-- All Strategies --</option>
                                     {% for strategy in tls_4d_data.available_strategies %}
                                     <option value="{{ strategy }}">{{ strategy }}</option>
                                     {% endfor %}
@@ -514,7 +527,7 @@
                     <div class="tls-grid-container" style="background: white; border: 1px solid #dee2e6; border-radius: 5px; padding: 20px;">
                         <div class="grid-header" style="display: grid; grid-template-columns: 80px repeat({{ tls_4d_data.grid_data.tls_trail_range | length }}, 1fr); gap: 10px; margin-bottom: 15px; align-items: center;">
                             <div class="grid-corner" style="font-weight: bold; text-align: center; display: flex; align-items: center; justify-content: center; line-height: 1.2;">
-                                <span style="font-size: 0.9em;">TSL Trigger (→)<br>TSL Distance (↓)</span>
+                                <span style="font-size: 0.9em;">TLS Act (↓)<br>TLS Trail (→)</span>
                             </div>
                             <!-- TLS Trail headers -->
                             {% for trail in tls_4d_data.grid_data.tls_trail_range %}
@@ -523,31 +536,7 @@
                         </div>
                         
                         <div class="grid-body" id="tls-grid-body">
-                            <!-- TLS Activation rows with mini-heatmaps -->
-                            {% for row_data in tls_4d_data.grid_data.grid_data %}
-                            <div class="grid-row" style="display: grid; grid-template-columns: 80px repeat({{ tls_4d_data.grid_data.tls_trail_range | length }}, 1fr); gap: 10px; margin-bottom: 15px; align-items: start;">
-                                <!-- Row header (TLS Activation level) -->
-                                <div class="activation-header" style="font-weight: bold; text-align: center; background: #f8f9fa; padding: 10px; border-radius: 3px; writing-mode: vertical-rl; text-orientation: mixed;">{{ row_data[0].tls_activation }}%</div>
-                                
-                                <!-- Mini-heatmap cells -->
-                                {% for cell in row_data %}
-                                <div class="mini-heatmap-cell {{ cell.header_class }}" 
-                                     data-cell-info='{"tls_activation": {{ cell.tls_activation }}, "tls_trail": {{ cell.tls_trail }}, "best_performance": {{ cell.best_performance }}, "has_data": {{ cell.has_data | lower }}, "strategy_ids": {{ cell.strategy_ids | tojson }}, "primary_strategy_id": "{{ cell.primary_strategy_id if cell.primary_strategy_id else "" }}", "is_single_strategy_mode": {{ cell.is_single_strategy_mode | lower }}, "tls_improvement": {{ cell.tls_improvement if cell.tls_improvement is not none else "null" }}, "win_rate": {{ cell.win_rate if cell.win_rate is not none else "null" }}}'
-                                     style="border: 2px solid {% if cell.header_class == 'performance-excellent' %}#27ae60{% elif cell.header_class == 'performance-good' %}#f39c12{% else %}#e74c3c{% endif %}; border-radius: 5px; padding: 5px; background: {% if cell.header_class == 'performance-excellent' %}#e8f5e8{% elif cell.header_class == 'performance-good' %}#fef9e7{% else %}#fdf2f2{% endif %};">
-                                    {% if cell.has_data %}
-                                        <div class="cell-header" style="text-align: center; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: {% if cell.header_class == 'performance-excellent' %}#27ae60{% elif cell.header_class == 'performance-good' %}#f39c12{% else %}#e74c3c{% endif %};">{{ cell.title }}</div>
-                                        <div class="cell-performance" style="text-align: center; font-size: 0.7em; margin-bottom: 5px;">Best: {{ "{:.2f}".format(cell.best_performance) }}%</div>
-                                        <div class="mini-heatmap-content" style="height: 150px; overflow: hidden;">
-                                            {{ cell.heatmap_html | safe }}
-                                        </div>
-                                    {% else %}
-                                        <div class="cell-header" style="text-align: center; font-size: 0.8em; font-weight: bold; margin-bottom: 5px; color: #6c757d;">{{ cell.title }}</div>
-                                        <div class="no-data-message" style="text-align: center; color: #6c757d; padding: 20px; font-style: italic;">No Data</div>
-                                    {% endif %}
-                                </div>
-                                {% endfor %}
-                            </div>
-                            {% endfor %}
+                            <!-- This will be populated by JavaScript -->
                         </div>
                     </div>
                     {% endif %}
@@ -559,9 +548,9 @@
                         <div style="display: flex; align-items: center; gap: 15px;">
                             <div class="legend-gradient" style="width: 200px; height: 20px; background: linear-gradient(to right, #e74c3c 0%, #f39c12 50%, #27ae60 100%); border-radius: 10px;"></div>
                             <div class="legend-labels" style="display: flex; gap: 20px; font-size: 0.9em;">
-                                <span class="legend-min" style="color: #e74c3c; font-weight: bold;">Worst ({{ "{:.2f}".format(tls_4d_data.grid_data.global_color_config.global_min_pnl) }}%)</span>
+                                <span class="legend-min" style="color: #e74c3c; font-weight: bold;">Worst ({{ "%.2f"|format(tls_4d_data.grid_data.global_color_config.global_min_pnl) }}%)</span>
                                 <span class="legend-mid" style="color: #f39c12; font-weight: bold;">Average</span>
-                                <span class="legend-max" style="color: #27ae60; font-weight: bold;">Best ({{ "{:.2f}".format(tls_4d_data.grid_data.global_color_config.global_max_pnl) }}%)</span>
+                                <span class="legend-max" style="color: #27ae60; font-weight: bold;">Best ({{ "%.2f"|format(tls_4d_data.grid_data.global_color_config.global_max_pnl) }}%)</span>
                             </div>
                         </div>
                     </div>
@@ -595,7 +584,7 @@
                             </div>
                             <div class="stat-item">
                                 <div class="stat-value" style="font-size: 1.5em; font-weight: bold; color: {% if tls_grouped_data.summary.effective_groups > 0 %}#28a745{% else %}#dc3545{% endif %};'>{{ tls_grouped_data.summary.effective_groups }}</div>
-                                <div class="stat-label" style="font-size: 0.9em; color: #6c757d;">Effective Groups ({{ "{:.1f}".format(tls_grouped_data.summary.effectiveness_rate) }}%)</div>
+                                <div class="stat-label" style="font-size: 0.9em; color: #6c757d;">Effective Groups ({{ "%.1f"|format(tls_grouped_data.summary.effectiveness_rate) }}%)</div>
                             </div>
                             <div class="stat-item">
                                 <div class="stat-value" style="font-size: 1.5em; font-weight: bold; color: #17a2b8;">{{ tls_grouped_data.summary.total_combinations }}</div>
@@ -610,15 +599,93 @@
                         {% if tls_grouped_data.summary.best_group %}
                         <div class="best-group-highlight" style="margin-top: 15px; padding: 10px; background: #d4edda; border-radius: 3px; border-left: 4px solid #28a745;">
                             <strong>🏆 Best Group:</strong> {{ tls_grouped_data.summary.best_group.parameters }} 
-                            | PnL: <span class="positive">{{ "{:.2f}".format(tls_grouped_data.summary.best_group.pnl) }}%</span> 
-                            | Effectiveness: <span class="{% if tls_grouped_data.summary.best_group.effectiveness > 0 %}positive{% else %}negative{% endif %}">{{ "{:+.1f}".format(tls_grouped_data.summary.best_group.effectiveness) }}%</span>
+                            | PnL: <span class="positive">{{ "%.2f"|format(tls_grouped_data.summary.best_group.pnl) }}%</span> 
+                            | Effectiveness: <span class="{% if tls_grouped_data.summary.best_group.effectiveness > 0 %}positive{% else %}negative{% endif %}">{{ "%+.1f"|format(tls_grouped_data.summary.best_group.effectiveness) }}%</span>
                         </div>
                         {% endif %}
                     </div>
                     {% endif %}
                     
                     <!-- Expandable Grouped Ranking Table -->
-                    <div id="grouped-ranking-table-container">{{ tls_grouped_data.table_html | safe }}</div>
+                    <div class="grouped-ranking-table-container">
+                        <div class="table-header">
+                            <h4>🏆 Top TLS Parameter Groups - Grouped by Similarity (Max 4-Point Distance)</h4>
+                            <p class="table-description">
+                                Groups show best representative combination with expandable similar alternatives. 
+                                Click (+) to expand group details.
+                            </p>
+                        </div>
+                        
+                        <table class="table table-striped table-hover" id="grouped_ranking_table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;"></th>
+                                    <th>Rank</th>
+                                    <th>Strategy</th>
+                                    <th>Representative Parameters</th>
+                                    <th>Rep. PnL (%)</th>
+                                    <th>Avg Group PnL (%)</th>
+                                    <th>Group Size</th>
+                                    <th>TLS Effectiveness (%)</th>
+                                    <th>Win Rate (%)</th>
+                                    <th>Baseline PnL (%)</th>
+                                    <th>Similar Combos</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for group in tls_grouped_data.table_data %}
+                                <tr class="group-main-row" data-group-id="{{ group.group_id }}" data-expanded="false">
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-secondary expand-btn" onclick="toggleGroup('{{ group.group_id }}')" title="Expand group details">
+                                            <span class="expand-icon">+</span>
+                                        </button>
+                                    </td>
+                                    <td><strong>{{ group.rank }}</strong></td>
+                                    <td><small>{{ group.representative.strategy_id }}</small></td>
+                                    <td>
+                                        <div class="parameter-display">
+                                            <span class="param-group">TP: {{ group.representative.tp_level }}%</span>
+                                            <span class="param-group">SL: {{ group.representative.sl_level }}%</span>
+                                            <span class="param-group">TLS Act: {{ group.representative.tls_activation }}%</span>
+                                            <span class="param-group">Trail: {{ group.representative.tls_trail }}%</span>
+                                        </div>
+                                    </td>
+                                    <td class="{{ group.representative.pnl_class }}"><strong>{{ "%.2f"|format(group.representative.pnl_pct) }}%</strong></td>
+                                    <td class="{{ group.group_metrics.avg_pnl_class }}">{{ "%.2f"|format(group.group_metrics.avg_pnl) }}%</td>
+                                    <td>{{ group.group_metrics.group_size }}</td>
+                                    <td class="{{ group.group_metrics.effectiveness_class }}"><strong>{{ "%+.1f"|format(group.group_metrics.tls_effectiveness) }}%</strong></td>
+                                    <td>{{ "%.1f"|format(group.group_metrics.win_rate) }}%</td>
+                                    <td class="{{ group.group_metrics.baseline_class }}">{{ "%.2f"|format(group.group_metrics.baseline_pnl) }}%</td>
+                                    <td>{{ group.group_metrics.actual_similar_count }}</td>
+                                </tr>
+                                
+                                <!-- Sub-rows for similar combinations -->
+                                {% for similar in group.similar_combinations %}
+                                <tr class="group-sub-row" data-group-id="{{ group.group_id }}" style="display: none;">
+                                    <td></td>
+                                    <td class="sub-rank">{{ similar.sub_rank }}</td>
+                                    <td><small>{{ similar.strategy_id }}</small></td>
+                                    <td class="sub-params">
+                                        <div class="parameter-display similar-params">
+                                            <span class="param-group">TP: {{ similar.tp_level }}%</span>
+                                            <span class="param-group">SL: {{ similar.sl_level }}%</span>
+                                            <span class="param-group">TLS Act: {{ similar.tls_activation }}%</span>
+                                            <span class="param-group">Trail: {{ similar.tls_trail }}%</span>
+                                        </div>
+                                    </td>
+                                    <td class="{{ similar.pnl_class }}">{{ "%.2f"|format(similar.pnl_pct) }}%</td>
+                                    <td class="text-muted">{{ "%.2f"|format(similar.pnl_pct) }}%</td>
+                                    <td class="text-muted">{{ similar.group_size }}</td>
+                                    <td class="{{ similar.effectiveness_class }}">{{ "%+.1f"|format(similar.tls_effectiveness) }}%</td>
+                                    <td class="text-muted">{{ "%.1f"|format(similar.win_rate) }}%</td>
+                                    <td class="text-muted">{{ "%.2f"|format(similar.baseline_pnl) }}%</td>
+                                    <td class="text-muted">-</td>
+                                </tr>
+                                {% endfor %}
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
                 {% else %}
                 <div class="tls-grouped-ranking-section" style="margin-top: 40px;">
@@ -628,22 +695,6 @@
                 {% endif %}
             </div>
             {% endif %}
-                                    
-            <!-- Smart Recommendations Section -->
-            {% if tls_analysis.summary %}
-            <div class="recommendation" style="background-color: #e8f5e8; color: #2d5016; border: 1px solid #c3e6c3;">
-                <h4>💡 Intelligent TLS Recommendations</h4>
-                <ul>
-                    <li><strong>Strategies Analyzed:</strong> {{ tls_analysis.summary.total_strategies }}</li>
-                    <li><strong>Strategies with TLS Benefit:</strong> {{ tls_analysis.summary.strategies_improved }} ({{ "%.1f"|format(tls_analysis.summary.improvement_rate) }}%)</li>
-                    <li><strong>Average Improvement:</strong> {{ "%.2f"|format(tls_analysis.summary.avg_benefit_when_positive) }}% when TLS is beneficial</li>
-                    {% if tls_analysis.summary.best_performing_strategy %}
-                    <li><strong>Best Performer:</strong> {{ tls_analysis.summary.best_performing_strategy }}</li>
-                    {% endif %}
-                </ul>
-                <!-- TODO: Add machine learning insights and pattern recognition results -->
-            </div>
-            {% endif %}                      
         </div>
         {% else %}
         <div class="section">
@@ -654,8 +705,7 @@
             </h2>
             <div class="skipped">TLS analysis was not performed or failed. {{ tls_analysis.get('error', 'No TLS data available') if tls_analysis else 'TLS analysis not executed' }}</div>
         </div>
-        {% endif %}
-
+        {% endif %}       
     </div>
     
     <script>

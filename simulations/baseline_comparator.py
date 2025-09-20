@@ -150,13 +150,13 @@ class StrategyBaselineComparator:
                 'best_tls_sl': best_tls_result['sl_level'],
                 'best_tls_activation': best_tls_result['tls_activation'],
                 'best_tls_trail': best_tls_result['tls_trail'],
-                'best_tls_benefit_pct': best_tls_result['tls_benefit_pct'],
+                'tls_benefit_pct': best_tls_result['tls_benefit_pct'],
                 'improvement_rate_pct': improvement_rate,
                 'avg_improvement_when_positive': avg_improvement,
                 'avg_risk_increase_when_negative': avg_risk_increase,
                 'total_combinations_tested': total_combinations,
                 'combinations_improved': improvement_count,
-                'tls_recommended': best_tls_result['tls_benefit_pct'] > 0
+                'tls_improves_performance': best_tls_result['tls_benefit_pct'] > 0
             })
         
         return pd.DataFrame(strategy_effectiveness)

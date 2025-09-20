@@ -214,12 +214,12 @@ class HTMLReportGenerator:
                 if hasattr(baseline_comparison, 'empty'):
                     if not baseline_comparison.empty:
                         total_strategies = len(baseline_comparison)
-                        improved_strategies = len(baseline_comparison[baseline_comparison['tls_recommended']])
+                        improved_strategies = len(baseline_comparison[baseline_comparison['tls_improves_performance']])
                         improvement_rate = (improved_strategies / total_strategies * 100) if total_strategies > 0 else 0
-                        avg_benefit = baseline_comparison['best_tls_benefit_pct'].mean()
+                        avg_benefit = baseline_comparison['tls_benefit_pct'].mean()
                         
                         # Get top 5 TLS improvements for table
-                        top_improvements = baseline_comparison.nlargest(5, 'best_tls_benefit_pct').to_dict('records')
+                        top_improvements = baseline_comparison.nlargest(5, 'tls_benefit_pct').to_dict('records')
                         
                         tls_summary = {
                             'total_strategies': total_strategies,
@@ -234,11 +234,11 @@ class HTMLReportGenerator:
                     improved_strategies = len([row for row in baseline_comparison if row.get('tls_improves_performance', False)])
                     improvement_rate = (improved_strategies / total_strategies * 100) if total_strategies > 0 else 0
                     
-                    tls_benefits = [row['best_tls_benefit_pct'] for row in baseline_comparison]
+                    tls_benefits = [row['tls_benefit_pct'] for row in baseline_comparison]
                     avg_benefit = sum(tls_benefits) / len(tls_benefits) if tls_benefits else 0
                     
                     # Get top 5 TLS improvements for table
-                    top_improvements = sorted(baseline_comparison, key=lambda x: x['best_tls_benefit_pct'], reverse=True)[:5]
+                    top_improvements = sorted(baseline_comparison, key=lambda x: x['tls_benefit_pct'], reverse=True)[:5]
                     
                     tls_summary = {
                         'total_strategies': total_strategies,
@@ -263,11 +263,11 @@ class HTMLReportGenerator:
         
         # Prepare TLS grouped ranking data for template
         tls_grouped_data = None
-        if tls_analysis and tls_analysis.get('status') == 'SUCCESS' and charts.get('tls_grouped_table'):
+        if tls_analysis and tls_analysis.get('status') == 'SUCCESS' and charts.get('tls_grouped_combinations_exist'):
             tls_grouped_data = {
-                'table_html': charts['tls_grouped_table'],
+                'table_data': charts.get('tls_grouped_table_data', []),
                 'summary': charts.get('tls_grouped_summary', {}),
-                'grouped_combinations': True  # Flag to show section
+                'grouped_combinations': True
             }
 
         template_data = {
@@ -378,7 +378,7 @@ class HTMLReportGenerator:
             baseline_pnl = [row['baseline_pnl'] for row in baseline_data]
             best_tls_pnl = [row['best_tls_pnl'] for row in baseline_data]
             strategy_names = [row['strategy_instance_id'] for row in baseline_data]
-            tls_benefits = [row['best_tls_benefit_pct'] for row in baseline_data]
+            tls_benefits = [row['tls_benefit_pct'] for row in baseline_data] # <-- POPRAWKA
             
             # Add scatter points
             fig.add_trace(go.Scatter(
@@ -600,7 +600,7 @@ class HTMLReportGenerator:
             improved_count = len([row for row in baseline_data if row.get('tls_improves_performance', False)])
             improvement_rate = (improved_count / total_strategies * 100) if total_strategies > 0 else 0
             
-            tls_benefits = [row['best_tls_benefit_pct'] for row in baseline_data]
+            tls_benefits = [row['tls_benefit_pct'] for row in baseline_data] # <-- POPRAWKA
             avg_benefit = sum(tls_benefits) / len(tls_benefits) if tls_benefits else 0
             best_benefit = max(tls_benefits) if tls_benefits else 0
             worst_impact = min(tls_benefits) if tls_benefits else 0
@@ -647,7 +647,7 @@ class HTMLReportGenerator:
         try:
             from reporting.visualizations.interactive.tls_grouped_ranking import (
                 group_4d_combinations,
-                create_grouped_ranking_table,
+                prepare_grouped_ranking_data, # MODIFIED: Use new data prep function
                 create_group_summary_statistics
             )
             
@@ -668,8 +668,8 @@ class HTMLReportGenerator:
                 logger.warning("No TLS grouped combinations generated")
                 return {}
             
-            # Create grouped ranking table
-            grouped_table_html = create_grouped_ranking_table(grouped_combinations)
+            # Create structured data for the ranking table
+            grouped_table_data = prepare_grouped_ranking_data(grouped_combinations) # MODIFIED: Call new function
             
             # Generate summary statistics
             grouped_summary = create_group_summary_statistics(grouped_combinations)
@@ -677,9 +677,9 @@ class HTMLReportGenerator:
             logger.info(f"Generated TLS grouped ranking with {len(grouped_combinations)} groups")
             
             return {
-                'tls_grouped_table': grouped_table_html,
+                'tls_grouped_table_data': grouped_table_data, # MODIFIED: Pass structured data
                 'tls_grouped_summary': grouped_summary,
-                'tls_grouped_combinations': grouped_combinations
+                'tls_grouped_combinations_exist': True if grouped_combinations else False # MODIFIED: Use boolean flag
             }
             
         except Exception as e:
