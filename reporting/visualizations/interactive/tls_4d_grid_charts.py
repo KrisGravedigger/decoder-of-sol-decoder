@@ -2,7 +2,9 @@
 TLS 4D Grid Charts for Phase 3 - 4D Parameter Grid Visualization
 
 Creates sophisticated grid-based mini-heatmaps enabling visual identification 
-of optimal parameter "islands" across 4D TLS space.
+of optimal parameter "islands" across 4D TLS space. This module is responsible
+for generating the data structures and Plotly HTML snippets that are rendered
+by the Jinja2 template into an interactive grid.
 """
 
 import plotly.graph_objects as go
@@ -16,24 +18,27 @@ logger = logging.getLogger(__name__)
 
 
 def detect_tested_tls_ranges(tls_results_df: pd.DataFrame) -> Tuple[List[float], List[float]]:
-    """
-    AIDEV-TLS-CLAUDE: Extract actual TLS ranges from simulation results.
-    
-    Extract actual TLS ranges from simulation results to ensure grid matches data:
-    
+    """Extracts the actual tested TLS parameter ranges from the simulation results.
+
+    It is critical that the grid visualization displays exactly what was tested, rather
+    than relying on the original configuration file. This ensures data integrity and
+    prevents rendering empty rows or columns for parameters that were not simulated.
+
     Args:
-        tls_results_df: TLS simulation results DataFrame
-        
+        tls_results_df (pd.DataFrame): The DataFrame containing raw TLS simulation results,
+            which must include 'tls_activation' and 'tls_trail' columns.
+
     Returns:
-        Tuple of (tls_activation_range, tls_trail_range) - sorted unique values from simulation results
-        
-    Critical: Grid must display exactly what was tested, not config defaults
+        Tuple[List[float], List[float]]: A tuple containing two sorted lists of unique
+        values: (tls_activation_range, tls_trail_range). Returns empty lists if
+        the input is empty or columns are missing.
     """
     if tls_results_df.empty:
         logger.warning("Empty TLS results DataFrame provided to detect_tested_tls_ranges")
         return [], []
     
     try:
+        # AIDEV-NOTE-CLAUDE: Convert to float and sort to ensure a consistent grid layout.
         tls_activation_range = sorted([float(x) for x in tls_results_df['tls_activation'].unique()])
         tls_trail_range = sorted([float(x) for x in tls_results_df['tls_trail'].unique()])
         
@@ -49,20 +54,22 @@ def detect_tested_tls_ranges(tls_results_df: pd.DataFrame) -> Tuple[List[float],
 
 
 def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instances_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
-    """
-    AIDEV-FIX-CLAUDE: Calculate a DIVERGING global min/max PnL scale centered at 0.
-    
-    Critical Requirements:
-    - Single color scale used by ALL mini-heatmaps for comparability.
-    - Scale is centered at 0: Red (negative) -> Yellow (zero) -> Green (positive).
-    - This enhances visual contrast for small but significant PnL changes.
-    
+    """Calculates a global, symmetric, diverging color scale for PnL percentages.
+
+    This function is critical for visual consistency across all mini-heatmaps. By using a
+    single color scale, it allows for direct and accurate comparison of performance between
+    different TLS parameter combinations. The scale is centered at zero to clearly
+    distinguish between profit and loss.
+
     Args:
-        tls_results_df: TLS simulation results DataFrame
-        strategy_instances_df: Strategy instances for percentage calculations
-        
+        tls_results_df (pd.DataFrame): The DataFrame with all TLS simulation results.
+        strategy_instances_df (Optional[pd.DataFrame]): DataFrame containing strategy instance
+            metadata, used to calculate PnL percentages from absolute SOL values.
+
     Returns:
-        Dictionary with symmetric min/max PnL and a diverging color scale.
+        Dict[str, Any]: A configuration dictionary containing the symmetric min/max PnL
+        values ('global_min_pnl', 'global_max_pnl') and the Plotly color scale list
+        ('color_scale').
     """
     if tls_results_df.empty:
         logger.warning("Empty TLS results DataFrame provided to calculate_global_color_scale")
@@ -75,7 +82,7 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
     try:
         pnl_percentages = []
         if strategy_instances_df is not None and not strategy_instances_df.empty:
-            # Merge to efficiently get total_invested for all results
+            # AIDEV-PERF-CLAUDE: Using a merge is more efficient than iterating for large datasets.
             merged_df = pd.merge(tls_results_df, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
             merged_df['total_invested'] = merged_df['total_invested'].fillna(1.0) # Avoid division by zero
             valid_investment = merged_df['total_invested'] > 0
@@ -89,11 +96,13 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
             # Final fallback for empty data
              return {'global_min_pnl': -1.0, 'global_max_pnl': 1.0, 'color_scale': [[0.0, '#e74c3c'], [0.5, '#f39c12'], [1.0, '#27ae60']]}
 
-        # AIDEV-FIX-CLAUDE: Logic for diverging scale
+        # AIDEV-4D-VIZ-CLAUDE: This logic creates a symmetric (diverging) scale.
+        # It finds the largest absolute PnL value and sets the scale from -X to +X.
+        # This ensures that zero is always the center of the color map (yellow),
+        # which is crucial for intuitive visual analysis.
         global_min_pnl = float(min(pnl_percentages))
         global_max_pnl = float(max(pnl_percentages))
         
-        # Determine the maximum absolute value to make the scale symmetric around 0
         max_abs_val = max(abs(global_min_pnl), abs(global_max_pnl))
         if max_abs_val < 0.5: # Ensure a minimum range for better visuals
             max_abs_val = 0.5
@@ -101,8 +110,8 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         symmetric_min = -max_abs_val
         symmetric_max = max_abs_val
         
-        # AIDEV-FIX-GEMINI: Define a more vibrant 5-point diverging colorscale
-        # This makes near-zero values more distinct and improves overall readability.
+        # AIDEV-4D-VIZ-CLAUDE: A 5-point diverging scale provides better visual contrast,
+        # especially for values near zero, compared to a simple 3-point scale.
         color_scale = [
             [0.0,  '#d73027'],  # Dark Red
             [0.4,  '#fc8d59'],  # Light Red/Orange
@@ -121,7 +130,7 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         
     except Exception as e:
         logger.error(f"Failed to calculate global color scale: {e}", exc_info=True)
-        # Return safe defaults
+        # Return safe defaults in case of failure
         return {
             'global_min_pnl': -5.0,
             'global_max_pnl': 5.0,
@@ -133,11 +142,23 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
                        tls_results_df: pd.DataFrame,
                        global_color_config: Dict[str, Any],
                        strategy_instances_df: Optional[pd.DataFrame] = None) -> Tuple[Optional[str], float]:
-    """
-    AIDEV-FIX-2-CLAUDE: Generate individual TP×SL heatmap with corrected logic.
-    - FIX 1: 'Best PnL' is now the max PnL from within this specific heatmap's data.
-    - FIX 2: Heatmap `z` values are now correctly passed as percentages to match the global color scale.
-    - FIX 3: Figure height and margins are adjusted to prevent label cropping.
+    """Generates a single TPxSL mini-heatmap for a specific TLS combination.
+
+    This function filters the main results for a given TLS activation/trail pair,
+    pivots the data to form a TPxSL matrix, and renders it as a self-contained
+    Plotly HTML div. It adheres to the global color scale for consistency.
+
+    Args:
+        tls_activation (float): The specific TLS activation level to filter for.
+        tls_trail (float): The specific TLS trail level to filter for.
+        tls_results_df (pd.DataFrame): The main DataFrame of all TLS simulation results.
+        global_color_config (Dict[str, Any]): The global color scale configuration.
+        strategy_instances_df (Optional[pd.DataFrame]): Data for calculating PnL percentages.
+
+    Returns:
+        Tuple[Optional[str], float]: A tuple containing:
+        - The generated HTML string for the Plotly chart div, or None if no data.
+        - The best PnL percentage found within this specific heatmap's data.
     """
     try:
         filtered_data = tls_results_df[
@@ -154,7 +175,8 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
         if not tp_levels or not sl_levels:
             return None, 0.0
 
-        # Create the Z-matrix with PnL percentages for both coloring and hover info.
+        # AIDEV-NOTE-CLAUDE: The z-matrix must contain PnL percentages to match the
+        # global color scale, which is also based on percentages.
         z_matrix_pct = []
         for sl in sl_levels:
             row_pct = []
@@ -178,12 +200,10 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
                     row_pct.append(None)
             z_matrix_pct.append(row_pct)
 
-        # AIDEV-FIX-1: Calculate 'best_performance_pct' as the maximum value within this specific z_matrix.
-        # This ensures each frame shows its own local best PnL.
+        # AIDEV-NOTE-CLAUDE: 'best_performance_pct' is the local maximum for this specific
+        # heatmap. This value is used to color the cell's header in the final grid.
         best_performance_pct = np.nanmax(z_matrix_pct) if np.any(z_matrix_pct) else 0.0
 
-        # AIDEV-FIX-2: Use the z_matrix_pct for the heatmap's `z` value.
-        # This aligns the data unit (percentage) with the global color scale unit (percentage), fixing the uniform color bug.
         fig = go.Figure(data=go.Heatmap(
             z=z_matrix_pct,
             x=[f"{tp}%" for tp in tp_levels],
@@ -196,16 +216,19 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
             hovertemplate='TP: %{x}<br>SL: %{y}<br>PnL: %{z:.2f}%<extra></extra>'
         ))
 
-        # AIDEV-FIX-GEMINI: Further adjust layout to guarantee axis label visibility.
+        # AIDEV-4D-VIZ-CLAUDE: Layout adjustments are critical to prevent axis labels from
+        # being cropped in the compact grid view.
         fig.update_layout(
             title=f"TLS({tls_activation}%, {tls_trail}%)",
-            height=240,  # Slightly more vertical space
-            margin=dict(l=35, r=10, t=40, b=60),  # Significantly larger bottom margin for labels
+            height=240,
+            margin=dict(l=35, r=10, t=40, b=60), # Larger bottom margin for labels
             xaxis=dict(title="TP", title_font_size=10, tickfont_size=8),
             yaxis=dict(title="SL", title_font_size=10, tickfont_size=8),
             title_font_size=12
         )
         
+        # AIDEV-NOTE-CLAUDE: Returning a self-contained HTML div is a pragmatic choice that
+        # simplifies injection into the Jinja2 template.
         heatmap_html = fig.to_html(include_plotlyjs=False, full_html=False, div_id=f"mini_heatmap_{tls_activation}_{tls_trail}")
         
         return heatmap_html, best_performance_pct
@@ -220,76 +243,52 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
                       baseline_data: Optional[Dict[str, float]] = None,
                       include_win_rate_data: bool = True,
                       global_color_config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    AIDEV-4D-VIZ-CLAUDE: Create complete 4D grid of mini-heatmaps.
-    
-    Grid Organization:
-    - Rows: TLS_activation levels (ascending order)
-    - Columns: TLS_trail levels (ascending order)
-    - Each cell: TP×SL mini-heatmap for that TLS combination
-    
-    Header Coloring Logic:
-    - Calculate average PnL percentage for each TLS combination
-    - Apply color coding: >5% = Green, 1-5% = Yellow, <1% = Red
-    - Color intensity reflects relative performance within grid
-    
-    Features:
-    - Strategy filtering: Show only selected strategy if filter applied
-    - Global color scale: All mini-heatmaps use same scale for comparability
-    - Missing data handling: Empty cells for untested combinations
-    - Baseline comparison: Include baseline data for TLS improvement filtering
-    
+    """Orchestrates the creation of the complete 4D grid of mini-heatmaps.
+
+    This function builds the main data structure that the frontend JavaScript consumes
+    to render and filter the interactive 4D grid. It iterates through all tested
+    TLS activation and trail combinations, generating a mini-heatmap for each one.
+
     Args:
-        tls_results_df: Complete TLS simulation results
-        strategy_filter: Optional strategy instance ID to filter by
-        strategy_instances_df: Strategy instances data for percentage calculations
-        baseline_data: Baseline performance data for comparison
-        
+        tls_results_df (pd.DataFrame): The complete dataset of TLS simulation results.
+        strategy_filter (Optional[str]): If provided, filters the data for a specific
+            strategy_instance_id before generating the grid.
+        strategy_instances_df (Optional[pd.DataFrame]): Data for PnL percentage calculations.
+        baseline_data (Optional[Dict[str, float]]): Baseline performance data for comparison,
+            mapping strategy_instance_id to its best non-TLS PnL.
+        include_win_rate_data (bool): Whether to calculate and include win rate data.
+        global_color_config_override (Optional[Dict[str, Any]]): A pre-calculated global
+            color scale to use, preventing recalculation for each strategy.
+
     Returns:
-        Dictionary with grid_data, global_color_config, baseline_info, and range information
+        Dict[str, Any]: A dictionary that fully complies with the Frontend Data Contract.
+        It contains the nested 'grid_data' list, range information, color configuration,
+        and baseline info required by the Jinja2 template and its JavaScript.
     """
     if tls_results_df.empty:
         logger.warning("Empty TLS results DataFrame provided to create_4d_tls_grid")
         return {
-            'grid_data': [],
-            'global_color_config': {},
-            'tls_activation_range': [],
-            'tls_trail_range': [],
-            'error': 'No TLS data available'
+            'grid_data': [], 'global_color_config': {}, 'tls_activation_range': [],
+            'tls_trail_range': [], 'error': 'No TLS data available'
         }
     
     try:
-        # HYBRID APPROACH: Client-side for "All", Server-side for specific strategies
         if strategy_filter and strategy_filter != 'all' and strategy_filter != 'All Strategies':
-            # Server-side filtering for specific strategy selection
             filtered_df = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_filter]
             if filtered_df.empty:
                 logger.warning(f"No data found for strategy filter: {strategy_filter}")
-                return {
-                    'grid_data': [],
-                    'global_color_config': {},
-                    'tls_activation_range': [],
-                    'tls_trail_range': [],
-                    'error': f'No data for strategy: {strategy_filter}'
-                }
+                return {'grid_data': [], 'global_color_config': {}, 'tls_activation_range': [],
+                        'tls_trail_range': [], 'error': f'No data for strategy: {strategy_filter}'}
         else:
-            # Client-side filtering for "All Strategies" - use all data
             filtered_df = tls_results_df
         
-        # Detect actual TLS ranges from data
         tls_activation_range, tls_trail_range = detect_tested_tls_ranges(filtered_df)
         
         if not tls_activation_range or not tls_trail_range:
             logger.warning("No valid TLS ranges detected in data")
-            return {
-                'grid_data': [],
-                'global_color_config': {},
-                'tls_activation_range': [],
-                'tls_trail_range': [],
-                'error': 'No valid TLS parameter ranges found'
-            }
+            return {'grid_data': [], 'global_color_config': {}, 'tls_activation_range': [],
+                    'tls_trail_range': [], 'error': 'No valid TLS parameter ranges found'}
         
-        # Calculate global color scale
         if global_color_config_override:
             global_color_config = global_color_config_override
             logger.info("Using provided global color scale override.")
@@ -297,24 +296,17 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
             logger.info("Calculating new global color scale based on filtered data.")
             global_color_config = calculate_global_color_scale(filtered_df, strategy_instances_df)
         
-        # Generate grid of mini-heatmaps
         grid_data = []
         baseline_info = None
         
-        # Calculate baseline info for filtered strategy
         if strategy_filter and baseline_data:
             baseline_pnl = baseline_data.get(strategy_filter, 0.0)
-            # Convert baseline to percentage
             if strategy_instances_df is not None:
                 strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_filter]
                 if not strategy_info.empty:
                     total_invested = strategy_info.iloc[0]['total_invested']
                     baseline_pct = (baseline_pnl / total_invested * 100) if total_invested > 0 else 0
-                    baseline_info = {
-                        'strategy_id': strategy_filter,
-                        'baseline_pnl_sol': baseline_pnl,
-                        'baseline_pnl_pct': baseline_pct
-                    }
+                    baseline_info = {'strategy_id': strategy_filter, 'baseline_pnl_sol': baseline_pnl, 'baseline_pnl_pct': baseline_pct}
         
         for activation in tls_activation_range:
             row_data = []
@@ -323,82 +315,57 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
                     activation, trail, filtered_df, global_color_config, strategy_instances_df
                 )
                 
-                # Determine header color based on best percentage performance (changed from avg)
-                if best_performance_pct > 5.0:  # > 5% profit
-                    header_class = 'performance-excellent'
-                elif best_performance_pct > 1.0:  # > 1% profit 
-                    header_class = 'performance-good'
-                else:  # <= 1% or negative
-                    header_class = 'performance-average'
+                header_class = 'performance-average'
+                if best_performance_pct > 5.0: header_class = 'performance-excellent'
+                elif best_performance_pct > 1.0: header_class = 'performance-good'
                 
-                # Calculate TLS improvement vs baseline (if available)
                 tls_improvement = None
                 if baseline_info and best_performance_pct is not None:
                     tls_improvement = best_performance_pct - baseline_info['baseline_pnl_pct']
                 
-                # Calculate win rate for this cell (if enabled)
                 cell_win_rate = None
                 if include_win_rate_data and heatmap_html is not None:
-                    cell_data = filtered_df[
-                        (filtered_df['tls_activation'] == activation) & 
-                        (filtered_df['tls_trail'] == trail)
-                    ]
+                    cell_data = filtered_df[(filtered_df['tls_activation'] == activation) & (filtered_df['tls_trail'] == trail)]
                     if not cell_data.empty:
-                        # Calculate win rate based on positive PnL positions
                         positive_results = 0
                         for _, pos_row in cell_data.iterrows():
                             pos_strategy_id = pos_row['strategy_instance_id']
                             pos_total_invested = 1.0
                             if strategy_instances_df is not None:
                                 pos_strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == pos_strategy_id]
-                                if not pos_strategy_info.empty:
-                                    pos_total_invested = pos_strategy_info.iloc[0]['total_invested']
-                            
+                                if not pos_strategy_info.empty: pos_total_invested = pos_strategy_info.iloc[0]['total_invested']
                             pos_pnl_pct = (pos_row['simulated_pnl'] / pos_total_invested * 100) if pos_total_invested > 0 else 0
-                            if pos_pnl_pct > 0:
-                                positive_results += 1
-                        
+                            if pos_pnl_pct > 0: positive_results += 1
                         cell_win_rate = (positive_results / len(cell_data) * 100) if len(cell_data) > 0 else 0
                 
-                # Get actual strategy IDs from the cell data for proper filtering
-                cell_data = filtered_df[
-                    (filtered_df['tls_activation'] == activation) & 
-                    (filtered_df['tls_trail'] == trail)
-                ]
-                
-                # Extract unique strategy IDs from this cell's data
+                cell_data = filtered_df[(filtered_df['tls_activation'] == activation) & (filtered_df['tls_trail'] == trail)]
                 cell_strategy_ids = [str(x) for x in cell_data['strategy_instance_id'].unique()] if not cell_data.empty else []
                 
-                # Determine strategy_id based on filtering mode
-                if strategy_filter and strategy_filter != 'all' and strategy_filter != 'All Strategies':
-                    # Single strategy mode: all cells have the same strategy_id
-                    primary_strategy_id = strategy_filter
-                    strategy_ids = [strategy_filter] if cell_strategy_ids else []
-                else:
-                    # All strategies mode: mixed data
-                    primary_strategy_id = cell_strategy_ids[0] if cell_strategy_ids else None
-                    strategy_ids = cell_strategy_ids
-                
+                is_single_mode = bool(strategy_filter and strategy_filter != 'all' and strategy_filter != 'All Strategies')
+                primary_strategy_id = strategy_filter if is_single_mode else (cell_strategy_ids[0] if cell_strategy_ids else None)
+                strategy_ids = [strategy_filter] if is_single_mode and cell_strategy_ids else cell_strategy_ids
+
+                # AIDEV-NOTE-CLAUDE: This dictionary is the "Cell Object" defined in the Frontend Data Contract.
+                # Every key here is required by the JavaScript for display or filtering.
                 row_data.append({
                     'tls_activation': float(activation),
                     'tls_trail': float(trail),
                     'heatmap_html': heatmap_html,
-                    'best_performance': float(best_performance_pct) if best_performance_pct is not None else 0.0,  # Changed from avg to best
+                    'best_performance': float(best_performance_pct) if best_performance_pct is not None else 0.0,
                     'header_class': header_class,
                     'title': f'TLS({activation}%, {trail}%)',
                     'has_data': heatmap_html is not None,
-                    'tls_improvement': float(tls_improvement) if tls_improvement is not None else None,  # Ensure Python float
-                    'win_rate': float(cell_win_rate) if cell_win_rate is not None else None,  # Ensure Python float
-                    'strategy_ids': strategy_ids,  # Already a list of strings
-                    'primary_strategy_id': primary_strategy_id,  # String
-                    'is_single_strategy_mode': bool(strategy_filter and strategy_filter != 'all' and strategy_filter != 'All Strategies')
+                    'tls_improvement': float(tls_improvement) if tls_improvement is not None else None,
+                    'win_rate': float(cell_win_rate) if cell_win_rate is not None else None,
+                    'strategy_ids': strategy_ids,
+                    'primary_strategy_id': primary_strategy_id,
+                    'is_single_strategy_mode': is_single_mode
                 })
             
             grid_data.append(row_data)
         
-        logger.info(f"Created 4D TLS grid: {len(tls_activation_range)} × {len(tls_trail_range)} = {len(tls_activation_range) * len(tls_trail_range)} cells")
+        logger.info(f"Created 4D TLS grid: {len(tls_activation_range)} rows × {len(tls_trail_range)} columns.")
         
-        # Calculate always-visible baseline information
         always_visible_baseline = None
         if strategy_filter and baseline_data and strategy_instances_df is not None:
             strategy_baseline_pnl = baseline_data.get(strategy_filter, 0.0)
@@ -407,212 +374,53 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
                 total_invested = strategy_info.iloc[0]['total_invested']
                 baseline_pct = (strategy_baseline_pnl / total_invested * 100) if total_invested > 0 else 0
                 always_visible_baseline = {
-                    'strategy_id': strategy_filter,
-                    'baseline_pnl_pct': baseline_pct,
+                    'strategy_id': strategy_filter, 'baseline_pnl_pct': baseline_pct,
                     'display_text': f"Current baseline to beat: {baseline_pct:.2f}%"
                 }
-        elif baseline_data:  # Global baseline when no strategy filter
-            # Calculate average baseline across all strategies
+        elif baseline_data: # Global baseline for "All Strategies" view
             baseline_values = list(baseline_data.values())
             if baseline_values and strategy_instances_df is not None:
                 avg_baseline = np.mean(baseline_values)
-                # Convert to approximate percentage (using average total_invested)
                 avg_total_invested = strategy_instances_df['total_invested'].mean() if 'total_invested' in strategy_instances_df.columns else 1.0
                 baseline_pct = (avg_baseline / avg_total_invested * 100) if avg_total_invested > 0 else 0
                 always_visible_baseline = {
-                    'strategy_id': 'all',
-                    'baseline_pnl_pct': baseline_pct,
+                    'strategy_id': 'all', 'baseline_pnl_pct': baseline_pct,
                     'display_text': f"Average baseline across all strategies: {baseline_pct:.2f}%"
                 }
         
+        # AIDEV-NOTE-CLAUDE: This final dictionary is the "Grid Object" defined in the contract.
         return {
             'grid_data': grid_data,
             'global_color_config': global_color_config,
-            'tls_activation_range': tls_activation_range,  # Already converted to Python floats
-            'tls_trail_range': tls_trail_range,  # Already converted to Python floats
+            'tls_activation_range': tls_activation_range,
+            'tls_trail_range': tls_trail_range,
             'total_combinations': int(len(tls_activation_range) * len(tls_trail_range)),
             'strategy_filter': strategy_filter,
-            'baseline_info': baseline_info,  # Legacy baseline info
-            'always_visible_baseline': always_visible_baseline,  # NEW: Always visible baseline
-            'available_strategies': [str(x) for x in tls_results_df['strategy_instance_id'].unique()] if not tls_results_df.empty else []  # For strategy dropdown
+            'baseline_info': baseline_info,
+            'always_visible_baseline': always_visible_baseline,
+            'available_strategies': [str(x) for x in tls_results_df['strategy_instance_id'].unique()] if not tls_results_df.empty else []
         }
         
     except Exception as e:
-        logger.error(f"Failed to create 4D TLS grid: {e}")
-        return {
-            'grid_data': [],
-            'global_color_config': {},
-            'tls_activation_range': [],
-            'tls_trail_range': [],
-            'error': f'Grid generation failed: {str(e)}'
-        }
-
-
-def create_grid_filter_controls(available_strategies: Optional[List[str]] = None) -> Dict[str, Any]:
-    """
-    AIDEV-4D-VIZ-CLAUDE: Generate filtering interface for 4D grid.
-    
-    Filter Controls:
-    - Min Performance: Range slider (0-20%, step 0.25%)
-    - Strategy Filter: Dropdown with all available strategies + "All Strategies" option
-    - Min Win Rate: Range slider (30-95%, step 5%) 
-    - Show Only Improvements: Checkbox (TLS better than baseline)
-    
-    JavaScript Integration:
-    - Real-time filtering without page reload
-    - Visual feedback: Filtered cells fade out, active cells remain prominent
-    - Filter state preservation: Maintain filters when navigating from Phase 2
-    
-    Returns:
-        Filter configuration dictionary for HTML template
-    """
-    try:
-        # Get available strategies (removed "All Strategies" option)
-        # Populate strategy options from actual data
-        strategy_options = []
-        if available_strategies:
-            strategy_options.extend(sorted(available_strategies))
-        
-        filter_config = {
-            'min_performance': {
-                'type': 'range',
-                'min': -5.0,  # Allow negative performance filtering
-                'max': 20.0,
-                'step': 0.25,
-                'default': -5.0,  # Start with no filtering
-                'label': 'Min Performance (%)',
-                'id': 'grid-min-performance',
-                'scale_markers': [0, 5, 10, 15, 20],  # Add scale markers
-                'zero_marker': True  # Highlight 0% marker
-            },
-            'strategy_filter': {
-                'type': 'dropdown',
-                'options': strategy_options,  # Now populated from actual data without "All Strategies"
-                'default': strategy_options[0] if strategy_options else '',  # Default to first strategy
-                'label': 'Strategy',
-                'id': 'grid-strategy-filter'
-            },
-            'min_win_rate': {
-                'type': 'range',
-                'min': 0,
-                'max': 100,
-                'step': 5,
-                'default': 0,  # Start with no filtering
-                'label': 'Min Win Rate (%)',
-                'id': 'grid-min-winrate',
-                'enabled': True  # Now fully enabled with data
-            },
-            'show_only_improvements': {
-                'type': 'checkbox',
-                'default': False,
-                'label': 'Show Only TLS Improvements',
-                'id': 'grid-show-improvements'
-            }
-        }
-        
-        logger.debug("Generated grid filter controls configuration")
-        return filter_config
-        
-    except Exception as e:
-        logger.error(f"Failed to create grid filter controls: {e}")
-        return {}
-
-
-def apply_grid_filters(grid_data: List[List[Dict]], filters: Dict[str, Any]) -> List[List[Dict]]:
-    """
-    AIDEV-4D-VIZ-CLAUDE: Apply active filters to grid display.
-    
-    Filtering Logic:
-    - Performance threshold: Hide cells below minimum
-    - Strategy filter: Show only selected strategy data
-    - Win rate filter: Hide cells with insufficient win rate
-    - Improvement filter: Show only cells where TLS > baseline
-    
-    Visual Effects:
-    - Filtered cells: opacity 0.3, pointer-events disabled
-    - Active cells: opacity 1.0, full interactivity
-    - Filter indicator: Show active filter count in UI
-    
-    Args:
-        grid_data: 2D array of grid cell data
-        filters: Active filter configuration
-        
-    Returns:
-        Filtered grid data with visibility flags
-    """
-    try:
-        if not grid_data or not filters:
-            return grid_data
-        
-        filtered_grid = []
-        active_filter_count = 0
-        
-        # Count active filters
-        if filters.get('minPerformance', -5.0) > -5.0:
-            active_filter_count += 1
-        if filters.get('strategy') != 'All Strategies':
-            active_filter_count += 1
-        if filters.get('minWinRate', 0) > 0:
-            active_filter_count += 1
-        if filters.get('showOnlyImprovements', False):
-            active_filter_count += 1
-        
-        for row in grid_data:
-            filtered_row = []
-            for cell in row:
-                # Apply filtering logic
-                passes_filters = True
-                
-                # Performance filter
-                if cell['avg_performance'] < filters.get('minPerformance', -5.0):
-                    passes_filters = False
-                
-                # Strategy filter - now fully implemented
-                if filters.get('strategy') != 'All Strategies':
-                    if cell.get('strategy_id') != filters.get('strategy'):
-                        passes_filters = False
-                
-                # Win rate filter - now fully implemented
-                min_win_rate = filters.get('minWinRate', 0)
-                if cell.get('win_rate') is not None and cell.get('win_rate') < min_win_rate:
-                    passes_filters = False
-                
-                # TLS improvement filter - now fully implemented
-                if filters.get('showOnlyImprovements', False):
-                    if cell.get('tls_improvement') is None or cell.get('tls_improvement') <= 0:
-                        passes_filters = False
-                
-                # Add filter state to cell
-                cell_copy = cell.copy()
-                cell_copy['passes_filters'] = passes_filters
-                cell_copy['opacity'] = 1.0 if passes_filters else 0.3
-                
-                filtered_row.append(cell_copy)
-            
-            filtered_grid.append(filtered_row)
-        
-        logger.debug(f"Applied grid filters - {active_filter_count} active filters")
-        return filtered_grid
-        
-    except Exception as e:
-        logger.error(f"Failed to apply grid filters: {e}")
-        return grid_data
+        logger.error(f"Failed to create 4D TLS grid: {e}", exc_info=True)
+        return {'grid_data': [], 'global_color_config': {}, 'tls_activation_range': [],
+                'tls_trail_range': [], 'error': f'Grid generation failed: {str(e)}'}
 
 
 def get_strategy_list_for_dropdown(tls_results_df: pd.DataFrame) -> List[str]:
-    """
-    Extract sorted strategy list for dropdown population.
-    
+    """Extracts and sorts a list of unique strategy IDs for populating UI dropdowns.
+
     Args:
-        tls_results_df: TLS simulation results DataFrame
-        
+        tls_results_df (pd.DataFrame): The DataFrame with all TLS simulation results.
+
     Returns:
-        List of strategy IDs sorted by date (newest first)
+        List[str]: A list of unique strategy instance IDs, sorted by date descending.
     """
     try:
         if tls_results_df.empty:
             return []
         
+        # AIDEV-INTEGRATE-CLAUDE: This relies on a shared utility function for consistent sorting.
         from utils.common import sort_strategies_by_date_descending
         strategies = [str(x) for x in tls_results_df['strategy_instance_id'].unique()]
         return sort_strategies_by_date_descending(strategies)
@@ -621,64 +429,8 @@ def get_strategy_list_for_dropdown(tls_results_df: pd.DataFrame) -> List[str]:
         logger.error(f"Failed to get strategy list for dropdown: {e}")
         return []
 
-
-def enhance_min_performance_slider_display() -> str:
-    """
-    Generate enhanced HTML for min performance slider with scale markers.
-    
-    Returns:
-        HTML string with enhanced slider display
-    """
-    return """
-    <div class="slider-container enhanced-slider">
-        <label for="grid-min-performance" class="form-label">Min Performance (%)</label>
-        <div class="slider-wrapper">
-            <input type="range" class="form-range" id="grid-min-performance" 
-                   min="-5" max="20" step="0.25" value="-5">
-            <div class="slider-scale">
-                <span class="scale-marker zero-marker" data-value="0">0%</span>
-                <span class="scale-marker" data-value="5">5%</span>
-                <span class="scale-marker" data-value="10">10%</span>
-                <span class="scale-marker" data-value="15">15%</span>
-                <span class="scale-marker" data-value="20">20%</span>
-            </div>
-        </div>
-        <div class="slider-value">Current: <span id="grid-performance-value">-5%</span></div>
-    </div>
-    
-    <style>
-    .enhanced-slider .slider-wrapper {
-        position: relative;
-        margin: 10px 0;
-    }
-    
-    .enhanced-slider .slider-scale {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 5px;
-        font-size: 0.8em;
-        color: #6c757d;
-    }
-    
-    .enhanced-slider .scale-marker {
-        position: relative;
-        text-align: center;
-        flex: 1;
-    }
-    
-    .enhanced-slider .zero-marker {
-        font-weight: bold;
-        color: #dc3545;
-        background-color: #fff3cd;
-        padding: 2px 4px;
-        border-radius: 3px;
-        border: 1px solid #ffc107;
-    }
-    
-    .enhanced-slider .slider-value {
-        text-align: center;
-        margin-top: 5px;
-        font-weight: bold;
-    }
-    </style>
-    """
+# NOTE: Functions create_grid_filter_controls, apply_grid_filters, and
+# enhance_min_performance_slider_display were removed as they were identified
+# as dead code. The filtering logic is now handled entirely by client-side JavaScript.
+# This aligns with the refactoring goal of separating backend data preparation from
+# frontend presentation logic.
