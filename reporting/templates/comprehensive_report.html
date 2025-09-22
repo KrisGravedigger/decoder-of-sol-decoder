@@ -456,6 +456,48 @@
                         </span>
                     </div>
                 </div>
+
+                <!-- REFACTORED: Top Combinations Table -->
+                {% if charts.get('tls_top_combinations_data') %}
+                <div class="top-combinations-table" style="margin-top: 30px;">
+                    <h4>🏆 Top Performing TLS Combinations (Best per Strategy)</h4>
+                    <table class="table table-striped table-hover" id="global_top_combinations_table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Strategy</th>
+                                <th>TP (%)</th>
+                                <th>SL (%)</th>
+                                <th>TLS Act (%)</th>
+                                <th>TLS Trail (%)</th>
+                                <th>TLS PnL (%)</th>
+                                <th>Baseline PnL (%)</th>
+                                <th>TLS Benefit (%)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for combo in charts.tls_top_combinations_data %}
+                            <tr>
+                                <td><strong>{{ loop.index }}</strong></td>
+                                <td>
+                                    <a href="#" class="top-combo-strategy-link" data-strategy-id="{{ combo.strategy_instance_id }}" 
+                                       style="text-decoration: none; color: #3498db; font-weight: bold;">
+                                        {{ combo.strategy_instance_id }}
+                                    </a>
+                                </td>
+                                <td>{{ combo.tp_level }}</td>
+                                <td>{{ combo.sl_level }}</td>
+                                <td>{{ combo.tls_activation }}</td>
+                                <td>{{ combo.tls_trail }}</td>
+                                <td class="{{ combo.tls_pnl_class }}">{{ "%.2f"|format(combo.tls_pnl) }}%</td>
+                                <td class="{{ combo.baseline_pnl_class }}">{{ "%.2f"|format(combo.baseline_pnl) }}%</td>
+                                <td class="{{ combo.benefit_class }}"><strong>{{ "%+.2f"|format(combo.tls_benefit) }}%</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
                                                
                 <!-- Strategy Performance Details Table -->
                 {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_table_html') %}

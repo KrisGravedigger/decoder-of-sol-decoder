@@ -453,7 +453,7 @@ class HTMLReportGenerator:
             
         return baseline_data
     
-    def _generate_tls_strategy_overview_charts(self, detailed_results, baseline_data: Dict[str, float]) -> Dict[str, str]:
+    def _generate_tls_strategy_overview_charts(self, detailed_results, baseline_data: Dict[str, float]) -> Dict[str, Any]:
         """Generate Phase 2 TLS strategy overview visualization components."""
         try:
             from reporting.visualizations.interactive.tls_strategy_charts import (
@@ -477,12 +477,13 @@ class HTMLReportGenerator:
             
             # Generate strategy overview charts
             strategy_scatter_chart = create_strategy_overview_scatter(tls_df, baseline_data)
-            top_combinations_table = create_global_top_combinations_table(tls_df, baseline_data)
+            # REFACTORED: This now returns a list of dictionaries (data), not HTML
+            top_combinations_data = create_global_top_combinations_table(tls_df, baseline_data)
             performance_summary = create_strategy_performance_summary(tls_df, baseline_data)
             
             return {
                 'tls_strategy_scatter_chart': strategy_scatter_chart,
-                'tls_top_combinations_table': top_combinations_table,
+                'tls_top_combinations_data': top_combinations_data, # NEW: Pass data to template
                 'tls_performance_summary': performance_summary
             }
             
