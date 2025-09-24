@@ -670,7 +670,7 @@ class HTMLReportGenerator:
                 return {}
             
             # Create structured data for the ranking table
-            grouped_table_data = prepare_grouped_ranking_data(grouped_combinations) # MODIFIED: Call new function
+            grouped_table_data = prepare_grouped_ranking_data(grouped_combinations)
             
             # Generate summary statistics
             grouped_summary = create_group_summary_statistics(grouped_combinations)
@@ -678,9 +678,9 @@ class HTMLReportGenerator:
             logger.info(f"Generated TLS grouped ranking with {len(grouped_combinations)} groups")
             
             return {
-                'tls_grouped_table_data': grouped_table_data, # MODIFIED: Pass structured data
+                'tls_grouped_table_data': grouped_table_data,
                 'tls_grouped_summary': grouped_summary,
-                'tls_grouped_combinations_exist': True if grouped_combinations else False # MODIFIED: Use boolean flag
+                'tls_grouped_combinations_exist': True if grouped_combinations else False
             }
             
         except Exception as e:
