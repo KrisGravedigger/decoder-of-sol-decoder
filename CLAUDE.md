@@ -728,3 +728,14 @@ Issue Resolution - Peak PnL Values Investigation:
 - **Multiprocessing Implementation:** The main simulation loop in `TlsRangeSimulator` was parallelized using the `multiprocessing` module. This dramatically speeds up the analysis by distributing position processing across multiple CPU cores, turning a previously linear task into a highly efficient, parallel one.
 - **Data Pipeline Stabilization:** Resolved a series of `KeyError` exceptions (`'tls_improproves_performance'`, `'tls_benefit_pct'`) by standardizing column names between `BaselineComparator` and `HtmlReportGenerator`. Fixed a `TemplateSyntaxError` in the Jinja2 template to ensure the final report renders correctly.
 - **Outcome:** The TLS simulation engine is now logically sound, architecturally clean, and significantly faster, producing reliable data for the HTML report.
+
+**2025-09-24: TLS Grouped Ranking Algorithm Fix - Phase 4 Completion**
+- **Critical Issue Resolved:** Fixed duplicate strategy entries in TLS grouped ranking table where same strategies appeared multiple times (e.g., strategy appearing in rows 9, 10, 11, 12, 15, 16)
+- **Root Cause Analysis:** Original algorithm grouped similar combinations across different strategies, causing each strategy to appear in multiple similarity groups
+- **Solution Implementation:** Modified `group_4d_combinations()` in `tls_grouped_ranking.py` to find similar combinations within the same strategy instead of across strategies
+- **Distance Threshold Optimization:** Changed from 4.0 to 2.0 based on empirical testing showing better focused, quality recommendations
+- **UI Data Accuracy:** Fixed "Similar Combos" column to show actual count of available similar combinations (not just displayed limit of 10)
+- **Technical Enhancement:** Two-pass algorithm: first counts all available similar combinations within distance threshold, then displays top 10 by performance
+- **Outcome:** Each strategy now appears exactly once with its best TLS combination as representative, plus up to 10 expandable similar alternatives from within that same strategy
+
+**System Status:** TLS Optimization Module Phase 4 complete. Grouped ranking algorithm delivers single-strategy representatives with accurate similarity counts and focused parameter recommendations at distance threshold 2.0. All duplicate strategy issues resolved. ✅

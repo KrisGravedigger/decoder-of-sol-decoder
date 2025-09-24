@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str, float], 
                          strategy_instances_df: Optional[pd.DataFrame] = None,
-                         max_combined_distance: float = 4.0) -> List[Dict[str, Any]]:
+                         max_combined_distance: float = 2.0) -> List[Dict[str, Any]]:
     """
     AIDEV-TLS-CLAUDE: Group similar 4D TLS parameter combinations by strategy with combined tolerance.
     
@@ -24,7 +24,7 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
     Each group represents the best parameter combination from different strategies.
     
     Grouping Algorithm:
-    - Combined distance: |tp1-tp2| + |sl1-sl2| + |tls_act1-tls_act2| + |tls_trail1-tls_trail2| ≤ 4 points
+    - Combined distance: |tp1-tp2| + |sl1-sl2| + |tls_act1-tls_act2| + |tls_trail1-tls_trail2| ≤ 2 points
     - Representative selection: Highest PnL combination becomes group representative
     - Strategy diversity: Best combinations from different strategies
     - Output limits: Top 20 groups ranked by representative PnL, max 10 similar combinations per group
@@ -107,6 +107,9 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
         for main_combo in sorted_combos:
             if main_combo['strategy_id'] in used_strategies:
                 continue
+            
+            # Mark this strategy as used immediately to prevent duplicates
+            used_strategies.add(main_combo['strategy_id'])
                 
             # Create new group with this combination as representative
             group = {
@@ -116,24 +119,93 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                 'group_metrics': {}
             }
             
-            used_strategies.add(main_combo['strategy_id'])
-            
-            # Find similar combinations from other strategies within distance threshold
+             # Find similar combinations within the SAME strategy from original TLS data
             similar_count = 0
-            for other_combo in sorted_combos:
-                if (other_combo['strategy_id'] in used_strategies or 
-                    similar_count >= 10):  # Max 10 similar combinations
+            
+            # Get all combinations for this strategy from the original data
+            strategy_data = tls_results_df[tls_results_df['strategy_instance_id'] == main_combo['strategy_id']]
+            
+            # Get unique parameter combinations for this strategy, sorted by performance
+            strategy_unique_combos = strategy_data.groupby(['tp_level', 'sl_level', 'tls_activation', 'tls_trail']).agg({
+                'simulated_pnl': 'sum',  # Total PnL for this combination
+                'strategy_instance_id': 'count'  # Number of positions
+            }).reset_index()
+            strategy_unique_combos.rename(columns={'strategy_instance_id': 'position_count'}, inplace=True)
+            strategy_unique_combos = strategy_unique_combos.sort_values('simulated_pnl', ascending=False)
+            
+            # First pass: Count ALL similar combinations within distance threshold
+            total_similar_available = 0
+            potential_similar_combos = []
+            
+            for _, combo_row in strategy_unique_combos.iterrows():
+                # Skip if it's the exact same combination (representative)
+                if (combo_row['tp_level'] == main_combo['tp_level'] and
+                    combo_row['sl_level'] == main_combo['sl_level'] and
+                    combo_row['tls_activation'] == main_combo['tls_activation'] and
+                    combo_row['tls_trail'] == main_combo['tls_trail']):
                     continue
                 
-                # Calculate combined distance
-                distance = (abs(main_combo['tp_level'] - other_combo['tp_level']) +
-                           abs(main_combo['sl_level'] - other_combo['sl_level']) +
-                           abs(main_combo['tls_activation'] - other_combo['tls_activation']) +
-                           abs(main_combo['tls_trail'] - other_combo['tls_trail']))
+                # Calculate combined distance (using 2.0 threshold)
+                distance = (abs(main_combo['tp_level'] - combo_row['tp_level']) +
+                           abs(main_combo['sl_level'] - combo_row['sl_level']) +
+                           abs(main_combo['tls_activation'] - combo_row['tls_activation']) +
+                           abs(main_combo['tls_trail'] - combo_row['tls_trail']))
                 
-                if distance <= max_combined_distance:
-                    group['similar_combinations'].append(other_combo)
-                    used_strategies.add(other_combo['strategy_id'])
+                if distance <= 2.0:
+                    total_similar_available += 1
+                    potential_similar_combos.append((combo_row, distance))
+            
+            # Second pass: Take top 10 similar combinations by performance (already sorted)
+            for combo_row, distance in potential_similar_combos[:10]:
+                # Create similar combo object matching the expected format
+                similar_combo = {
+                    'strategy_id': main_combo['strategy_id'],
+                    'tp_level': combo_row['tp_level'],
+                    'sl_level': combo_row['sl_level'],
+                    'tls_activation': combo_row['tls_activation'],
+                    'tls_trail': combo_row['tls_trail'],
+                    'representative_pnl': (combo_row['simulated_pnl'] / total_invested * 100) if total_invested > 0 else 0,
+                    'representative_raw_pnl': combo_row['simulated_pnl'],
+                    'baseline_pnl': baseline_pnl_pct,
+                    'tls_effectiveness': 0,  # Simplified for grouping
+                    'win_rate': 0,  # Simplified for grouping
+                    'group_size': combo_row['position_count'],
+                    'total_invested': total_invested
+                }
+                
+                group['similar_combinations'].append(similar_combo)
+                
+                # Skip if it's the exact same combination (representative)
+                if (combo_row['tp_level'] == main_combo['tp_level'] and
+                    combo_row['sl_level'] == main_combo['sl_level'] and
+                    combo_row['tls_activation'] == main_combo['tls_activation'] and
+                    combo_row['tls_trail'] == main_combo['tls_trail']):
+                    continue
+                
+                # Calculate combined distance (using 2.0 threshold for more focused results)
+                distance = (abs(main_combo['tp_level'] - combo_row['tp_level']) +
+                           abs(main_combo['sl_level'] - combo_row['sl_level']) +
+                           abs(main_combo['tls_activation'] - combo_row['tls_activation']) +
+                           abs(main_combo['tls_trail'] - combo_row['tls_trail']))
+                
+                if distance <= 2.0:  # Using 2.0 threshold instead of max_combined_distance
+                    # Create similar combo object matching the expected format
+                    similar_combo = {
+                        'strategy_id': main_combo['strategy_id'],
+                        'tp_level': combo_row['tp_level'],
+                        'sl_level': combo_row['sl_level'],
+                        'tls_activation': combo_row['tls_activation'],
+                        'tls_trail': combo_row['tls_trail'],
+                        'representative_pnl': (combo_row['simulated_pnl'] / total_invested * 100) if total_invested > 0 else 0,
+                        'representative_raw_pnl': combo_row['simulated_pnl'],
+                        'baseline_pnl': baseline_pnl_pct,
+                        'tls_effectiveness': 0,  # Simplified for grouping
+                        'win_rate': 0,  # Simplified for grouping
+                        'group_size': combo_row['position_count'],
+                        'total_invested': total_invested
+                    }
+                    
+                    group['similar_combinations'].append(similar_combo)
                     similar_count += 1
             
             # Calculate group-level metrics
@@ -150,7 +222,7 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                 'win_rate': group['representative']['win_rate'],
                 'baseline_pnl': group['representative']['baseline_pnl'],
                 'num_combinations': len(all_group_combos),
-                'actual_similar_count': len(group['similar_combinations']),  # FIXED: Actual count, not max
+                'actual_similar_count': total_similar_available,  # Show total available, not just displayed
                 'parameter_spread': {
                     'tp_range': [min(c['tp_level'] for c in all_group_combos), 
                                 max(c['tp_level'] for c in all_group_combos)],
