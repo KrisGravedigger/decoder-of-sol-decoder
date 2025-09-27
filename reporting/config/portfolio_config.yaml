@@ -141,7 +141,7 @@ optimization_engine:
     decay_period_weeks: 4
     minimum_weight: 0.5
 
-# PHASE 1: 4D TLS Range Testing Configuration
+# 4D TLS Range Testing Configuration
 tls_range_testing:
   enable: true
   
@@ -158,3 +158,19 @@ tls_range_testing:
   
   # Baseline comparison
   generate_baseline_comparison: true         # Always compare vs best non-TLS
+
+# Baseline optimization
+
+  # Baseline confidence parameters
+baseline_confidence:
+  min_positions_full_confidence: 20  # Positions needed for 100% confidence
+  variance_penalty_factor: 0.1       # How much variance reduces confidence
+
+# Baseline validation  
+baseline_validation:
+  consistency_tolerance_sol: 0.01    # Max acceptable difference between modules
+  
+# Feature flags (for Phase 2)
+unified_baseline:
+  enabled: false                      # Will enable in Phase 4
+  legacy_mode: false                  # Force old behavior if needed
