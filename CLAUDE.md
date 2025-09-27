@@ -739,3 +739,20 @@ Issue Resolution - Peak PnL Values Investigation:
 - **Outcome:** Each strategy now appears exactly once with its best TLS combination as representative, plus up to 10 expandable similar alternatives from within that same strategy
 
 **System Status:** TLS Optimization Module Phase 4 complete. Grouped ranking algorithm delivers single-strategy representatives with accurate similarity counts and focused parameter recommendations at distance threshold 2.0. All duplicate strategy issues resolved. ✅
+
+**2025-09-26: Strategy Merger Config Implementation - Manual Strategy Grouping System**
+- **Strategy Merger Config Module:** Implemented complete manual strategy merging system allowing grouping of similar strategies (differing only in TP/SL or dates) through YAML configuration
+- **Configuration-Driven Merging:** Added `reporting/config/strategy_merger.yaml` with flexible group definitions - system automatically uses oldest strategy as representative for each group
+- **Automatic Statistics Recalculation:** Merged strategies have consolidated metrics (position counts, PnL aggregation, win rates) with TP/SL parameters taken from newest strategy in group
+- **Audit Trail Integration:** Added `original_strategy_instance_id` column to positions CSV and `merged_from` field to strategy instances for complete transparency
+- **Pipeline Integration:** Seamlessly integrated into existing `StrategyInstanceDetector` workflow with backward compatibility (works without config file)
+- **Data Integrity:** Comprehensive validation prevents duplicate merges across groups, handles missing strategies gracefully, maintains chronological data consistency
+- **Performance Optimization:** Merged strategies removed from final outputs, rankings recalculated for consolidated dataset, duplicate positions properly deduplicated
+
+**Technical Implementation:**
+- **New Methods:** `_load_merger_config()`, `_apply_strategy_merging()`, `_merge_strategy_instances()`, `_recalculate_merged_strategy_metrics()`
+- **Enhanced CSV Processing:** `_update_positions_csv_with_merged_strategies()` ensures position data consistency with merged strategy IDs
+- **Smart Aggregation Logic:** Date ranges (min/max), financial metrics (sum/average), performance statistics (recalculated), strategy parameters (from newest)
+- **Error Handling:** Graceful handling of missing config, non-existent strategies, invalid YAML, duplicate group assignments
+
+**Business Impact:** Enables logical grouping of strategy variations for cleaner analysis, reduces noise in strategy rankings, provides consolidated performance metrics while maintaining full audit trail of original strategy assignments.
