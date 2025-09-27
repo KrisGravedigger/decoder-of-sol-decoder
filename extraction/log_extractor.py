@@ -89,10 +89,20 @@ CRITICAL_FAILURE_PATTERNS = {
 
 # Logging configuration
 log_level = logging.DEBUG if (DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG") else logging.WARNING
+import sys
+
+# Configure logging with UTF-8 encoding support
+log_handler = logging.StreamHandler(sys.stdout)
+log_handler.setStream(sys.stdout)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 logging.basicConfig(
     level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[log_handler],
+    encoding='utf-8',
+    errors='replace'
 )
 logger = logging.getLogger('LogExtractor')
 
@@ -474,11 +484,13 @@ class LogParser:
             timestamp_match = re.search(r'v[\d.]+-(\d{2}/\d{2}-\d{2}:\d{2}:\d{2})', line_content)
             timestamp_str = timestamp_match.group(1) if timestamp_match else "unknown"
             
+            # AIDEV-NOTE-CLAUDE: Clean emoji characters for Windows logging compatibility
+            safe_content = line_content[:100].encode('ascii', errors='replace').decode('ascii')
             logger.warning(
                 f"Could not identify closed pair for close event | "
                 f"File: {source_file} | Line: {index+1} | "
                 f"Timestamp: {timestamp_str} | "
-                f"Content: {line_content[:100]}{'...' if len(line_content) > 100 else ''}"
+                f"Content: {safe_content}{'...' if len(line_content) > 100 else ''}"
             )
             return
         

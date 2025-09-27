@@ -120,12 +120,28 @@ class PortfolioAnalysisOrchestrator:
 
             logger.info("Step 4: Generating comprehensive HTML report...")
             html_generator = HTMLReportGenerator(config=self.config)
+            
+            # Check for TLS results to include in report
+            tls_result = None
+            if self.config.get('tls_range_testing', {}).get('enable', False):
+                try:
+                    tls_result = self.run_tls_optimization_analysis(positions_file)
+                    if tls_result['status'] == 'SUCCESS':
+                        logger.info("TLS analysis completed successfully for comprehensive report")
+                    else:
+                        logger.warning(f"TLS analysis failed: {tls_result.get('error', 'Unknown error')}")
+                        tls_result = None
+                except Exception as e:
+                    logger.warning(f"TLS analysis failed during comprehensive report: {e}")
+                    tls_result = None
+            
             html_file = html_generator.generate_comprehensive_report(
                 portfolio_analysis=portfolio_result,
                 # AIDEV-CLAUDE-ADDITION: Pass new results to HTML generator
                 strategy_simulations=strategy_simulation_results,
                 correlation_analysis=correlation_result,
-                weekend_analysis=weekend_result
+                weekend_analysis=weekend_result,
+                tls_analysis=tls_result  # Add TLS results
             )
 
             execution_time = (datetime.now() - start_time).total_seconds()
@@ -135,6 +151,7 @@ class PortfolioAnalysisOrchestrator:
                 'strategy_simulations': strategy_simulation_results, # Add this
                 'correlation_analysis': correlation_result,
                 'weekend_analysis': weekend_result,
+                'tls_analysis': tls_result,  # Add TLS results
                 'files_generated': {'html_report': html_file, 'text_reports': report_files, 'charts': chart_files}
             }
             self._log_comprehensive_summary(comprehensive_result)
@@ -196,11 +213,53 @@ class PortfolioAnalysisOrchestrator:
             logger.error(f"Quick analysis failed: {e}", exc_info=True)
             return {'status': 'ERROR', 'error': str(e)}
             
-    def analyze_specific_period(self, start_date_str: str, end_date_str: str, positions_file: str):
-        """Placeholder for period-specific analysis."""
-        logger.info(f"Analyzing from {start_date_str} to {end_date_str}. This feature is not fully implemented yet.")
-        # Future implementation would filter positions_df by date and run analysis.
-        pass
+    def run_tls_optimization_analysis(self, positions_file: str) -> Dict[str, Any]:
+        """Run TLS optimization analysis."""
+        logger.info("Running TLS optimization analysis...")
+        
+        try:
+            from simulations.tls_range_simulator import TlsRangeSimulator
+            from reporting.post_close_analyzer import PostCloseAnalyzer
+            import pandas as pd
+            import os
+            
+            positions_df = load_and_prepare_positions(positions_file, self.analytics.min_threshold)
+            if positions_df.empty:
+                return {'status': 'ERROR', 'error': 'No positions data after loading'}
+            
+            if 'strategy_instance_id' not in positions_df.columns:
+                return {'status': 'ERROR', 'error': 'positions_df must contain strategy_instance_id column'}
+            
+            # Check if TLS is enabled
+            if not self.config.get('tls_range_testing', {}).get('enable', False):
+                return {'status': 'SKIPPED', 'reason': 'TLS range testing disabled in config'}
+            
+            # Load existing TP/SL results if available
+            existing_tp_sl_results = None
+            if os.path.exists("reporting/output/range_test_detailed_results.csv"):
+                existing_tp_sl_results = pd.read_csv("reporting/output/range_test_detailed_results.csv")
+                logger.info("Using existing TP/SL results for baseline comparison")
+            
+            # Run TLS analysis
+            post_close_analyzer = PostCloseAnalyzer()
+            tls_simulator = TlsRangeSimulator(self.config, post_close_analyzer)
+            
+            results = tls_simulator.run_tls_analysis(positions_df, existing_tp_sl_results)
+            
+            # Save results
+            os.makedirs("reporting/output", exist_ok=True)
+            results['detailed_results'].to_csv("reporting/output/tls_detailed_results.csv", index=False)
+            results['baseline_comparison'].to_csv("reporting/output/tls_baseline_comparison.csv", index=False)
+            
+            return {
+                'status': 'SUCCESS',
+                'detailed_results': results['detailed_results'],
+                'baseline_comparison': results['baseline_comparison']
+            }
+            
+        except Exception as e:
+            logger.error(f"TLS optimization analysis failed: {e}", exc_info=True)
+            return {'status': 'ERROR', 'error': str(e)}
 
     def _log_comprehensive_summary(self, result: Dict[str, Any]):
         """Log a summary of the comprehensive analysis."""

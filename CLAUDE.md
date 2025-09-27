@@ -374,7 +374,8 @@ project/
 │   │   │   ├── market_charts.py  # Correlation, EMA Trend charts
 │   │   │   ├── portfolio_charts.py # KPI, Equity Curve, Drawdown, Cost charts
 │   │   │   ├── simulation_charts.py# Weekend, Strategy Sim charts
-│   │   │   └── strategy_charts.py  # Heatmap, AVG PnL charts
+            ├── strategy_charts.py  # Heatmap, AVG PnL charts
+│   │   │   └── tls_grouped_ranking.py
 │   │   └── strategy_heatmap.py
 │   ├── orchestrator.py         # Core logic engine for the reporting workflow
 │   ├── analysis_runner.py      # Runs Spot vs. Bid-Ask simulation for all positions
@@ -412,8 +413,8 @@ Cache: automatic Moralis API response caching (JSON files) with smart gap detect
 Reports: individual text reports + collective CSV with clean column names
 
 🏃‍♂️ Project Status
-Last Update: 2025-08-25
-Current Version: v5.0 - Complete TP/SL Optimization Module
+Last Update: 2025-09-19
+Current Version: v5v6.0 - Complete TSL Optimization Module
 Working Features:
 
 **Core Data Pipeline:**
@@ -504,9 +505,27 @@ Working Features:
 - **ML-ready dataset export** ✅ (structured features for model training)
 - **Missed opportunity quantification** ✅ (profit potential analysis)
 
+**TLS Optimization Module (Phases 1, 2, 3 & 4 Complete):**
+- **4D parameter configuration** ✅ (TP/SL/TLS_Activation/TLS_Trail ranges with smart filtering)
+- **TLS simulation engine** ✅ (dynamic trailing stop loss with activation thresholds)
+- **Baseline comparison system** ✅ (TLS vs best non-TLS performance analysis)
+- **Strategy performance visualization** ✅ (interactive charts with grey bars and scatter plots)
+- **Top combinations analysis** ✅ (deduplicated best TLS parameters per strategy)
+- **Mathematical logic verification** ✅ (fixed-reference TLS calculation with comprehensive testing)
+- **Parameter effectiveness analysis** ✅ (activation rates and performance distribution)
+- **Comprehensive UI integration** ✅ (dedicated menu system and HTML report sections)
+- **4D Grid Visualization System** ✅ (sophisticated mini-heatmap grids with global color scaling)
+- **Advanced Filtering Interface** ✅ (real-time filtering with percentage display and baseline comparison)
+- **Interactive Parameter Exploration** ✅ (visual identification of optimal TLS "islands" across 4D space)
+- **Phase 2 Navigation Integration** ✅ (seamless strategy selection from charts to grid analysis)
+- **4D Parameter Grouping Algorithm** ✅ (smart clustering of similar, high-performing TLS combinations)
+- **Expandable Grouped Ranking Table** ✅ (interactive UI to explore representative and similar parameter groups)
+- **Parallel Processing for Report Generation** ✅ (concurrent grid generation for significant performance improvement)
+- **Data Integrity & Consistency** ✅ (unified data sources for all metrics, ensuring logical consistency)
+
 Next Priority Tasks:
 
-**Phase 5: ML-Driven Optimization Engine:**
+**Phase 5: ML-Driven Optimization Engine (TP/SL):**
 - Implement prescriptive analytics engine for optimal TP/SL parameter identification 📋
 - Expected Value (EV) based SL floor analysis with mathematical framework 📋
 - Time decay weighting system prioritizing recent performance 📋
@@ -626,7 +645,7 @@ CSV Field Handling: Fixed strategy_instance_id field conflicts in data export
 - **Zero Mapping Overhead:** Direct CSV header → code usage, eliminated accidental complexity
 - **Cache API Failure Handling:** Proper distinction between API failures (retry tomorrow) vs verified empty periods (cache forever)
 
-**System Status:** TP/SL Optimization Module complete through Phase 4. Foundation established for Phase 5 ML-driven recommendations. All major objectives achieved. ✅
+**System Status:** TLS Optimization Module complete through Phase 2. Advanced 4D parameter testing with verified mathematical logic, interactive visualizations, and comprehensive strategy insights delivered. Foundation established for Phase 3 ML-driven recommendations. All major objectives achieved. ✅
 
 **2025-08-28: Peak PnL Analysis Debugging & Code Cleanup**
 Issue Resolution - Peak PnL Values Investigation:
@@ -685,75 +704,38 @@ Issue Resolution - Peak PnL Values Investigation:
 - **Result:** Strategy ranking now properly prioritizes profitability and consistency over statistical outliers
 - **Technical Implementation:** Modified `_calculate_weighted_score()` in `strategy_instance_detector.py` with simplified, business-focused algorithm
 
-**2025-09-01: Resolved Critical Price Cache Infinite Loop & Hardened API Logic**
+**2025-09-01/03: Critical Price Cache Stabilization**
+- **Issue Resolved:** Fixed a critical infinite loop in the price cache system that caused excessive API credit consumption. The system was repeatedly trying to fetch data for time periods with no trading activity.
+- **Solution:** Implemented an intelligent gap-merging system to drastically reduce API calls and introduced "tombstone" placeholders to mark verified empty data periods, permanently breaking the re-fetch cycle.
+- **Outcome:** The data fetching pipeline is now fully stable, efficient, and resilient, eliminating unnecessary API costs and ensuring offline data integrity.
 
-**Issue Resolution:** Successfully diagnosed and fixed a critical, multi-layered bug causing an infinite re-fetch loop in the price cache system, which led to excessive API credit consumption. The problem was elusive, requiring a deep debugging process that ruled out several incorrect hypotheses.
+**2025-09-07: Realistic Intra-Candle Simulation & Data Pipeline Repair**
+- **Issue Resolved:** Corrected a fundamental flaw in the TP/SL simulation logic that produced unrealistic results by only considering candle `close` prices. This was traced back to a critical bug in the data pipeline that was discarding essential OCHLV (`high`/`low`) data.
+- **Solution:** Repaired the `EnhancedPriceCacheManager` to preserve full OCHLV data and upgraded the simulation engine to use standard backtesting logic, accurately triggering TP on `high` and SL on `low` prices.
+- **Outcome:** The simulation engine now produces significantly more accurate, intuitive, and trustworthy results, reflecting real-world trading conditions.
 
--   **Root Cause Discovery:** The core issue was identified after direct API testing (`api_checker.py`) confirmed that the Moralis API omits data points for time intervals without any trading activity. Our validation logic misinterpreted these "silent gaps" as missing data, triggering a perpetual and futile re-fetch cycle.
+**2025-09-10 to 2025-09-20: 4D Trailing Stop Loss (TLS) Optimization Module (Phases 1-4 Complete)**
+- **Phase 1-2: Engine Creation & Critical Logic Correction:** Developed the core 4D simulation engine and interactive strategy comparison charts. Critically, identified and corrected a fundamental flaw in the TLS mathematical logic, ensuring the simulation produced valid, predictable results based on a fixed-reference model.
+- **Phase 3: Advanced 4D Visualization:** Implemented a sophisticated grid of interactive mini-heatmaps, allowing for intuitive visual exploration of the complex 4D parameter space (TP, SL, TLS Activation, TLS Trail) and identification of optimal "islands."
+- **Phase 4 & Finalization: Performance, Integrity & Actionable Insights:**
+    - **Performance:** Resolved major report generation slowdowns by implementing parallel processing, significantly reducing wait times.
+    - **Data Integrity:** Fixed all data inconsistencies between summary tables and visualizations, ensuring the entire report presents a single, trustworthy source of truth.
+    - **Actionable Insights:** Delivered the final feature—a parameter grouping algorithm that clusters top-performing, similar TLS combinations into an expandable table, transforming raw data into robust, actionable strategy recommendations.
+- **Outcome:** The TLS Optimization Module is now feature-complete, providing a fast, visually intuitive, and logically consistent tool for advanced LP strategy optimization.
 
--   **"Tombstone" Logic Implementation:** The primary solution was to introduce "tombstone" placeholders. When the system verifies that the API has no data for a specific interval, it now writes a special marker to the cache. This tells the validation logic to treat the gap as "checked and confirmed empty," effectively breaking the loop.
+**2025-09-20: TLS Simulation Engine Refactoring & Parallelization**
+- **Critical Logic Fix & Refactoring:** Centralized all Out-of-Range (OOR) and position valuation logic within `LPPositionValuator`, eliminating dangerous code duplication in the simulation engine. The `TlsRangeSimulator` was refactored to act as a pure orchestrator, delegating tasks to specialized modules (`LPPositionValuator`, `BaselineComparator`) for improved clarity and maintainability. Added key comments explaining the bot's specific 1-sided entry OOR logic directly in the code.
+- **Multiprocessing Implementation:** The main simulation loop in `TlsRangeSimulator` was parallelized using the `multiprocessing` module. This dramatically speeds up the analysis by distributing position processing across multiple CPU cores, turning a previously linear task into a highly efficient, parallel one.
+- **Data Pipeline Stabilization:** Resolved a series of `KeyError` exceptions (`'tls_improproves_performance'`, `'tls_benefit_pct'`) by standardizing column names between `BaselineComparator` and `HtmlReportGenerator`. Fixed a `TemplateSyntaxError` in the Jinja2 template to ensure the final report renders correctly.
+- **Outcome:** The TLS simulation engine is now logically sound, architecturally clean, and significantly faster, producing reliable data for the HTML report.
 
--   **API Workaround Reinstated:** The investigation revealed that a previous refactoring had accidentally removed a critical workaround for a Moralis API bug (requests with `fromDate == toDate` causing a `400 Bad Request`). This workaround was restored and centralized in the core API fetching function, eliminating a major source of errors during gap-filling.
+**2025-09-24: TLS Grouped Ranking Algorithm Fix - Phase 4 Completion**
+- **Critical Issue Resolved:** Fixed duplicate strategy entries in TLS grouped ranking table where same strategies appeared multiple times (e.g., strategy appearing in rows 9, 10, 11, 12, 15, 16)
+- **Root Cause Analysis:** Original algorithm grouped similar combinations across different strategies, causing each strategy to appear in multiple similarity groups
+- **Solution Implementation:** Modified `group_4d_combinations()` in `tls_grouped_ranking.py` to find similar combinations within the same strategy instead of across strategies
+- **Distance Threshold Optimization:** Changed from 4.0 to 2.0 based on empirical testing showing better focused, quality recommendations
+- **UI Data Accuracy:** Fixed "Similar Combos" column to show actual count of available similar combinations (not just displayed limit of 10)
+- **Technical Enhancement:** Two-pass algorithm: first counts all available similar combinations within distance threshold, then displays top 10 by performance
+- **Outcome:** Each strategy now appears exactly once with its best TLS combination as representative, plus up to 10 expandable similar alternatives from within that same strategy
 
--   **Enhanced Resilience:** Improved the `circuit breaker` mechanism with more descriptive logging for critical API errors (e.g., exhausted credits), making the system's behavior more transparent during large-scale data fetching operations.
-
-**Outcome:** The price cache is now fully stable, efficient, and resilient. It correctly handles all known API edge cases, completely eliminating the infinite loop and ensuring the integrity of offline data. The entire data fetching pipeline is now production-ready.
-
-**2025-09-03: Resolved Critical Price Cache Infinite Loop & Hardened API Logic**
-
-**Issue Resolution:** Successfully diagnosed and fixed a critical, multi-layered bug causing an infinite re-fetch loop in the price cache system, which led to excessive API credit consumption. The problem was elusive, requiring a deep debugging process that ruled out several incorrect hypotheses.
-
--   **Root Cause Discovery:** The core issue was a combination of two problems:
-    1.  **Inefficiency:** The system was making one API call for every single missing hour of data ("death by a thousand cuts"), rapidly depleting API credits even for small gaps.
-    2.  **Logical Flaw:** The cache validation logic did not correctly handle all gap scenarios, contributing to unnecessary re-checks.
-
--   **The Multi-Stage Solution:** A comprehensive refactoring was implemented to solve the problem at its root:
-    1.  **Gap Merging for Efficiency:** A new `_merge_gaps` function was introduced to intelligently combine fragmented, consecutive gaps into single, large blocks. This drastically reduces the number of API calls from dozens to just one for a given period.
-    2.  **Hardened Validation Logic:** The `validate_cache_completeness` function was corrected to ensure it has a consistent and strict definition of what constitutes a data gap, preventing future loops.
-    3.  **Resilient API Handling:** The system's `circuit breaker` and error handling proved effective, correctly stopping API calls upon credit exhaustion and marking gaps for future retries.
-
-**Outcome:** The price cache is now fully stable, efficient, and resilient. It correctly handles all known API edge cases, minimizes API credit consumption, and ensures the integrity of offline data. The entire data fetching pipeline is now robust and production-ready.
-
-**2025-09-04: Critical Refactoring: Unifying Price Cache Access and Fixing Report Generation**
-
-**Issue Resolution:** Resolved a multi-layered series of crashes caused by incomplete refactoring of the price cache system. The initial `AttributeError` in the TP/SL simulator was fixed, which then exposed a deeper, critical `NotImplementedError` during final report generation. The root cause was identified as the `InfrastructureCostAnalyzer` still using the deprecated `PriceCacheManager`.
-
--   **Initial `AttributeError` Fix:** Replaced all legacy calls to `fetch_ochlv_data` with the new `get_price_data` method across `range_test_simulator.py`, `post_close_analyzer.py`, and `cache_debugger.py`, correctly adding the required `timeframe` parameter.
--   **Comprehensive `NotImplementedError` Fix:** Migrated `infrastructure_cost_analyzer.py` entirely to the modern `EnhancedPriceCacheManager`, simplifying its logic and ensuring it uses the single source of truth for price data.
--   **Code Hygiene:** Removed dead `import` statements for the legacy `PriceCacheManager` from `main.py` and `analysis_runner.py` to prevent future bugs.
-
-**Outcome:** The entire data pipeline, from simulation to final report generation, now exclusively and correctly uses the `EnhancedPriceCacheManager`. This eliminates critical bugs, removes technical debt, and stabilizes the entire reporting workflow.
-
-**2025-09-07: Realistic Intra-Candle Simulation & Critical Data Pipeline Repair**
-
-**Issue Resolution:** Fixed a fundamental flaw in the TP/SL simulation logic that caused counter-intuitive results (e.g., raising TP did not increase PnL). The root cause was twofold:
-
-1.  **Simulation Logic Flaw:** The backtester only considered the `close` price of each candle, ignoring `high` and `low` prices. This caused the simulation to miss actual TP/SL trigger points within a candle, leading to unrealistic "PnL jumps".
-2.  **Critical Data Pipeline Bug:** A deep-seated bug was discovered in `EnhancedPriceCacheManager`. The primary `get_price_data` method was incorrectly discarding the full, raw OCHLV data and instead serving a simplified `{timestamp, close}` version from a processed cache, which made realistic simulation impossible and caused `KeyError: 'high'`.
-
-**Comprehensive Solution Implemented:**
-
--   **Data Pipeline Repaired:** The `EnhancedPriceCacheManager` was refactored to exclusively use the full, raw OCHLV data as the single source of truth throughout its entire processing pipeline, ensuring no data loss.
--   **Realistic Simulation Logic:** `lp_position_valuator` was upgraded to calculate PnL based on `high` and `low` prices. The core simulation engine in `range_test_simulator` now implements standard backtesting logic:
-    -   If a candle's `high` price triggers TP, the position exits with PnL set **exactly to `tp_level`**.
-    -   If a candle's `low` price triggers SL, the position exits with PnL set **exactly to `-sl_level`**.
-
-**Outcome:** The simulation engine is now significantly more accurate, robust, and produces logical, intuitive results. The underlying data infrastructure has been hardened to prevent future data integrity issues.
-
-**2025-09-09: Strategy Date-Based Sorting Implementation**
-
-**Issue Resolution:** Implemented unified date-based sorting across all strategy visualizations and tables, replacing inconsistent sorting methods.
-
-**Problems Fixed:**
-- Inconsistent sorting across different charts and tables
-- Hardcoded 5-strategy limit in heatmaps despite config allowing 100
-- Dynamic PnL sorting in Interactive TP/SL Explorer instead of static date ordering
-
-**Solution Implemented:**
-- Added date extraction utilities to `utils/common.py` using regex pattern `\d{4}-\d{2}-\d{2}`
-- Updated all chart modules (`range_test_charts.py`, `tp_sl_optimizer.py`, `html_report_generator.py`) for consistent date-based sorting
-- Replaced dynamic JavaScript sorting with static date-based sorting in HTML template
-- Removed hardcoded `[:5]` slice to respect `top_strategies_only` config parameter
-
-**Outcome:** All strategy visualizations now consistently display strategies in chronological order (newest first), showing complete strategy sets while maintaining predictable, date-based navigation.
-
+**System Status:** TLS Optimization Module Phase 4 complete. Grouped ranking algorithm delivers single-strategy representatives with accurate similarity counts and focused parameter recommendations at distance threshold 2.0. All duplicate strategy issues resolved. ✅
