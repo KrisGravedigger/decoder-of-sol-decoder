@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 from reporting.price_cache_manager import PriceCacheManager
 
 logger = logging.getLogger(__name__)
-CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD = 5
+CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD = 20
 
 class EnhancedPriceCacheManager(PriceCacheManager):
     """
@@ -420,10 +420,10 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             if point.get('is_forward_filled'): consecutive_fills += 1
             else:
                 if consecutive_fills >= CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD:
-                    logger.warning(f"SIGNIFICANT DATA GAP: Filled a gap of {consecutive_fills} points for {pool_address} ({timeframe}).")
+                    logger.info(f"Data gap filled: {consecutive_fills} points for {pool_address} ({timeframe})")
                 consecutive_fills = 0
         if consecutive_fills >= CONSECUTIVE_PLACEHOLDER_WARNING_THRESHOLD:
-            logger.warning(f"SIGNIFICANT DATA GAP: Filled a gap of {consecutive_fills} points for {pool_address} ({timeframe}) at the end of the range.")
+            logger.info(f"Data gap filled: {consecutive_fills} points for {pool_address} ({timeframe}) at end of range")
     
     def _split_into_monthly_periods(self, start_dt: datetime, end_dt: datetime) -> List[Tuple[datetime, datetime]]:
         periods = []

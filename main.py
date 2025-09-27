@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import datetime
 
 # --- Configure Logging ---
 logging.basicConfig(
@@ -17,6 +18,7 @@ from dotenv import load_dotenv
 from typing import Optional
 from typing import Dict
 from datetime import datetime
+
 
 # --- Setup Project Path & Environment ---
 load_dotenv()
@@ -388,6 +390,218 @@ def run_tp_sl_optimization_engine():
         logger.error(f"Optimization engine failed: {e}")
         print(f"❌ Failed to run optimization: {e}")
 
+def run_tls_optimization_analysis():
+    """Run Phase 1 TLS Optimization Analysis."""
+    try:
+        from simulations.tls_range_simulator import TlsRangeSimulator
+        from reporting.data_loader import load_and_prepare_positions
+        from reporting.post_close_analyzer import PostCloseAnalyzer
+        import pandas as pd
+        
+        print("\n" + "="*70)
+        print("RUNNING 4D TLS OPTIMIZATION ANALYSIS (Phase 1)")
+        print("="*70)
+        
+        # Load positions
+        print("Loading enriched positions data...")
+        positions_df = load_and_prepare_positions("positions_to_analyze.csv", 0.01)
+        
+        if 'strategy_instance_id' not in positions_df.columns:
+            print("❌ ERROR: positions_to_analyze.csv is not enriched with strategy_instance_id!")
+            print("Please run Step 2 (Detect Strategies & Enrich Data) first.")
+            return
+            
+        config = load_main_config()
+        if not config.get('tls_range_testing', {}).get('enable', False):
+            print("❌ TLS range testing is disabled in config. Set tls_range_testing.enable: true")
+            return
+        
+        # Check for existing TP/SL results to use as baseline
+        existing_tp_sl_results = None
+        if os.path.exists("reporting/output/range_test_detailed_results.csv"):
+            print("✅ Found existing TP/SL simulation results for baseline comparison")
+            existing_tp_sl_results = pd.read_csv("reporting/output/range_test_detailed_results.csv")
+        else:
+            print("⚠️  No existing TP/SL results found - will compute baseline during analysis")
+        
+        # Create TLS simulator
+        post_close_analyzer = PostCloseAnalyzer()
+        tls_simulator = TlsRangeSimulator(config, post_close_analyzer)
+        
+        print(f"\nRunning TLS simulation for {len(positions_df)} positions...")
+        print(f"TLS activation range: {config['tls_range_testing']['tls_activation_range']}")
+        print(f"TLS trail range: {config['tls_range_testing']['tls_trail_range']}")
+        print(f"TP levels: {tls_simulator.tp_levels}")
+        print(f"SL levels: {tls_simulator.sl_levels}")
+        
+        # Run TLS analysis
+        results = tls_simulator.run_tls_analysis(positions_df, existing_tp_sl_results)
+        
+        print(f"\n✅ TLS simulation complete!")
+        print(f"  Total TLS simulations: {len(results['detailed_results'])}")
+        print(f"  Strategies compared: {len(results['baseline_comparison'])}")
+        
+        # Save results
+        results['detailed_results'].to_csv("reporting/output/tls_detailed_results.csv", index=False)
+        results['baseline_comparison'].to_csv("reporting/output/tls_baseline_comparison.csv", index=False)
+        print("\nResults saved to reporting/output/")
+        
+        # Display summary
+        baseline_df = results['baseline_comparison']
+        if not baseline_df.empty:
+            improved_strategies = len(baseline_df[baseline_df['tls_improves_performance']])
+            total_strategies = len(baseline_df)
+            avg_benefit = baseline_df['tls_benefit_pct'].mean()
+            
+            print(f"\n📊 TLS ANALYSIS SUMMARY:")
+            print(f"  Strategies improved by TLS: {improved_strategies}/{total_strategies} ({improved_strategies/total_strategies*100:.1f}%)")
+            print(f"  Average TLS benefit: {avg_benefit:+.2f}%")
+            print(f"  Best TLS benefit: {baseline_df['tls_benefit_pct'].max():+.2f}%")
+            print(f"  Worst TLS impact: {baseline_df['tls_benefit_pct'].min():+.2f}%")
+            
+            # Show top 3 strategies that benefit from TLS
+            top_improvements = baseline_df.nlargest(3, 'tls_benefit_pct')
+            print(f"\n🏆 TOP TLS IMPROVEMENTS:")
+            for _, row in top_improvements.iterrows():
+                print(f"  {row['strategy_instance_id']}: {row['tls_benefit_pct']:+.2f}% ")
+                print(f"    TP:{row['best_tls_tp']}% SL:{row['best_tls_sl']}% TLS_ACT:{row['best_tls_activation']}% TLS_TRAIL:{row['best_tls_trail']}%")
+        
+        print("\n💡 TLS results will be included in future comprehensive reports.")
+        
+    except Exception as e:
+        logger.error(f"TLS optimization analysis failed: {e}", exc_info=True)
+        print(f"❌ TLS analysis failed: {e}")
+
+def tls_analysis_menu():
+    """TLS (Trailing Stop Loss) Analysis & Optimization submenu."""
+    while True:
+        print("\n" + "="*70)
+        print("--- TLS (Trailing Stop Loss) Analysis & Optimization ---")
+        print("="*70)
+        print("1. Run 4D TLS Optimization Analysis")
+        print("2. View TLS vs Baseline Comparison Results")
+        print("3. Export TLS Analysis Results")
+        print("4. Generate TLS Effectiveness Report")
+        print("5. Back to main menu")
+        
+        choice = input("\nSelect option (1-5): ").strip()
+        
+        if choice == "1":
+            run_tls_optimization_analysis()
+        elif choice == "2":
+            view_tls_comparison_results()
+        elif choice == "3":
+            export_tls_results()
+        elif choice == "4":
+            generate_tls_effectiveness_report()
+        elif choice == "5":
+            break
+        else:
+            print("Invalid choice, please try again.")
+
+def view_tls_comparison_results():
+    """View TLS vs baseline comparison results."""
+    try:
+        import pandas as pd
+        
+        if not os.path.exists("reporting/output/tls_baseline_comparison.csv"):
+            print("❌ No TLS comparison results found. Please run TLS analysis first (option 1).")
+            return
+            
+        df = pd.read_csv("reporting/output/tls_baseline_comparison.csv")
+        
+        print("\n" + "="*70)
+        print("TLS VS BASELINE COMPARISON RESULTS")
+        print("="*70)
+        
+        total_strategies = len(df)
+        improved_strategies = len(df[df['tls_improves_performance']])
+        avg_benefit = df['tls_benefit_pct'].mean()
+        
+        print(f"Total Strategies Analyzed: {total_strategies}")
+        print(f"Strategies Improved by TLS: {improved_strategies} ({improved_strategies/total_strategies*100:.1f}%)")
+        print(f"Average TLS Benefit: {avg_benefit:+.2f}%")
+        print(f"Best TLS Benefit: {df['tls_benefit_pct'].max():+.2f}%")
+        print(f"Worst TLS Impact: {df['tls_benefit_pct'].min():+.2f}%")
+        
+        print("\n🏆 TOP 5 TLS IMPROVEMENTS:")
+        print("-"*70)
+        top_5 = df.nlargest(5, 'tls_benefit_pct')
+        for i, (_, row) in enumerate(top_5.iterrows(), 1):
+            print(f"{i}. {row['strategy_instance_id']}")
+            print(f"   Benefit: {row['tls_benefit_pct']:+.2f}% | Baseline: {row['baseline_pnl']:.4f} SOL | TLS: {row['best_tls_pnl']:.4f} SOL")
+            print(f"   Optimal: TP:{row['best_tls_tp']}% SL:{row['best_tls_sl']}% TLS_ACT:{row['best_tls_activation']}% TLS_TRAIL:{row['best_tls_trail']}%")
+            print()
+            
+    except Exception as e:
+        print(f"❌ Failed to view TLS results: {e}")
+
+def export_tls_results():
+    """Export TLS analysis results."""
+    try:
+        if os.path.exists("reporting/output/tls_detailed_results.csv") and os.path.exists("reporting/output/tls_baseline_comparison.csv"):
+            print("\n✅ TLS results already exported to:")
+            print("  - reporting/output/tls_detailed_results.csv (detailed simulations)")
+            print("  - reporting/output/tls_baseline_comparison.csv (strategy comparisons)")
+        else:
+            print("❌ No TLS results found. Please run TLS analysis first.")
+    except Exception as e:
+        print(f"❌ Export check failed: {e}")
+
+def generate_tls_effectiveness_report():
+    """Generate TLS effectiveness text report."""
+    try:
+        import pandas as pd
+        from datetime import datetime
+        
+        if not os.path.exists("reporting/output/tls_baseline_comparison.csv"):
+            print("❌ No TLS comparison results found. Please run TLS analysis first.")
+            return
+            
+        df = pd.read_csv("reporting/output/tls_baseline_comparison.csv")
+        
+        # Generate report content
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        report_lines = [
+            "="*70,
+            "TLS (TRAILING STOP LOSS) EFFECTIVENESS REPORT",
+            f"Generated: {timestamp}",
+            "="*70,
+            "",
+            "EXECUTIVE SUMMARY:",
+            "-"*30,
+            f"Total Strategies Analyzed: {len(df)}",
+            f"Strategies Improved by TLS: {len(df[df['tls_improves_performance']])} ({len(df[df['tls_improves_performance']])/len(df)*100:.1f}%)",
+            f"Average TLS Benefit: {df['tls_benefit_pct'].mean():+.2f}%",
+            f"Median TLS Benefit: {df['tls_benefit_pct'].median():+.2f}%",
+            f"Best TLS Performance: {df['tls_benefit_pct'].max():+.2f}%",
+            f"Worst TLS Performance: {df['tls_benefit_pct'].min():+.2f}%",
+            "",
+            "TOP PERFORMING TLS STRATEGIES:",
+            "-"*50,
+        ]
+        
+        # Add top 10 strategies
+        top_10 = df.nlargest(10, 'tls_benefit_pct')
+        for i, (_, row) in enumerate(top_10.iterrows(), 1):
+            report_lines.extend([
+                f"{i:2d}. {row['strategy_instance_id']}",
+                f"    TLS Benefit: {row['tls_benefit_pct']:+6.2f}% | Baseline: {row['baseline_pnl']:8.4f} SOL | TLS Best: {row['best_tls_pnl']:8.4f} SOL",
+                f"    Optimal Params: TP:{row['best_tls_tp']:2.0f}% SL:{row['best_tls_sl']:2.0f}% TLS_ACT:{row['best_tls_activation']:2.0f}% TLS_TRAIL:{row['best_tls_trail']:2.0f}%",
+                ""
+            ])
+        
+        # Save report
+        report_path = f"reporting/output/tls_effectiveness_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        os.makedirs("reporting/output", exist_ok=True)
+        with open(report_path, "w") as f:
+            f.write("\n".join(report_lines))
+            
+        print(f"\n✅ TLS effectiveness report generated: {report_path}")
+        
+    except Exception as e:
+        print(f"❌ Report generation failed: {e}")
+
 def generate_tp_sl_report():
     """
     Generate comprehensive TP/SL optimization report.
@@ -502,6 +716,17 @@ def run_core_analysis_and_report_pipeline():
     """Steps 4 & 5 combined: Run Base Simulations and Generate Report."""
     print_header("Steps 4 & 5: Running Analysis & Generating Report")
     run_spot_vs_bidask_analysis_offline()
+    
+    # Run TLS analysis if enabled
+    config = load_main_config()
+    if config.get('tls_range_testing', {}).get('enable', False):
+        print_header("TLS Analysis: Running 4D TLS Optimization")
+        try:
+            run_tls_optimization_analysis()
+        except Exception as e:
+            logger.warning(f"TLS analysis failed, continuing without it: {e}")
+            print(f"⚠️  TLS analysis failed: {e}")
+    
     run_comprehensive_report_offline()
     print_header("Core Analysis & Reporting Completed")
 
@@ -538,12 +763,24 @@ def run_full_optimization_pipeline(api_key: Optional[str]):
     print_header("4. Running TP/SL Range Simulation (Phase 4A Prerequisite)")
     run_tp_sl_range_simulation()
 
-    # 5. Optimization Engine (Phase 5)
-    print_header("5. Running TP/SL Optimization Engine (Phase 5)")
+    # 5. TLS Analysis (Phase 1)
+    config = load_main_config()
+    if config.get('tls_range_testing', {}).get('enable', False):
+        print_header("5. Running 4D TLS Optimization Analysis (Phase 1)")
+        try:
+            run_tls_optimization_analysis()
+        except Exception as e:
+            logger.warning(f"TLS analysis failed in pipeline: {e}")
+            print(f"⚠️  TLS analysis failed: {e}")
+    else:
+        print_header("5. TLS Analysis SKIPPED (disabled in config)")
+
+    # 6. Optimization Engine (Phase 5)
+    print_header("6. Running TP/SL Optimization Engine (Phase 5)")
     run_tp_sl_optimization_engine()
 
-    # 6. Final Report Generation (Step 5)
-    print_header("6. Generating Comprehensive Report with All Analyses")
+    # 7. Final Report Generation (Step 5)
+    print_header("7. Generating Comprehensive Report with All Analyses")
     run_comprehensive_report_offline()
         
     print_header("Full Optimization Pipeline Completed")
@@ -581,10 +818,11 @@ def main_menu():
         print("-"*70)
         print("--- ADVANCED ANALYSIS & TOOLS ---")
         print("6. TP/SL Range Testing & Optimization Submenu (Phase 4 & 5)")
-        print("7. Cache Management & Debugging")
+        print("7. TLS (Trailing Stop Loss) Analysis & Optimization")
+        print("8. Cache Management & Debugging")
         print("0. Exit")
         
-        choice = input("Select an option (0-7): ")
+        choice = input("Select an option (0-8): ")
 
         if choice == '1':
             run_data_preparation_pipeline()
@@ -599,6 +837,8 @@ def main_menu():
         elif choice == '6':
             tp_sl_range_testing_menu()
         elif choice == '7':
+            tls_analysis_menu()
+        elif choice == '8':
             cache_analyzer_menu()
         elif choice == '0':
             print("Exiting application...")

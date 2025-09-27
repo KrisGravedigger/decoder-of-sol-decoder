@@ -25,7 +25,7 @@ visualization:
   chart_types: ["equity_curve", "drawdown", "cost_impact", "strategy_heatmap"]
   timestamp_format: "%Y%m%d_%H%M"
   filters:
-    min_strategy_occurrences: 3  # minimum positions per strategy
+    min_strategy_occurrences: 5  # minimum positions per strategy
     top_strategies_only: 100      # show only top N strategies
     exclude_outliers: false       # remove statistical outliers
     date_range_filter: false      # custom date range selection
@@ -108,7 +108,7 @@ range_testing:
   enable: true  # Master switch to run this analysis
 
   # Define TP levels to test (in percentage)
-  tp_levels: [2, 3, 4, 5, 6, 7, 8, 9] 
+  tp_levels: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] 
 
   # Define SL levels to test (in percentage, positive value)
   sl_levels: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
@@ -140,3 +140,21 @@ optimization_engine:
     last_n_days_full_weight: 7
     decay_period_weeks: 4
     minimum_weight: 0.5
+
+# PHASE 1: 4D TLS Range Testing Configuration
+tls_range_testing:
+  enable: true
+  
+  # TLS parameter ranges
+  tls_activation_range: [1, 2, 3, 4, 5, 6, 7]  # Activation at X% profit
+  tls_trail_range: [2, 3, 4, 5, 6, 7, 8]          # Trail X% below peak
+  
+  # Existing TP/SL ranges (inherit from range_testing section)
+  inherit_tp_sl_ranges: true
+  
+  # Performance optimization
+  enable_smart_filtering: true               # Skip invalid combinations
+  max_combinations_per_position: 100000       # Performance circuit breaker
+  
+  # Baseline comparison
+  generate_baseline_comparison: true         # Always compare vs best non-TLS

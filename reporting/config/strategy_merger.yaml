@@ -1,0 +1,23 @@
+# Strategy Merger Configuration
+# Location: reporting/config/strategy_merger.yaml
+
+strategy_mergers:
+  # Group similar strategies with different dates but same parameters
+  - group_name: "Conservative_BidAsk_GroupTha"
+    merge_strategies:
+      - "Bid-Ask_TP6_SL12_2025-08-14_abc123"  # oldest - will become group name
+      - "Bid-Ask_TP6_SL12_2025-08-16_def456"  # merge into oldest
+      - "Bid-Ask_TP6_SL12_2025-08-18_ghi789"  # merge into oldest
+
+  # Another example group  
+  - group_name: "Thiagold"
+    merge_strategies:
+      - "Bid-Ask (1-Sided) UNKNOWN_TP6_SL9_2025-09-10_4c8801"
+      - "Bid-Ask (1-Sided) SIXTYNINE_TP6_SL9_2025-08-08_731d9f"
+      - "Bid-Ask (1-Sided) SIXTYNINE_TP3_SL9_2025-08-01_9ebb8d"
+
+# Optional merge logic configuration (reserved for future use)
+merge_logic:
+  use_earliest_date: true        # Use earliest first_use_date
+  recalculate_metrics: true      # Recalculate metrics for merged group
+  preserve_original_data: false  # Don't keep original strategy metadata
