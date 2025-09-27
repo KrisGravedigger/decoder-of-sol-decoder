@@ -24,6 +24,13 @@ from .visualizations import interactive as interactive_charts
 from .visualizations.interactive import range_test_charts
 from utils.common import sort_strategies_by_date_descending
 
+# AIDEV-INTEGRATE-CLAUDE: Import UnifiedBaselineManager for validation
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -270,6 +277,46 @@ class HTMLReportGenerator:
                 'grouped_combinations': True
             }
 
+        # AIDEV-INTEGRATE-CLAUDE: Unified baseline validation for Phase 2
+        unified_baseline_data = None
+        if UNIFIED_MANAGER_AVAILABLE and self.config.get('unified_baseline', {}).get('enabled', False):
+            try:
+                manager = UnifiedBaselineManager(self.config)
+                
+                # Load range test results if available
+                range_df = None
+                if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                    range_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                
+                # Get TLS results if available
+                tls_df = None
+                if tls_analysis and 'detailed_results' in tls_analysis:
+                    tls_df = tls_analysis['detailed_results']
+                    if not isinstance(tls_df, pd.DataFrame) and isinstance(tls_df, list):
+                        tls_df = pd.DataFrame(tls_df)
+                
+                # Run validation if we have data
+                if range_df is not None:
+                    validation_report = manager.validate_consistency(range_df, tls_df)
+                    
+                    # Generate comparison report
+                    comparison_df = manager.generate_comparison_report(range_df, tls_df)
+                    
+                    unified_baseline_data = {
+                        'validation_passed': validation_report.is_consistent,
+                        'consistency_rate': validation_report.to_dict()['consistency_rate'],
+                        'inconsistencies': validation_report.inconsistencies[:5],  # Show top 5
+                        'warnings': validation_report.warnings[:5],
+                        'recommendations': comparison_df.to_dict('records') if not comparison_df.empty else [],
+                        'total_strategies': validation_report.total_strategies,
+                        'consistent_strategies': validation_report.consistent_strategies
+                    }
+                    
+                    logger.info(f"Unified baseline validation: {validation_report.consistent_strategies}/{validation_report.total_strategies} consistent")
+                    
+            except Exception as e:
+                logger.warning(f"Could not generate unified baseline validation: {e}")
+        
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'portfolio_analysis': portfolio_analysis,
@@ -287,7 +334,8 @@ class HTMLReportGenerator:
             'enriched_simulation_json': enriched_simulation_json,
             'optimal_settings_json': json.dumps(optimal_settings_map),
             'tested_tp_levels_json': json.dumps(sorted(tested_tp_levels)),
-            'tested_sl_levels_json': json.dumps(sorted(tested_sl_levels))
+            'tested_sl_levels_json': json.dumps(sorted(tested_sl_levels)),
+            'unified_baseline_data': unified_baseline_data  # AIDEV-INTEGRATE-CLAUDE: Add validation data
         }
         
         return template_data
