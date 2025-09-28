@@ -211,19 +211,22 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                 continue
             
             try:
-                # Load strategy instances data for total_invested values to ensure consistent calculation
+               # Load strategy instances data for investment values to ensure consistent calculation
                 import pandas as pd
                 import os
-                total_invested = 1.0  # Default fallback
+                avg_invested = 1.0  # Default fallback
                 if os.path.exists("strategy_instances.csv"):
                     strategy_instances_df = pd.read_csv("strategy_instances.csv")
                     strategy_row = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
                     if not strategy_row.empty:
                         total_invested = strategy_row.iloc[0]['total_invested']
+                        position_count = strategy_row.iloc[0].get('analyzed_position_count', 1)
+                        # AIDEV-NOTE-CLAUDE: Calculate average investment per position
+                        avg_invested = total_invested / position_count if position_count > 0 else total_invested
                 
-                # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+                # AIDEV-NOTE-CLAUDE: Use average-based ROI calculation
                 strategy_pnl_pct = strategy_results['simulated_pnl'].apply(
-                    lambda x: calculate_strategy_roi_percentage(x, total_invested)
+                    lambda x: calculate_strategy_roi_percentage(x, avg_invested)
                 )
                 
                 # Ensure strategy_pnl_pct is not empty
@@ -231,9 +234,10 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                     logger.debug(f"Empty PnL percentage data for strategy {strategy_id}")
                     continue
                 
-                # Calculate PnL range for grey bar visualization using same consistent calculation
-                min_pnl_pct = (strategy_results['simulated_pnl'].min() / total_invested * 100) if total_invested > 0 else 0
-                max_pnl_pct = (strategy_results['simulated_pnl'].max() / total_invested * 100) if total_invested > 0 else 0
+                # Calculate PnL range for grey bar visualization using average investment
+                # AIDEV-NOTE-CLAUDE: Use average investment for consistent percentage calculation
+                min_pnl_pct = calculate_strategy_roi_percentage(strategy_results['simulated_pnl'].min(), avg_invested)
+                max_pnl_pct = calculate_strategy_roi_percentage(strategy_results['simulated_pnl'].max(), avg_invested)
                 
                 # Add grey bar showing PnL range (min to max) instead of individual points
                 if min_pnl_pct != max_pnl_pct:  # Only show bar if there's a range
@@ -288,18 +292,20 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                         name=f"{strategy_id}_best_tls"
                     ))
                 
-                # Best non-TLS result (yellow highlight) - convert to percentage using correct baseline calculation
+                # Best non-TLS result (yellow highlight) - convert to percentage using average investment
                 baseline_pnl = baseline_data.get(strategy_id, 0.0)
                 if baseline_pnl != 0.0:
-                    # Load strategy instances data for total_invested values
+                    # AIDEV-NOTE-CLAUDE: Use average investment for baseline percentage
                     import pandas as pd
                     import os
-                    total_invested = 1.0  # Default fallback
+                    avg_invested_baseline = 1.0  # Default fallback
                     if os.path.exists("strategy_instances.csv"):
                         strategy_instances_df = pd.read_csv("strategy_instances.csv")
                         strategy_row = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
                         if not strategy_row.empty:
                             total_invested = strategy_row.iloc[0]['total_invested']
+                            position_count = strategy_row.iloc[0].get('analyzed_position_count', 1)
+                            avg_invested_baseline = total_invested / position_count if position_count > 0 else total_invested
                     
                     # Load optimal TP/SL data for correct baseline calculation
                     optimal_tp_sl_pnl = baseline_pnl  # Default fallback
@@ -309,8 +315,9 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                         if not strategy_agg_data.empty:
                             optimal_tp_sl_pnl = strategy_agg_data.loc[strategy_agg_data['total_pnl'].idxmax(), 'total_pnl']
                     
-                    # Calculate correct baseline PnL percentage: (best_tp_sl_pnl / total_invested) * 100
-                    baseline_pnl_pct = (optimal_tp_sl_pnl / total_invested * 100) if total_invested > 0 else 0
+                    # Calculate correct baseline PnL percentage using average investment
+                    # AIDEV-NOTE-CLAUDE: Average-based calculation for consistency
+                    baseline_pnl_pct = calculate_strategy_roi_percentage(optimal_tp_sl_pnl / position_count if position_count > 0 else optimal_tp_sl_pnl, avg_invested_baseline)
                     
                     fig.add_trace(go.Scatter(
                         x=[strategy_id],

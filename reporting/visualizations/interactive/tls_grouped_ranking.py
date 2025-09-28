@@ -65,21 +65,31 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
         for strategy_id in [str(x) for x in tls_results_df['strategy_instance_id'].unique()]:
             strategy_data = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_id]
             
-            # Get total_invested for this strategy
+            # Get investment data for this strategy
             total_invested = 1.0  # Default fallback
+            position_count = 1    # Default fallback
+            avg_invested = 1.0    # Default fallback
+            
             if strategy_instances_df is not None:
                 strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
                 if not strategy_info.empty:
                     total_invested = strategy_info.iloc[0]['total_invested']
+                    position_count = strategy_info.iloc[0].get('analyzed_position_count', 1)
+                    # AIDEV-NOTE-CLAUDE: Calculate average investment per position
+                    avg_invested = total_invested / position_count if position_count > 0 else total_invested
             
             # Find best combination for this strategy
             best_row = strategy_data.loc[strategy_data['simulated_pnl'].idxmax()]
             baseline_pnl = baseline_data.get(strategy_id, 0.0)
             
-            # Calculate percentage-based metrics
-            # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
-            pnl_pct = calculate_strategy_roi_percentage(best_row['simulated_pnl'], total_invested)
-            baseline_pnl_pct = calculate_strategy_roi_percentage(baseline_pnl, total_invested)
+            # Calculate percentage-based metrics using averages
+            # AIDEV-NOTE-CLAUDE: Use average-based ROI calculation for consistency
+            # For best combination, we have total PnL, so divide by position count to get average
+            avg_pnl = best_row['simulated_pnl'] / position_count if position_count > 0 else best_row['simulated_pnl']
+            avg_baseline_pnl = baseline_pnl / position_count if position_count > 0 else baseline_pnl
+            
+            pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_invested)
+            baseline_pnl_pct = calculate_strategy_roi_percentage(avg_baseline_pnl, avg_invested)
             
             # TLS effectiveness: (Representative_PnL - Strategy_Baseline_PnL) / Strategy_Baseline_PnL × 100
             tls_effectiveness = ((pnl_pct - baseline_pnl_pct) / abs(baseline_pnl_pct) * 100) if baseline_pnl_pct != 0 else 0
@@ -173,13 +183,16 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                     
                     # Only add to display list if within top 10 limit
                     if similar_count < 10:
+                        # AIDEV-NOTE-CLAUDE: Use average-based calculation for similar combinations
+                        avg_combo_pnl = combo_row['simulated_pnl'] / position_count if position_count > 0 else combo_row['simulated_pnl']
+                        
                         similar_combo = {
                             'strategy_id': main_combo['strategy_id'],
                             'tp_level': combo_row['tp_level'],
                             'sl_level': combo_row['sl_level'],
                             'tls_activation': combo_row['tls_activation'],
                             'tls_trail': combo_row['tls_trail'],
-                            'representative_pnl': (combo_row['simulated_pnl'] / total_invested * 100) if total_invested > 0 else 0,
+                            'representative_pnl': calculate_strategy_roi_percentage(avg_combo_pnl, avg_invested),
                             'representative_raw_pnl': combo_row['simulated_pnl'],
                             'baseline_pnl': baseline_pnl_pct,
                             'tls_effectiveness': 0,  # Simplified for grouping

@@ -103,14 +103,20 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
             merged_df = pd.merge(tls_results_df, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
             merged_df['total_invested'] = merged_df['total_invested'].fillna(1.0) # Avoid division by zero
             valid_investment = merged_df['total_invested'] > 0
-            # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
-            pnl_percentages = [
-                calculate_strategy_roi_percentage(pnl, inv) 
-                for pnl, inv in zip(
-                    merged_df.loc[valid_investment, 'simulated_pnl'],
-                    merged_df.loc[valid_investment, 'total_invested']
-                )
-            ]
+            # AIDEV-NOTE-CLAUDE: Calculate average PnL per position for each strategy
+            # Group by strategy to get averages
+            strategy_groups = merged_df.loc[valid_investment].groupby('strategy_instance_id').agg({
+                'simulated_pnl': 'mean',
+                'total_invested': 'mean'
+            }).reset_index()
+            
+            # Calculate ROI using averages: (avg_pnl / avg_invested) * 100
+            pnl_percentages = []
+            for _, row in strategy_groups.iterrows():
+                avg_pnl = row['simulated_pnl']
+                avg_invested = row['total_invested'] / len(merged_df[merged_df['strategy_instance_id'] == row['strategy_instance_id']])
+                pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_invested)
+                pnl_percentages.append(pnl_pct)
         
         if not pnl_percentages:
             # Fallback if strategy instances are not available or no valid investments
@@ -211,19 +217,25 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
                 ]
                 
                 if not cell_data.empty:
-                    # Calculate average PnL percentage for this specific TP/SL cell
+                    # AIDEV-NOTE-CLAUDE: Calculate average PnL % using avg per position / avg investment
                     pnl_percentages = []
                     if strategy_instances_df is not None:
-                        merged_cell_data = pd.merge(cell_data, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
+                        merged_cell_data = pd.merge(cell_data, strategy_instances_df[['strategy_instance_id', 'total_invested', 'analyzed_position_count']], on='strategy_instance_id', how='left')
                         merged_cell_data['total_invested'] = merged_cell_data['total_invested'].fillna(1.0).replace(0, 1.0)
-                        # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
-                        pnl_percentages = [
-                            calculate_strategy_roi_percentage(pnl, inv)
-                            for pnl, inv in zip(
-                                merged_cell_data['simulated_pnl'],
-                                merged_cell_data['total_invested']
-                            )
-                        ]
+                        merged_cell_data['analyzed_position_count'] = merged_cell_data['analyzed_position_count'].fillna(1).replace(0, 1)
+                        
+                        # Calculate average investment per position for each strategy
+                        merged_cell_data['avg_investment_per_position'] = merged_cell_data['total_invested'] / merged_cell_data['analyzed_position_count']
+                        
+                        # Use average PnL and average investment
+                        for strategy_id in merged_cell_data['strategy_instance_id'].unique():
+                            strategy_data = merged_cell_data[merged_cell_data['strategy_instance_id'] == strategy_id]
+                            avg_pnl = strategy_data['simulated_pnl'].mean()
+                            avg_investment = strategy_data['avg_investment_per_position'].iloc[0]
+                            pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_investment)
+                            pnl_percentages.append(pnl_pct)
+                    
+                    avg_pnl_pct = np.mean(pnl_percentages) if pnl_percentages else 0
                     
                     avg_pnl_pct = np.mean(pnl_percentages) if pnl_percentages else 0
                     row_pct.append(avg_pnl_pct)
@@ -379,11 +391,19 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
                         positive_results = 0
                         for _, pos_row in cell_data.iterrows():
                             pos_strategy_id = pos_row['strategy_instance_id']
-                            pos_total_invested = 1.0
+                            # AIDEV-NOTE-CLAUDE: Use average investment per position
                             if strategy_instances_df is not None:
                                 pos_strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == pos_strategy_id]
-                                if not pos_strategy_info.empty: pos_total_invested = pos_strategy_info.iloc[0]['total_invested']
-                            pos_pnl_pct = (pos_row['simulated_pnl'] / pos_total_invested * 100) if pos_total_invested > 0 else 0
+                                if not pos_strategy_info.empty:
+                                    total_invested = pos_strategy_info.iloc[0]['total_invested']
+                                    position_count = pos_strategy_info.iloc[0].get('analyzed_position_count', 1)
+                                    avg_invested = total_invested / position_count if position_count > 0 else total_invested
+                                else:
+                                    avg_invested = 1.0
+                            else:
+                                avg_invested = 1.0
+                            
+                            pos_pnl_pct = calculate_strategy_roi_percentage(pos_row['simulated_pnl'], avg_invested)
                             if pos_pnl_pct > 0: positive_results += 1
                         cell_win_rate = (positive_results / len(cell_data) * 100) if len(cell_data) > 0 else 0
                 
