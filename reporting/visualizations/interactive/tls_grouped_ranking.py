@@ -13,6 +13,22 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# AIDEV-INTEGRATE-CLAUDE: Import UnifiedBaselineManager for consistent baselines
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+    logger.debug("UnifiedBaselineManager not available, using legacy baseline calculation")
+
+
+def calculate_strategy_roi_percentage(total_pnl_sol: float, total_invested_sol: float) -> float:
+    """
+    Standard ROI metric for strategy comparison.
+    AIDEV-NOTE-CLAUDE: Unified ROI calculation - single source of truth
+    """
+    return (total_pnl_sol / total_invested_sol * 100) if total_invested_sol > 0 else 0.0
+
 
 def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str, float], 
                          strategy_instances_df: Optional[pd.DataFrame] = None,
@@ -61,8 +77,9 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
             baseline_pnl = baseline_data.get(strategy_id, 0.0)
             
             # Calculate percentage-based metrics
-            pnl_pct = (best_row['simulated_pnl'] / total_invested * 100) if total_invested > 0 else 0
-            baseline_pnl_pct = (baseline_pnl / total_invested * 100) if total_invested > 0 else 0
+            # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+            pnl_pct = calculate_strategy_roi_percentage(best_row['simulated_pnl'], total_invested)
+            baseline_pnl_pct = calculate_strategy_roi_percentage(baseline_pnl, total_invested)
             
             # TLS effectiveness: (Representative_PnL - Strategy_Baseline_PnL) / Strategy_Baseline_PnL × 100
             tls_effectiveness = ((pnl_pct - baseline_pnl_pct) / abs(baseline_pnl_pct) * 100) if baseline_pnl_pct != 0 else 0

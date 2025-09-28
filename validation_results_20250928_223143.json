@@ -1,0 +1,62 @@
+{
+  "timestamp": "2025-09-28T22:31:42.166012",
+  "tests_passed": 10,
+  "tests_failed": 0,
+  "details": [
+    {
+      "test": "ROI Calculation",
+      "status": "PASSED",
+      "details": "PnL=0.6, Invested=20.0: All modules return 3.00%"
+    },
+    {
+      "test": "ROI Calculation",
+      "status": "PASSED",
+      "details": "PnL=1.0, Invested=10.0: All modules return 10.00%"
+    },
+    {
+      "test": "ROI Calculation",
+      "status": "PASSED",
+      "details": "PnL=-0.5, Invested=5.0: All modules return -10.00%"
+    },
+    {
+      "test": "ROI Calculation",
+      "status": "PASSED",
+      "details": "PnL=0.0, Invested=10.0: All modules return 0.00%"
+    },
+    {
+      "test": "Baseline Consistency",
+      "status": "PASSED",
+      "strategy": "Bid-Ask (1-Sided) MEDIUM_TP4.5_SL8_2025-05-19_5a211d",
+      "details": "Consistent baseline: 0.5300 SOL"
+    },
+    {
+      "test": "Baseline Consistency",
+      "status": "PASSED",
+      "strategy": "Bid-Ask (1-Sided) SIXTYNINE_TP3_SL11_2025-05-29_dd50e7",
+      "details": "Consistent baseline: 0.6370 SOL"
+    },
+    {
+      "test": "Baseline Consistency",
+      "status": "PASSED",
+      "strategy": "Bid-Ask (1-Sided) SIXTYNINE_TP3_SL8_2025-05-30_aa6215",
+      "details": "Consistent baseline: 0.5260 SOL"
+    },
+    {
+      "test": "Baseline Consistency",
+      "status": "PASSED",
+      "strategy": "Bid-Ask (1-Sided) SIXTYNINE_TP3_SL9_2025-08-01_9ebb8d",
+      "details": "Consistent baseline: 5.8290 SOL"
+    },
+    {
+      "test": "Baseline Consistency",
+      "status": "PASSED",
+      "strategy": "Bid-Ask (1-Sided) SIXTYNINE_TP4_SL15_2025-05-21_000e77",
+      "details": "Consistent baseline: 0.9200 SOL"
+    },
+    {
+      "test": "Validation Report",
+      "status": "PASSED",
+      "details": "Consistency rate: 21/21 strategies"
+    }
+  ]
+}

@@ -53,6 +53,16 @@ class HTMLReportGenerator:
         
         os.makedirs(self.output_dir, exist_ok=True)
         self.jinja_env = Environment(loader=FileSystemLoader(self.templates_dir), autoescape=True)
+        
+        # AIDEV-NOTE-CLAUDE: Initialize UnifiedBaselineManager if available and enabled
+        self.baseline_manager = None
+        if UNIFIED_MANAGER_AVAILABLE and config and config.get('unified_baseline', {}).get('enabled', False):
+            try:
+                self.baseline_manager = UnifiedBaselineManager(config)
+                logger.info("UnifiedBaselineManager initialized for HTML report generation")
+            except Exception as e:
+                logger.warning(f"Failed to initialize UnifiedBaselineManager: {e}")
+        
         logger.info("HTML Report Generator initialized")
         
     def generate_comprehensive_report(self, 
@@ -524,6 +534,16 @@ class HTMLReportGenerator:
                 return {}
             
             # Generate strategy overview charts
+            # AIDEV-NOTE-CLAUDE: Pass unified baseline if available
+            if self.baseline_manager and not baseline_data:
+                # Generate baseline data from UnifiedBaselineManager
+                baseline_data = {}
+                for strategy_id in tls_df['strategy_instance_id'].unique():
+                    baseline_result = self.baseline_manager.calculate_strategy_baseline(
+                        strategy_id, tls_df, metric='total_pnl'
+                    )
+                    baseline_data[strategy_id] = baseline_result.baseline_sol
+            
             strategy_scatter_chart = create_strategy_overview_scatter(tls_df, baseline_data)
             # REFACTORED: This now returns a list of dictionaries (data), not HTML
             top_combinations_data = create_global_top_combinations_table(tls_df, baseline_data)

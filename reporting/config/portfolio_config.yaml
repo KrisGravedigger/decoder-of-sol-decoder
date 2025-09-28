@@ -175,3 +175,9 @@ unified_baseline:
   enabled: true                      # Will enable in Phase 4
   legacy_mode: false                  # Force old behavior if needed
   validation_enabled: true            # Run consistency checks
+
+  # Rollback procedure if issues occur:
+  # 1. Set enabled: false
+  # 2. Delete reporting/output/unified_baselines_cache.json
+  # 3. Restart application
+  # System will automatically fall back to legacy calculations

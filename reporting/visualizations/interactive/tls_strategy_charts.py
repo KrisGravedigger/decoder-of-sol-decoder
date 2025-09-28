@@ -16,6 +16,29 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# AIDEV-NOTE-CLAUDE: Import UnifiedBaselineManager for consistent baselines
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+    logger.debug("UnifiedBaselineManager not available, using legacy baseline calculation")
+
+
+def calculate_strategy_roi_percentage(total_pnl_sol: float, total_invested_sol: float) -> float:
+    """
+    Standard ROI metric for strategy comparison.
+    AIDEV-NOTE-CLAUDE: Unified ROI calculation - single source of truth
+    
+    Args:
+        total_pnl_sol: Sum of all position PnL for the strategy
+        total_invested_sol: Sum of all investments for the strategy
+        
+    Returns:
+        ROI percentage: (total_pnl / total_invested) * 100
+    """
+    return (total_pnl_sol / total_invested_sol * 100) if total_invested_sol > 0 else 0.0
+
 def _prepare_strategy_performance_summary_data(tls_results_df: pd.DataFrame) -> Dict[str, Any]:
     """
     Prepares aggregated data for the strategy performance summary table.
@@ -65,15 +88,55 @@ def _prepare_strategy_performance_summary_data(tls_results_df: pd.DataFrame) -> 
             optimal_params_tsl_str = f"TP:{best_combo_params[0]} SL:{best_combo_params[1]}<br>Act:{best_combo_params[2]} Trl:{best_combo_params[3]}"
 
         # --- Baseline Calculations: Find best combination and its TOTAL PnL ---
+        # AIDEV-NOTE-CLAUDE: Use UnifiedBaselineManager if available and enabled
         total_pnl_baseline_sol = 0.0
         optimal_params_baseline_str = "N/A"
-        if not baseline_aggregated_df.empty:
-            strategy_baseline_agg = baseline_aggregated_df[baseline_aggregated_df['strategy_instance_id'] == strategy_id]
-            if not strategy_baseline_agg.empty:
-                # Find the row with the maximum total_pnl for this strategy
-                best_baseline_row = strategy_baseline_agg.loc[strategy_baseline_agg['total_pnl'].idxmax()]
-                total_pnl_baseline_sol = best_baseline_row['total_pnl']
-                optimal_params_baseline_str = f"TP:{best_baseline_row['tp_level']} SL:{best_baseline_row['sl_level']}"
+        
+        if UNIFIED_MANAGER_AVAILABLE:
+            try:
+                import yaml
+                config_path = "reporting/config/portfolio_config.yaml"
+                config = {}
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+                
+                if config.get('unified_baseline', {}).get('enabled', False):
+                    manager = UnifiedBaselineManager(config)
+                    if not baseline_aggregated_df.empty:
+                        baseline_result = manager.calculate_strategy_baseline(
+                            strategy_id, 
+                            baseline_aggregated_df,
+                            metric='total_pnl'
+                        )
+                        total_pnl_baseline_sol = baseline_result.baseline_sol
+                        optimal_params_baseline_str = f"TP:{baseline_result.optimal_tp} SL:{baseline_result.optimal_sl}"
+                        logger.debug(f"Using unified baseline for {strategy_id}: {total_pnl_baseline_sol:.4f} SOL")
+                else:
+                    # Legacy baseline calculation
+                    if not baseline_aggregated_df.empty:
+                        strategy_baseline_agg = baseline_aggregated_df[baseline_aggregated_df['strategy_instance_id'] == strategy_id]
+                        if not strategy_baseline_agg.empty:
+                            best_baseline_row = strategy_baseline_agg.loc[strategy_baseline_agg['total_pnl'].idxmax()]
+                            total_pnl_baseline_sol = best_baseline_row['total_pnl']
+                            optimal_params_baseline_str = f"TP:{best_baseline_row['tp_level']} SL:{best_baseline_row['sl_level']}"
+            except Exception as e:
+                logger.debug(f"UnifiedBaselineManager not enabled or error occurred: {e}")
+                # Fallback to legacy
+                if not baseline_aggregated_df.empty:
+                    strategy_baseline_agg = baseline_aggregated_df[baseline_aggregated_df['strategy_instance_id'] == strategy_id]
+                    if not strategy_baseline_agg.empty:
+                        best_baseline_row = strategy_baseline_agg.loc[strategy_baseline_agg['total_pnl'].idxmax()]
+                        total_pnl_baseline_sol = best_baseline_row['total_pnl']
+                        optimal_params_baseline_str = f"TP:{best_baseline_row['tp_level']} SL:{best_baseline_row['sl_level']}"
+        else:
+            # Legacy baseline calculation
+            if not baseline_aggregated_df.empty:
+                strategy_baseline_agg = baseline_aggregated_df[baseline_aggregated_df['strategy_instance_id'] == strategy_id]
+                if not strategy_baseline_agg.empty:
+                    best_baseline_row = strategy_baseline_agg.loc[strategy_baseline_agg['total_pnl'].idxmax()]
+                    total_pnl_baseline_sol = best_baseline_row['total_pnl']
+                    optimal_params_baseline_str = f"TP:{best_baseline_row['tp_level']} SL:{best_baseline_row['sl_level']}"
         
         # --- New Comparison Metric ---
         tsl_advantage_pct = 0.0
@@ -158,8 +221,10 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                     if not strategy_row.empty:
                         total_invested = strategy_row.iloc[0]['total_invested']
                 
-                # Convert PnL to percentage values using total_invested (same as table calculation)
-                strategy_pnl_pct = (strategy_results['simulated_pnl'] / total_invested * 100) if total_invested > 0 else strategy_results['simulated_pnl'] * 0
+                # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+                strategy_pnl_pct = strategy_results['simulated_pnl'].apply(
+                    lambda x: calculate_strategy_roi_percentage(x, total_invested)
+                )
                 
                 # Ensure strategy_pnl_pct is not empty
                 if len(strategy_pnl_pct) == 0:
@@ -374,8 +439,9 @@ def create_global_top_combinations_table(tls_results_df: pd.DataFrame, baseline_
                     total_invested = strategy_row.iloc[0]['total_invested']
             
             optimal_tp_sl_pnl = optimal_tp_sl_data.get(strategy_id, strategy_baseline)
-            baseline_pnl_pct = (optimal_tp_sl_pnl / total_invested * 100) if total_invested > 0 else 0.0
-            tls_pnl_pct = (row['simulated_pnl'] / total_invested * 100) if total_invested > 0 else 0.0
+            # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+            baseline_pnl_pct = calculate_strategy_roi_percentage(optimal_tp_sl_pnl, total_invested)
+            tls_pnl_pct = calculate_strategy_roi_percentage(row['simulated_pnl'], total_invested)
             
             tls_benefit = ((tls_pnl_pct - baseline_pnl_pct) / abs(baseline_pnl_pct)) * 100 if baseline_pnl_pct != 0 else 0.0
             

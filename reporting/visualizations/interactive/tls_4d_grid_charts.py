@@ -13,8 +13,25 @@ import pandas as pd
 from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# AIDEV-NOTE-CLAUDE: Import UnifiedBaselineManager for consistent baselines
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+    logger.debug("UnifiedBaselineManager not available, using legacy baseline calculation")
+
+
+def calculate_strategy_roi_percentage(total_pnl_sol: float, total_invested_sol: float) -> float:
+    """
+    Standard ROI metric for strategy comparison.
+    AIDEV-NOTE-CLAUDE: Unified ROI calculation - single source of truth
+    """
+    return (total_pnl_sol / total_invested_sol * 100) if total_invested_sol > 0 else 0.0
 
 
 def detect_tested_tls_ranges(tls_results_df: pd.DataFrame) -> Tuple[List[float], List[float]]:
@@ -86,7 +103,14 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
             merged_df = pd.merge(tls_results_df, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
             merged_df['total_invested'] = merged_df['total_invested'].fillna(1.0) # Avoid division by zero
             valid_investment = merged_df['total_invested'] > 0
-            pnl_percentages = (merged_df.loc[valid_investment, 'simulated_pnl'] / merged_df.loc[valid_investment, 'total_invested'] * 100).tolist()
+            # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+            pnl_percentages = [
+                calculate_strategy_roi_percentage(pnl, inv) 
+                for pnl, inv in zip(
+                    merged_df.loc[valid_investment, 'simulated_pnl'],
+                    merged_df.loc[valid_investment, 'total_invested']
+                )
+            ]
         
         if not pnl_percentages:
             # Fallback if strategy instances are not available or no valid investments
@@ -192,7 +216,14 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
                     if strategy_instances_df is not None:
                         merged_cell_data = pd.merge(cell_data, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
                         merged_cell_data['total_invested'] = merged_cell_data['total_invested'].fillna(1.0).replace(0, 1.0)
-                        pnl_percentages = (merged_cell_data['simulated_pnl'] / merged_cell_data['total_invested'] * 100).tolist()
+                        # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+                        pnl_percentages = [
+                            calculate_strategy_roi_percentage(pnl, inv)
+                            for pnl, inv in zip(
+                                merged_cell_data['simulated_pnl'],
+                                merged_cell_data['total_invested']
+                            )
+                        ]
                     
                     avg_pnl_pct = np.mean(pnl_percentages) if pnl_percentages else 0
                     row_pct.append(avg_pnl_pct)
@@ -299,13 +330,31 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
         grid_data = []
         baseline_info = None
         
+        # AIDEV-INTEGRATE-CLAUDE: Use UnifiedBaselineManager for baseline if available
         if strategy_filter and baseline_data:
             baseline_pnl = baseline_data.get(strategy_filter, 0.0)
+            
+            if UNIFIED_MANAGER_AVAILABLE:
+                try:
+                    import yaml
+                    config_path = "reporting/config/portfolio_config.yaml"
+                    config = {}
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r') as f:
+                            config = yaml.safe_load(f)
+                    
+                    if config.get('unified_baseline', {}).get('enabled', False):
+                        manager = UnifiedBaselineManager(config)
+                        baseline_pnl = manager.get_tls_comparison_baseline(strategy_filter, filtered_df)
+                except Exception as e:
+                    logger.debug(f"Failed to use UnifiedBaselineManager: {e}")
+            
             if strategy_instances_df is not None:
                 strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_filter]
                 if not strategy_info.empty:
                     total_invested = strategy_info.iloc[0]['total_invested']
-                    baseline_pct = (baseline_pnl / total_invested * 100) if total_invested > 0 else 0
+                    # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+                    baseline_pct = calculate_strategy_roi_percentage(baseline_pnl, total_invested)
                     baseline_info = {'strategy_id': strategy_filter, 'baseline_pnl_sol': baseline_pnl, 'baseline_pnl_pct': baseline_pct}
         
         for activation in tls_activation_range:
