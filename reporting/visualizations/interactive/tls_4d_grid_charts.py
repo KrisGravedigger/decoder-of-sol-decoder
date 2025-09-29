@@ -97,70 +97,70 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         }
     
     try:
+        # Calculate PnL percentages for ALL individual combinations
         pnl_percentages = []
+        
         if strategy_instances_df is not None and not strategy_instances_df.empty:
-            # AIDEV-PERF-CLAUDE: Using a merge is more efficient than iterating for large datasets.
-            merged_df = pd.merge(tls_results_df, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
-            merged_df['total_invested'] = merged_df['total_invested'].fillna(1.0) # Avoid division by zero
-            valid_investment = merged_df['total_invested'] > 0
-            # AIDEV-NOTE-CLAUDE: Calculate average PnL per position for each strategy
-            # Group by strategy to get averages
-            strategy_groups = merged_df.loc[valid_investment].groupby('strategy_instance_id').agg({
-                'simulated_pnl': 'mean',
-                'total_invested': 'mean'
+            # Group by unique TP/SL/TLS combinations across all strategies
+            unique_combos = tls_results_df.groupby(
+                ['strategy_instance_id', 'tp_level', 'sl_level', 'tls_activation', 'tls_trail']
+            ).agg({
+                'simulated_pnl': 'sum'  # Total PnL for this combination
             }).reset_index()
             
-            # Calculate ROI using averages: (avg_pnl / avg_invested) * 100
-            pnl_percentages = []
-            for _, row in strategy_groups.iterrows():
-                avg_pnl = row['simulated_pnl']
-                avg_invested = row['total_invested'] / len(merged_df[merged_df['strategy_instance_id'] == row['strategy_instance_id']])
-                pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_invested)
-                pnl_percentages.append(pnl_pct)
+            # Calculate percentage for each combination
+            for _, combo in unique_combos.iterrows():
+                strategy_id = combo['strategy_instance_id']
+                strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
+                
+                if not strategy_info.empty:
+                    total_invested = strategy_info.iloc[0]['total_invested']
+                    position_count = strategy_info.iloc[0].get('analyzed_position_count', 1)
+                    
+                    if total_invested > 0 and position_count > 0:
+                        # Calculate average per position
+                        avg_pnl = combo['simulated_pnl'] / position_count
+                        avg_invested = total_invested / position_count
+                        pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_invested)
+                        pnl_percentages.append(pnl_pct)
         
         if not pnl_percentages:
-            # Fallback if strategy instances are not available or no valid investments
+            # Fallback if strategy instances are not available
             pnl_percentages = (tls_results_df['simulated_pnl'] * 100).tolist()
 
         if not pnl_percentages:
             # Final fallback for empty data
-             return {'global_min_pnl': -1.0, 'global_max_pnl': 1.0, 'color_scale': [[0.0, '#e74c3c'], [0.5, '#f39c12'], [1.0, '#27ae60']]}
+            return {'global_min_pnl': -1.0, 'global_max_pnl': 1.0, 
+                    'color_scale': [[0.0, '#e74c3c'], [0.5, '#f39c12'], [1.0, '#27ae60']]}
 
-        # AIDEV-4D-VIZ-CLAUDE: Dynamic scale based on actual data range
-        # This ensures proper color differentiation even for small value ranges
-        global_min_pnl = float(min(pnl_percentages)) if pnl_percentages else -1.0
-        global_max_pnl = float(max(pnl_percentages)) if pnl_percentages else 1.0
+        # Get actual min/max from all combinations
+        global_min_pnl = float(min(pnl_percentages))
+        global_max_pnl = float(max(pnl_percentages))
         
-        # Calculate the actual range
-        pnl_range = global_max_pnl - global_min_pnl
+        # Create symmetric scale around zero
+        max_abs = max(abs(global_min_pnl), abs(global_max_pnl))
         
-        # For symmetric scale around zero, but with better granularity
-        if pnl_range < 0.1:  # Very narrow range - use actual min/max
-            symmetric_min = global_min_pnl - 0.01  # Small padding
-            symmetric_max = global_max_pnl + 0.01
-        else:
-            # Find the center point and create symmetric scale
-            center = (global_min_pnl + global_max_pnl) / 2
-            half_range = max(abs(global_max_pnl - center), abs(center - global_min_pnl))
-            
-            # Add 10% padding for better visibility
-            padding = half_range * 0.1
-            symmetric_min = center - half_range - padding
-            symmetric_max = center + half_range + padding
+        # Add 10% padding for better visibility
+        padding = max_abs * 0.1
+        symmetric_min = -max_abs - padding
+        symmetric_max = max_abs + padding
         
-        logger.info(f"Dynamic color scale - Min: {symmetric_min:.2f}%, Max: {symmetric_max:.2f}%, Range: {pnl_range:.2f}%")
+        # Ensure we have at least some range
+        if abs(symmetric_max - symmetric_min) < 0.1:
+            symmetric_min = -5.0
+            symmetric_max = 5.0
         
-        # AIDEV-4D-VIZ-CLAUDE: A 5-point diverging scale provides better visual contrast,
-        # especially for values near zero, compared to a simple 3-point scale.
+        logger.info(f"Global color scale calculated - Range: [{symmetric_min:.2f}%, {symmetric_max:.2f}%], "
+                   f"Actual data range: [{global_min_pnl:.2f}%, {global_max_pnl:.2f}%]")
+        
+        # Create diverging color scale
         color_scale = [
             [0.0,  '#d73027'],  # Dark Red
-            [0.4,  '#fc8d59'],  # Light Red/Orange
+            [0.25, '#fc8d59'],  # Light Red/Orange  
             [0.5,  '#fee08b'],  # Saturated Yellow (for zero)
-            [0.6,  '#91cf60'],  # Light Green
+            [0.75, '#91cf60'],  # Light Green
             [1.0,  '#1a9850']   # Dark Green
         ]
-        
-        logger.info(f"Diverging global color scale calculated - Range: [{symmetric_min:.2f}%, {symmetric_max:.2f}%]")
         
         return {
             'global_min_pnl': symmetric_min,
@@ -170,7 +170,6 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         
     except Exception as e:
         logger.error(f"Failed to calculate global color scale: {e}", exc_info=True)
-        # Return safe defaults in case of failure
         return {
             'global_min_pnl': -5.0,
             'global_max_pnl': 5.0,

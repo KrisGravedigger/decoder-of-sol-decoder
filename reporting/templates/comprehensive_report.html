@@ -655,7 +655,7 @@
                                     <td>{{ group.group_metrics.group_size }}</td>
                                     <td class="{{ group.group_metrics.effectiveness_class }}"><strong>{{ "%+.1f"|format(group.group_metrics.tls_effectiveness) }}%</strong></td>
                                     <td>{{ "%.1f"|format(group.group_metrics.win_rate) }}%</td>
-                                    <td class="{{ group.group_metrics.baseline_class }}">{{ "%.2f"|format(group.group_metrics.baseline_pnl) }}%</td>
+                                    <td class="{{ group.group_metrics.baseline_class }}">{{ "%.2f"|format(group.group_metrics.baseline_pnl_pct) }}%</td>
                                     <td>{{ group.group_metrics.actual_similar_count }}</td>
                                 </tr>
                                 
@@ -678,7 +678,7 @@
                                     <td class="text-muted">{{ similar.group_size }}</td>
                                     <td class="{{ similar.effectiveness_class }}">{{ "%+.1f"|format(similar.tls_effectiveness) }}%</td>
                                     <td class="text-muted">{{ "%.1f"|format(similar.win_rate) }}%</td>
-                                    <td class="text-muted">{{ "%.2f"|format(similar.baseline_pnl) }}%</td>
+                                    <td class="text-muted">{{ "%.2f"|format(similar.baseline_pnl_pct) }}%</td>
                                     <td class="text-muted">-</td>
                                 </tr>
                                 {% endfor %}

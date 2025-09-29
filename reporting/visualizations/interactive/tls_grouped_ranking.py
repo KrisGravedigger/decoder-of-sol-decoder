@@ -116,11 +116,11 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                 'sl_level': best_row['sl_level'],
                 'tls_activation': best_row['tls_activation'],
                 'tls_trail': best_row['tls_trail'],
-                'avg_pnl_pct': pnl_pct,  # AIDEV-NOTE-CLAUDE: Changed to avg_pnl_pct for clarity
+                'avg_pnl_pct': pnl_pct,  # Average PnL % per position
                 'total_pnl_sol': best_row['simulated_pnl'],  # Total PnL in SOL
                 'avg_pnl_sol': avg_pnl,  # Average PnL per position in SOL
                 'baseline_pnl_pct': baseline_pnl_pct,
-                'tls_effectiveness': tls_effectiveness,  # Now compares avg % vs baseline avg %
+                'tls_effectiveness': tls_effectiveness,
                 'win_rate': win_rate,
                 'group_size': len(combo_data),
                 'total_invested': total_invested,
@@ -129,7 +129,7 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
             }
         
         # Step 2: Sort by performance and create groups
-        sorted_combos = sorted(strategy_best_combos.values(), key=lambda x: x['representative_raw_pnl'], reverse=True)
+        sorted_combos = sorted(strategy_best_combos.values(), key=lambda x: x['avg_pnl_pct'], reverse=True)
         
         groups = []
         used_strategies = set()
@@ -195,9 +195,9 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                             'sl_level': combo_row['sl_level'],
                             'tls_activation': combo_row['tls_activation'],
                             'tls_trail': combo_row['tls_trail'],
-                            'representative_pnl': calculate_strategy_roi_percentage(avg_combo_pnl, avg_invested),
-                            'representative_raw_pnl': combo_row['simulated_pnl'],
-                            'baseline_pnl': baseline_pnl_pct,
+                            'avg_pnl_pct': calculate_strategy_roi_percentage(avg_combo_pnl, avg_invested),
+                            'total_pnl_sol': combo_row['simulated_pnl'],
+                            'baseline_pnl_pct': baseline_pnl_pct,
                             'tls_effectiveness': 0,  # Simplified for grouping
                             'win_rate': 0,  # Simplified for grouping
                             'group_size': combo_row['position_count'],
@@ -210,7 +210,7 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
             # Calculate group-level metrics
             all_group_combos = [group['representative']] + group['similar_combinations']
             
-            group_pnl_values = [combo['representative_pnl'] for combo in all_group_combos]
+            group_pnl_values = [combo['avg_pnl_pct'] for combo in all_group_combos]
             total_positions = sum(combo['group_size'] for combo in all_group_combos)
             
             # Group metrics calculations
@@ -219,7 +219,7 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                 'group_size': total_positions,
                 'tls_effectiveness': group['representative']['tls_effectiveness'],
                 'win_rate': group['representative']['win_rate'],
-                'baseline_pnl': group['representative']['baseline_pnl'],
+                'baseline_pnl_pct': group['representative']['baseline_pnl_pct'],
                 'num_combinations': len(all_group_combos),
                 'actual_similar_count': total_similar_available,  # Show total available, not just displayed
                 'parameter_spread': {
@@ -269,7 +269,7 @@ def prepare_grouped_ranking_data(grouped_data: List[Dict[str, Any]]) -> List[Dic
     
     try:
         # Sort groups by representative PnL for final display
-        sorted_groups = sorted(grouped_data, key=lambda x: x['representative']['representative_pnl'], reverse=True)
+        sorted_groups = sorted(grouped_data, key=lambda x: x['representative']['avg_pnl_pct'], reverse=True)
         
         prepared_table_data = []
         
@@ -299,8 +299,8 @@ def prepare_grouped_ranking_data(grouped_data: List[Dict[str, Any]]) -> List[Dic
                 'tls_effectiveness': metrics['tls_effectiveness'],
                 'effectiveness_class': 'positive' if metrics['tls_effectiveness'] > 0 else 'negative',
                 'win_rate': metrics['win_rate'],
-                'baseline_pnl': metrics['baseline_pnl'],
-                'baseline_class': 'positive' if metrics['baseline_pnl'] >= 0 else 'negative',
+                'baseline_pnl_pct': metrics['baseline_pnl_pct'],
+                'baseline_class': 'positive' if metrics['baseline_pnl_pct'] >= 0 else 'negative',
                 'actual_similar_count': metrics['actual_similar_count'],
             }
             
@@ -308,7 +308,7 @@ def prepare_grouped_ranking_data(grouped_data: List[Dict[str, Any]]) -> List[Dic
             similar_combos_data = []
             if group['similar_combinations']:
                 sorted_similar = sorted(group['similar_combinations'], 
-                                      key=lambda x: x['representative_pnl'], reverse=True)
+                                      key=lambda x: x['avg_pnl_pct'], reverse=True)
                 
                 for i, similar_combo in enumerate(sorted_similar):
                     similar_combos_data.append({
@@ -318,13 +318,14 @@ def prepare_grouped_ranking_data(grouped_data: List[Dict[str, Any]]) -> List[Dic
                         'sl_level': similar_combo['sl_level'],
                         'tls_activation': similar_combo['tls_activation'],
                         'tls_trail': similar_combo['tls_trail'],
-                        'pnl_pct': similar_combo['representative_pnl'],
-                        'pnl_class': 'positive' if similar_combo['representative_pnl'] >= 0 else 'negative',
+                        'avg_pnl_pct': similar_combo['avg_pnl_pct'],
+                        'total_pnl_sol': similar_combo['total_pnl_sol'],
+                        'pnl_class': 'positive' if similar_combo['avg_pnl_pct'] >= 0 else 'negative',
                         'group_size': similar_combo['group_size'],
                         'tls_effectiveness': similar_combo['tls_effectiveness'],
                         'effectiveness_class': 'positive' if similar_combo['tls_effectiveness'] > 0 else 'negative',
                         'win_rate': similar_combo['win_rate'],
-                        'baseline_pnl': similar_combo['baseline_pnl'],
+                        'baseline_pnl_pct': similar_combo['baseline_pnl_pct'],
                     })
 
             prepared_table_data.append({

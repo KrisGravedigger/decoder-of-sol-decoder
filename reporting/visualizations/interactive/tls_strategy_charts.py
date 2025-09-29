@@ -262,11 +262,56 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                 
                 # Best TLS result (green highlight) - use average-based calculation
                 if len(strategy_results) > 0:  # Safety check
+                    # Group by unique TP/SL/TLS combinations for this strategy
+                    strategy_combos = strategy_results.groupby(
+                        ['tp_level', 'sl_level', 'tls_activation', 'tls_trail']
+                    ).agg({
+                        'simulated_pnl': ['sum', 'count']  # Total PnL and count
+                    }).reset_index()
+                    
+                    strategy_combos.columns = ['tp_level', 'sl_level', 'tls_activation', 'tls_trail', 'total_pnl', 'position_count']
+                    
+                    # Calculate average PnL % for each combination
+                    strategy_combos['avg_pnl_pct'] = strategy_combos.apply(
+                        lambda row: calculate_strategy_roi_percentage(
+                            row['total_pnl'] / row['position_count'] if row['position_count'] > 0 else row['total_pnl'],
+                            avg_invested
+                        ), axis=1
+                    )
+                    
+                    # Find best combination by average PnL %
+                    if not strategy_combos.empty:
+                        best_combo_idx = strategy_combos['avg_pnl_pct'].idxmax()
+                        best_combo = strategy_combos.iloc[best_combo_idx]
+                        
+                        best_tls_pnl_pct = best_combo['avg_pnl_pct']
+                        
+                        fig.add_trace(go.Scatter(
+                            x=[strategy_id],
+                            y=[best_tls_pnl_pct],
+                            mode='markers',
+                            marker=dict(
+                                size=8,
+                                color='green',
+                                opacity=1.0,
+                                line=dict(width=1, color='darkgreen')
+                            ),
+                            hovertemplate=(
+                                "<b>BEST TLS: %{x}</b><br>" +
+                                "Avg PnL: %{y:.2f}%<br>" +
+                                f"TP: {best_combo['tp_level']}%, SL: {best_combo['sl_level']}%<br>" +
+                                f"TLS Act: {best_combo['tls_activation']}%, Trail: {best_combo['tls_trail']}%<br>" +
+                                f"Positions: {int(best_combo['position_count'])}<br>" +
+                                "<extra></extra>"
+                            ),
+                            showlegend=False,
+                            name=f"{strategy_id}_best_tls"
+                        ))
+                else:
+                    # Original single-point logic as fallback
                     best_tls_iloc_pos = strategy_results['simulated_pnl'].argmax()
                     best_tls_result = strategy_results.iloc[best_tls_iloc_pos]
                     
-                    # AIDEV-NOTE-CLAUDE: Calculate best TLS % using average investment
-                    # This is a single position result, so use avg_invested directly
                     best_tls_pnl_pct = calculate_strategy_roi_percentage(
                         best_tls_result['simulated_pnl'], 
                         avg_invested
