@@ -18,6 +18,9 @@ from core.models import Position  # ZMIANA: Import oficjalnego modelu
 
 logger = logging.getLogger(__name__)
 
+# AIDEV-INTEGRATE-CLAUDE: Import UnifiedBaselineManager for Phase 2 integration
+from simulations.unified_baseline_manager import UnifiedBaselineManager
+
 
 class TpSlRangeSimulator:
     """
@@ -91,6 +94,9 @@ class TpSlRangeSimulator:
         
         # Aggregate results by strategy instance
         aggregated_df = self._aggregate_results(detailed_df)
+        
+        # AIDEV-INTEGRATE-CLAUDE: Export to unified baseline system if enabled
+        self.export_to_baseline_manager(aggregated_df)
         
         return {
             'detailed_results': detailed_df,
@@ -330,8 +336,9 @@ class TpSlRangeSimulator:
         # Group by strategy instance and TP/SL levels
         grouped = detailed_df.groupby(['strategy_instance_id', 'tp_level', 'sl_level'])
         
+        # AIDEV-INTEGRATE-CLAUDE: Added 'max' aggregation for baseline tracking
         aggregated = grouped.agg({
-            'simulated_pnl': ['sum', 'mean', 'count'],
+            'simulated_pnl': ['sum', 'mean', 'count', 'max'],  # Added 'max' for best position
             'simulated_pnl_pct': 'mean',
             'improvement': 'sum',
             'exit_reason': lambda x: x.value_counts().to_dict(),
@@ -344,6 +351,7 @@ class TpSlRangeSimulator:
             'simulated_pnl_sum': 'total_pnl',
             'simulated_pnl_mean': 'avg_pnl',
             'simulated_pnl_count': 'position_count',
+            'simulated_pnl_max': 'best_position_pnl',  # AIDEV-INTEGRATE-CLAUDE: Track best position
             'simulated_pnl_pct_mean': 'avg_pnl_pct',
             'improvement_sum': 'total_improvement',
             'exit_reason_<lambda>': 'exit_reasons',
@@ -371,7 +379,43 @@ class TpSlRangeSimulator:
         aggregated = aggregated.reset_index()
         
         return aggregated
+
+    def export_to_baseline_manager(self, aggregated_df: pd.DataFrame) -> None:
+        """
+        Export aggregated results to UnifiedBaselineManager.
         
+        AIDEV-INTEGRATE-CLAUDE: Phase 2 integration point
+        Sends range test results to unified baseline system
+        
+        Args:
+            aggregated_df: Aggregated results DataFrame
+        """
+        try:
+            # Check if unified baseline is enabled
+            if not self.config.get('unified_baseline', {}).get('enabled', False):
+                logger.debug("UnifiedBaselineManager not enabled, skipping export")
+                return
+                
+            manager = UnifiedBaselineManager(self.config)
+            
+            # Register results for each strategy
+            for strategy_id in aggregated_df['strategy_instance_id'].unique():
+                strategy_data = aggregated_df[aggregated_df['strategy_instance_id'] == strategy_id]
+                
+                # Calculate and cache baseline
+                baseline = manager.calculate_strategy_baseline(
+                    strategy_id,
+                    strategy_data,
+                    metric='total_pnl'  # Use total_pnl as primary metric
+                )
+                
+                logger.debug(f"Exported baseline for {strategy_id}: {baseline.baseline_sol:.4f} SOL")
+                
+            logger.info(f"Exported {len(aggregated_df['strategy_instance_id'].unique())} strategies to UnifiedBaselineManager")
+            
+        except Exception as e:
+            logger.warning(f"Could not export to UnifiedBaselineManager: {e}")
+
     def _row_to_position(self, row: pd.Series) -> Position:
         """
         Convert DataFrame row to a Position object for simulation.

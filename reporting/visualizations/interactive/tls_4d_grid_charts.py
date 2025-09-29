@@ -13,8 +13,25 @@ import pandas as pd
 from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# AIDEV-NOTE-CLAUDE: Import UnifiedBaselineManager for consistent baselines
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+    logger.debug("UnifiedBaselineManager not available, using legacy baseline calculation")
+
+
+def calculate_strategy_roi_percentage(total_pnl_sol: float, total_invested_sol: float) -> float:
+    """
+    Standard ROI metric for strategy comparison.
+    AIDEV-NOTE-CLAUDE: Unified ROI calculation - single source of truth
+    """
+    return (total_pnl_sol / total_invested_sol * 100) if total_invested_sol > 0 else 0.0
 
 
 def detect_tested_tls_ranges(tls_results_df: pd.DataFrame) -> Tuple[List[float], List[float]]:
@@ -80,47 +97,65 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         }
     
     try:
+        # Calculate PnL percentages for ALL individual combinations
         pnl_percentages = []
+        
         if strategy_instances_df is not None and not strategy_instances_df.empty:
-            # AIDEV-PERF-CLAUDE: Using a merge is more efficient than iterating for large datasets.
-            merged_df = pd.merge(tls_results_df, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
-            merged_df['total_invested'] = merged_df['total_invested'].fillna(1.0) # Avoid division by zero
-            valid_investment = merged_df['total_invested'] > 0
-            pnl_percentages = (merged_df.loc[valid_investment, 'simulated_pnl'] / merged_df.loc[valid_investment, 'total_invested'] * 100).tolist()
+            # Group by unique TP/SL/TLS combinations across all strategies
+            unique_combos = tls_results_df.groupby(
+                ['strategy_instance_id', 'tp_level', 'sl_level', 'tls_activation', 'tls_trail']
+            ).agg({
+                'simulated_pnl': 'sum'  # Total PnL for this combination
+            }).reset_index()
+            
+            # Calculate percentage for each combination
+            for _, combo in unique_combos.iterrows():
+                strategy_id = combo['strategy_instance_id']
+                strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
+                
+                if not strategy_info.empty:
+                    total_invested = strategy_info.iloc[0]['total_invested']
+                    position_count = strategy_info.iloc[0].get('analyzed_position_count', 1)
+                    
+                    if total_invested > 0 and position_count > 0:
+                        # Calculate average per position
+                        avg_pnl = combo['simulated_pnl'] / position_count
+                        avg_invested = total_invested / position_count
+                        pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_invested)
+                        pnl_percentages.append(pnl_pct)
         
         if not pnl_percentages:
-            # Fallback if strategy instances are not available or no valid investments
+            # Fallback if strategy instances are not available
             pnl_percentages = (tls_results_df['simulated_pnl'] * 100).tolist()
 
         if not pnl_percentages:
             # Final fallback for empty data
-             return {'global_min_pnl': -1.0, 'global_max_pnl': 1.0, 'color_scale': [[0.0, '#e74c3c'], [0.5, '#f39c12'], [1.0, '#27ae60']]}
+            return {'global_min_pnl': -1.0, 'global_max_pnl': 1.0, 
+                    'color_scale': [[0.0, '#e74c3c'], [0.5, '#f39c12'], [1.0, '#27ae60']]}
 
-        # AIDEV-4D-VIZ-CLAUDE: This logic creates a symmetric (diverging) scale.
-        # It finds the largest absolute PnL value and sets the scale from -X to +X.
-        # This ensures that zero is always the center of the color map (yellow),
-        # which is crucial for intuitive visual analysis.
+        # Get actual min/max from all combinations
         global_min_pnl = float(min(pnl_percentages))
         global_max_pnl = float(max(pnl_percentages))
         
-        max_abs_val = max(abs(global_min_pnl), abs(global_max_pnl))
-        if max_abs_val < 0.5: # Ensure a minimum range for better visuals
-            max_abs_val = 0.5
-
-        symmetric_min = -max_abs_val
-        symmetric_max = max_abs_val
+        # Create symmetric scale around zero
+        max_abs = max(abs(global_min_pnl), abs(global_max_pnl))
         
-        # AIDEV-4D-VIZ-CLAUDE: A 5-point diverging scale provides better visual contrast,
-        # especially for values near zero, compared to a simple 3-point scale.
-        color_scale = [
-            [0.0,  '#d73027'],  # Dark Red
-            [0.4,  '#fc8d59'],  # Light Red/Orange
-            [0.5,  '#fee08b'],  # Saturated Yellow (for zero)
-            [0.6,  '#91cf60'],  # Light Green
-            [1.0,  '#1a9850']   # Dark Green
-        ]
+        # Add 10% padding for better visibility
+        padding = max_abs * 0.1
+        symmetric_min = -max_abs - padding
+        symmetric_max = max_abs + padding
         
-        logger.info(f"Diverging global color scale calculated - Range: [{symmetric_min:.2f}%, {symmetric_max:.2f}%]")
+        # Ensure we have at least some range
+        if abs(symmetric_max - symmetric_min) < 0.1:
+            symmetric_min = -5.0
+            symmetric_max = 5.0
+        
+        logger.info(f"Global color scale calculated - Range: [{symmetric_min:.2f}%, {symmetric_max:.2f}%], "
+                   f"Actual data range: [{global_min_pnl:.2f}%, {global_max_pnl:.2f}%]")
+        
+        # AIDEV-NOTE-CLAUDE: Use the standard 'RdYlGn' diverging color scale for more detail,
+        # matching the professional heatmap in strategy_charts.py.
+        color_scale = 'RdYlGn'
         
         return {
             'global_min_pnl': symmetric_min,
@@ -130,7 +165,6 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         
     except Exception as e:
         logger.error(f"Failed to calculate global color scale: {e}", exc_info=True)
-        # Return safe defaults in case of failure
         return {
             'global_min_pnl': -5.0,
             'global_max_pnl': 5.0,
@@ -187,14 +221,28 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
                 ]
                 
                 if not cell_data.empty:
-                    # Calculate average PnL percentage for this specific TP/SL cell
+                    # AIDEV-NOTE-CLAUDE: Calculate average PnL % using avg per position / avg investment
                     pnl_percentages = []
                     if strategy_instances_df is not None:
-                        merged_cell_data = pd.merge(cell_data, strategy_instances_df[['strategy_instance_id', 'total_invested']], on='strategy_instance_id', how='left')
+                        merged_cell_data = pd.merge(cell_data, strategy_instances_df[['strategy_instance_id', 'total_invested', 'analyzed_position_count']], on='strategy_instance_id', how='left')
                         merged_cell_data['total_invested'] = merged_cell_data['total_invested'].fillna(1.0).replace(0, 1.0)
-                        pnl_percentages = (merged_cell_data['simulated_pnl'] / merged_cell_data['total_invested'] * 100).tolist()
-                    
-                    avg_pnl_pct = np.mean(pnl_percentages) if pnl_percentages else 0
+                        merged_cell_data['analyzed_position_count'] = merged_cell_data['analyzed_position_count'].fillna(1).replace(0, 1)
+                        
+                        # Calculate average investment per position for each strategy
+                        merged_cell_data['avg_investment_per_position'] = merged_cell_data['total_invested'] / merged_cell_data['analyzed_position_count']
+                        
+                        # Use average PnL and average investment
+                        for strategy_id in merged_cell_data['strategy_instance_id'].unique():
+                            strategy_data = merged_cell_data[merged_cell_data['strategy_instance_id'] == strategy_id]
+                            avg_pnl = strategy_data['simulated_pnl'].mean()
+                            avg_investment = strategy_data['avg_investment_per_position'].iloc[0]
+                            pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_investment)
+                            pnl_percentages.append(pnl_pct)
+                                                         
+                    if pnl_percentages:
+                        avg_pnl_pct = np.mean(pnl_percentages)
+                    else:
+                        avg_pnl_pct = 0.0
                     row_pct.append(avg_pnl_pct)
                 else:
                     row_pct.append(None)
@@ -299,13 +347,31 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
         grid_data = []
         baseline_info = None
         
+        # AIDEV-INTEGRATE-CLAUDE: Use UnifiedBaselineManager for baseline if available
         if strategy_filter and baseline_data:
             baseline_pnl = baseline_data.get(strategy_filter, 0.0)
+            
+            if UNIFIED_MANAGER_AVAILABLE:
+                try:
+                    import yaml
+                    config_path = "reporting/config/portfolio_config.yaml"
+                    config = {}
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r') as f:
+                            config = yaml.safe_load(f)
+                    
+                    if config.get('unified_baseline', {}).get('enabled', False):
+                        manager = UnifiedBaselineManager(config)
+                        baseline_pnl = manager.get_tls_comparison_baseline(strategy_filter, filtered_df)
+                except Exception as e:
+                    logger.debug(f"Failed to use UnifiedBaselineManager: {e}")
+            
             if strategy_instances_df is not None:
                 strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_filter]
                 if not strategy_info.empty:
                     total_invested = strategy_info.iloc[0]['total_invested']
-                    baseline_pct = (baseline_pnl / total_invested * 100) if total_invested > 0 else 0
+                    # AIDEV-NOTE-CLAUDE: Use standardized ROI calculation
+                    baseline_pct = calculate_strategy_roi_percentage(baseline_pnl, total_invested)
                     baseline_info = {'strategy_id': strategy_filter, 'baseline_pnl_sol': baseline_pnl, 'baseline_pnl_pct': baseline_pct}
         
         for activation in tls_activation_range:
@@ -330,11 +396,19 @@ def create_4d_tls_grid(tls_results_df: pd.DataFrame, strategy_filter: Optional[s
                         positive_results = 0
                         for _, pos_row in cell_data.iterrows():
                             pos_strategy_id = pos_row['strategy_instance_id']
-                            pos_total_invested = 1.0
+                            # AIDEV-NOTE-CLAUDE: Use average investment per position
                             if strategy_instances_df is not None:
                                 pos_strategy_info = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == pos_strategy_id]
-                                if not pos_strategy_info.empty: pos_total_invested = pos_strategy_info.iloc[0]['total_invested']
-                            pos_pnl_pct = (pos_row['simulated_pnl'] / pos_total_invested * 100) if pos_total_invested > 0 else 0
+                                if not pos_strategy_info.empty:
+                                    total_invested = pos_strategy_info.iloc[0]['total_invested']
+                                    position_count = pos_strategy_info.iloc[0].get('analyzed_position_count', 1)
+                                    avg_invested = total_invested / position_count if position_count > 0 else total_invested
+                                else:
+                                    avg_invested = 1.0
+                            else:
+                                avg_invested = 1.0
+                            
+                            pos_pnl_pct = calculate_strategy_roi_percentage(pos_row['simulated_pnl'], avg_invested)
                             if pos_pnl_pct > 0: positive_results += 1
                         cell_win_rate = (positive_results / len(cell_data) * 100) if len(cell_data) > 0 else 0
                 

@@ -8,8 +8,17 @@ and calculate TLS benefit metrics for comparison analysis.
 import logging
 import pandas as pd
 from typing import Dict, List, Any, Optional
+import os
 
 logger = logging.getLogger(__name__)
+
+# AIDEV-INTEGRATE-CLAUDE: Import UnifiedBaselineManager for consistent baselines
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+    logger.debug("UnifiedBaselineManager not available, using legacy baseline calculation")
 
 
 class StrategyBaselineComparator:
@@ -29,6 +38,8 @@ class StrategyBaselineComparator:
         """
         For each strategy, find the best non-TLS performance.
         
+        AIDEV-INTEGRATE-CLAUDE: Now delegates to UnifiedBaselineManager when available
+        
         Args:
             strategy_positions: List of position dictionaries
             existing_tp_sl_results: Optional DataFrame with existing TP/SL simulation results
@@ -36,6 +47,54 @@ class StrategyBaselineComparator:
         Returns:
             Dictionary mapping strategy_instance_id -> best_non_tls_pnl
         """
+        # AIDEV-INTEGRATE-CLAUDE: Try to use UnifiedBaselineManager if available and enabled
+        if UNIFIED_MANAGER_AVAILABLE:
+            try:
+                # Check if unified baseline is enabled via config (if we can access it)
+                import yaml
+                config_path = "reporting/config/portfolio_config.yaml"
+                config = {}
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+                
+                if config.get('unified_baseline', {}).get('enabled', False):
+                    logger.info("Using UnifiedBaselineManager for baseline calculation")
+                    manager = UnifiedBaselineManager(config)
+                    
+                    strategy_baselines = {}
+                    if existing_tp_sl_results is not None and not existing_tp_sl_results.empty:
+                        for strategy_id in existing_tp_sl_results['strategy_instance_id'].unique():
+                            strategy_data = existing_tp_sl_results[existing_tp_sl_results['strategy_instance_id'] == strategy_id]
+                            baseline_result = manager.calculate_strategy_baseline(
+                                strategy_id, 
+                                strategy_data,
+                                metric='total_pnl'
+                            )
+                            strategy_baselines[strategy_id] = baseline_result.baseline_sol
+                            
+                            logger.debug(
+                                f"Unified baseline for {strategy_id}: {baseline_result.baseline_sol:.4f} SOL "
+                                f"(TP: {baseline_result.optimal_tp}, SL: {baseline_result.optimal_sl}, "
+                                f"confidence: {baseline_result.confidence_score:.2f})"
+                            )
+                    else:
+                        # Use actual positions as fallback
+                        positions_df = pd.DataFrame(strategy_positions)
+                        for strategy_id in positions_df['strategy_instance_id'].unique():
+                            strategy_positions_data = positions_df[positions_df['strategy_instance_id'] == strategy_id]
+                            if not strategy_positions_data.empty:
+                                strategy_baselines[strategy_id] = strategy_positions_data['pnl_sol'].max()
+                    
+                    logger.info(f"Calculated unified baselines for {len(strategy_baselines)} strategies")
+                    return strategy_baselines
+                    
+            except Exception as e:
+                logger.debug(f"UnifiedBaselineManager not enabled or error occurred: {e}")
+                # Fall through to legacy implementation
+        
+        # LEGACY IMPLEMENTATION (preserved for backward compatibility)
+        logger.debug("Using legacy baseline calculation")
         strategy_baselines = {}
         
         if existing_tp_sl_results is not None and not existing_tp_sl_results.empty:

@@ -24,6 +24,13 @@ from .visualizations import interactive as interactive_charts
 from .visualizations.interactive import range_test_charts
 from utils.common import sort_strategies_by_date_descending
 
+# AIDEV-INTEGRATE-CLAUDE: Import UnifiedBaselineManager for validation
+try:
+    from simulations.unified_baseline_manager import UnifiedBaselineManager
+    UNIFIED_MANAGER_AVAILABLE = True
+except ImportError:
+    UNIFIED_MANAGER_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +53,16 @@ class HTMLReportGenerator:
         
         os.makedirs(self.output_dir, exist_ok=True)
         self.jinja_env = Environment(loader=FileSystemLoader(self.templates_dir), autoescape=True)
+        
+        # AIDEV-NOTE-CLAUDE: Initialize UnifiedBaselineManager if available and enabled
+        self.baseline_manager = None
+        if UNIFIED_MANAGER_AVAILABLE and config and config.get('unified_baseline', {}).get('enabled', False):
+            try:
+                self.baseline_manager = UnifiedBaselineManager(config)
+                logger.info("UnifiedBaselineManager initialized for HTML report generation")
+            except Exception as e:
+                logger.warning(f"Failed to initialize UnifiedBaselineManager: {e}")
+        
         logger.info("HTML Report Generator initialized")
         
     def generate_comprehensive_report(self, 
@@ -270,6 +287,46 @@ class HTMLReportGenerator:
                 'grouped_combinations': True
             }
 
+        # AIDEV-INTEGRATE-CLAUDE: Unified baseline validation for Phase 2
+        unified_baseline_data = None
+        if UNIFIED_MANAGER_AVAILABLE and self.config.get('unified_baseline', {}).get('enabled', False):
+            try:
+                manager = UnifiedBaselineManager(self.config)
+                
+                # Load range test results if available
+                range_df = None
+                if os.path.exists("reporting/output/range_test_aggregated.csv"):
+                    range_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
+                
+                # Get TLS results if available
+                tls_df = None
+                if tls_analysis and 'detailed_results' in tls_analysis:
+                    tls_df = tls_analysis['detailed_results']
+                    if not isinstance(tls_df, pd.DataFrame) and isinstance(tls_df, list):
+                        tls_df = pd.DataFrame(tls_df)
+                
+                # Run validation if we have data
+                if range_df is not None:
+                    validation_report = manager.validate_consistency(range_df, tls_df)
+                    
+                    # Generate comparison report
+                    comparison_df = manager.generate_comparison_report(range_df, tls_df)
+                    
+                    unified_baseline_data = {
+                        'validation_passed': validation_report.is_consistent,
+                        'consistency_rate': validation_report.to_dict()['consistency_rate'],
+                        'inconsistencies': validation_report.inconsistencies[:5],  # Show top 5
+                        'warnings': validation_report.warnings[:5],
+                        'recommendations': comparison_df.to_dict('records') if not comparison_df.empty else [],
+                        'total_strategies': validation_report.total_strategies,
+                        'consistent_strategies': validation_report.consistent_strategies
+                    }
+                    
+                    logger.info(f"Unified baseline validation: {validation_report.consistent_strategies}/{validation_report.total_strategies} consistent")
+                    
+            except Exception as e:
+                logger.warning(f"Could not generate unified baseline validation: {e}")
+        
         template_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'portfolio_analysis': portfolio_analysis,
@@ -287,7 +344,8 @@ class HTMLReportGenerator:
             'enriched_simulation_json': enriched_simulation_json,
             'optimal_settings_json': json.dumps(optimal_settings_map),
             'tested_tp_levels_json': json.dumps(sorted(tested_tp_levels)),
-            'tested_sl_levels_json': json.dumps(sorted(tested_sl_levels))
+            'tested_sl_levels_json': json.dumps(sorted(tested_sl_levels)),
+            'unified_baseline_data': unified_baseline_data  # AIDEV-INTEGRATE-CLAUDE: Add validation data
         }
         
         return template_data
@@ -476,14 +534,23 @@ class HTMLReportGenerator:
                 return {}
             
             # Generate strategy overview charts
+            # AIDEV-NOTE-CLAUDE: Pass unified baseline if available
+            if self.baseline_manager and not baseline_data:
+                # Generate baseline data from UnifiedBaselineManager
+                baseline_data = {}
+                for strategy_id in tls_df['strategy_instance_id'].unique():
+                    baseline_result = self.baseline_manager.calculate_strategy_baseline(
+                        strategy_id, tls_df, metric='total_pnl'
+                    )
+                    baseline_data[strategy_id] = baseline_result.baseline_sol
+            
             strategy_scatter_chart = create_strategy_overview_scatter(tls_df, baseline_data)
-            # REFACTORED: This now returns a list of dictionaries (data), not HTML
-            top_combinations_data = create_global_top_combinations_table(tls_df, baseline_data)
+            # top_combinations_data = create_global_top_combinations_table(tls_df, baseline_data)  # REMOVED
             performance_summary = create_strategy_performance_summary(tls_df, baseline_data)
             
             return {
                 'tls_strategy_scatter_chart': strategy_scatter_chart,
-                'tls_top_combinations_data': top_combinations_data, # NEW: Pass data to template
+                # 'tls_top_combinations_data': top_combinations_data,  # REMOVED
                 'tls_performance_summary': performance_summary
             }
             
