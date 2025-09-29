@@ -545,13 +545,12 @@ class HTMLReportGenerator:
                     baseline_data[strategy_id] = baseline_result.baseline_sol
             
             strategy_scatter_chart = create_strategy_overview_scatter(tls_df, baseline_data)
-            # REFACTORED: This now returns a list of dictionaries (data), not HTML
-            top_combinations_data = create_global_top_combinations_table(tls_df, baseline_data)
+            # top_combinations_data = create_global_top_combinations_table(tls_df, baseline_data)  # REMOVED
             performance_summary = create_strategy_performance_summary(tls_df, baseline_data)
             
             return {
                 'tls_strategy_scatter_chart': strategy_scatter_chart,
-                'tls_top_combinations_data': top_combinations_data, # NEW: Pass data to template
+                # 'tls_top_combinations_data': top_combinations_data,  # REMOVED
                 'tls_performance_summary': performance_summary
             }
             

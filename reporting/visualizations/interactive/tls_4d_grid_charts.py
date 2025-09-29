@@ -126,19 +126,29 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
             # Final fallback for empty data
              return {'global_min_pnl': -1.0, 'global_max_pnl': 1.0, 'color_scale': [[0.0, '#e74c3c'], [0.5, '#f39c12'], [1.0, '#27ae60']]}
 
-        # AIDEV-4D-VIZ-CLAUDE: This logic creates a symmetric (diverging) scale.
-        # It finds the largest absolute PnL value and sets the scale from -X to +X.
-        # This ensures that zero is always the center of the color map (yellow),
-        # which is crucial for intuitive visual analysis.
-        global_min_pnl = float(min(pnl_percentages))
-        global_max_pnl = float(max(pnl_percentages))
+        # AIDEV-4D-VIZ-CLAUDE: Dynamic scale based on actual data range
+        # This ensures proper color differentiation even for small value ranges
+        global_min_pnl = float(min(pnl_percentages)) if pnl_percentages else -1.0
+        global_max_pnl = float(max(pnl_percentages)) if pnl_percentages else 1.0
         
-        max_abs_val = max(abs(global_min_pnl), abs(global_max_pnl))
-        if max_abs_val < 0.5: # Ensure a minimum range for better visuals
-            max_abs_val = 0.5
-
-        symmetric_min = -max_abs_val
-        symmetric_max = max_abs_val
+        # Calculate the actual range
+        pnl_range = global_max_pnl - global_min_pnl
+        
+        # For symmetric scale around zero, but with better granularity
+        if pnl_range < 0.1:  # Very narrow range - use actual min/max
+            symmetric_min = global_min_pnl - 0.01  # Small padding
+            symmetric_max = global_max_pnl + 0.01
+        else:
+            # Find the center point and create symmetric scale
+            center = (global_min_pnl + global_max_pnl) / 2
+            half_range = max(abs(global_max_pnl - center), abs(center - global_min_pnl))
+            
+            # Add 10% padding for better visibility
+            padding = half_range * 0.1
+            symmetric_min = center - half_range - padding
+            symmetric_max = center + half_range + padding
+        
+        logger.info(f"Dynamic color scale - Min: {symmetric_min:.2f}%, Max: {symmetric_max:.2f}%, Range: {pnl_range:.2f}%")
         
         # AIDEV-4D-VIZ-CLAUDE: A 5-point diverging scale provides better visual contrast,
         # especially for values near zero, compared to a simple 3-point scale.
@@ -234,10 +244,11 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
                             avg_investment = strategy_data['avg_investment_per_position'].iloc[0]
                             pnl_pct = calculate_strategy_roi_percentage(avg_pnl, avg_investment)
                             pnl_percentages.append(pnl_pct)
-                    
-                    avg_pnl_pct = np.mean(pnl_percentages) if pnl_percentages else 0
-                    
-                    avg_pnl_pct = np.mean(pnl_percentages) if pnl_percentages else 0
+                                                         
+                    if pnl_percentages:
+                        avg_pnl_pct = np.mean(pnl_percentages)
+                    else:
+                        avg_pnl_pct = 0.0
                     row_pct.append(avg_pnl_pct)
                 else:
                     row_pct.append(None)

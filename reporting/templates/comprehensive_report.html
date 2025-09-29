@@ -456,49 +456,7 @@
                         </span>
                     </div>
                 </div>
-
-                <!-- REFACTORED: Top Combinations Table -->
-                {% if charts.get('tls_top_combinations_data') %}
-                <div class="top-combinations-table" style="margin-top: 30px;">
-                    <h4>🏆 Top Performing TLS Combinations (Best per Strategy)</h4>
-                    <table class="table table-striped table-hover" id="global_top_combinations_table">
-                        <thead>
-                            <tr>
-                                <th>Rank</th>
-                                <th>Strategy</th>
-                                <th>TP (%)</th>
-                                <th>SL (%)</th>
-                                <th>TLS Act (%)</th>
-                                <th>TLS Trail (%)</th>
-                                <th>TLS PnL (%)</th>
-                                <th>Baseline PnL (%)</th>
-                                <th>TLS Benefit (%)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for combo in charts.tls_top_combinations_data %}
-                            <tr>
-                                <td><strong>{{ loop.index }}</strong></td>
-                                <td>
-                                    <a href="#" class="top-combo-strategy-link" data-strategy-id="{{ combo.strategy_instance_id }}" 
-                                       style="text-decoration: none; color: #3498db; font-weight: bold;">
-                                        {{ combo.strategy_instance_id }}
-                                    </a>
-                                </td>
-                                <td>{{ combo.tp_level }}</td>
-                                <td>{{ combo.sl_level }}</td>
-                                <td>{{ combo.tls_activation }}</td>
-                                <td>{{ combo.tls_trail }}</td>
-                                <td class="{{ combo.tls_pnl_class }}">{{ "%.2f"|format(combo.tls_pnl) }}%</td>
-                                <td class="{{ combo.baseline_pnl_class }}">{{ "%.2f"|format(combo.baseline_pnl) }}%</td>
-                                <td class="{{ combo.benefit_class }}"><strong>{{ "%+.2f"|format(combo.tls_benefit) }}%</strong></td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% endif %}
-                                               
+                                                            
                 <!-- Strategy Performance Details Table -->
                 {% if charts.get('tls_performance_summary') and charts.tls_performance_summary.get('_table_html') %}
                 <div class="strategy-performance-details" style="margin-top: 30px;">
@@ -665,8 +623,8 @@
                                     <th>Rank</th>
                                     <th>Strategy</th>
                                     <th>Representative Parameters</th>
-                                    <th>Rep. PnL (%)</th>
-                                    <th>Avg Group PnL (%)</th>
+                                    <th>Avg PnL (%)</th>
+                                    <th>Total PnL (SOL)</th>
                                     <th>Group Size</th>
                                     <th>TLS Effectiveness (%)</th>
                                     <th>Win Rate (%)</th>
@@ -692,8 +650,8 @@
                                             <span class="param-group">Trail: {{ group.representative.tls_trail }}%</span>
                                         </div>
                                     </td>
-                                    <td class="{{ group.representative.pnl_class }}"><strong>{{ "%.2f"|format(group.representative.pnl_pct) }}%</strong></td>
-                                    <td class="{{ group.group_metrics.avg_pnl_class }}">{{ "%.2f"|format(group.group_metrics.avg_pnl) }}%</td>
+                                    <td class="{{ group.representative.pnl_class }}"><strong>{{ "%.2f"|format(group.representative.avg_pnl_pct) }}%</strong></td>
+                                    <td class="{{ group.representative.pnl_class }}">{{ "%.3f"|format(group.representative.total_pnl_sol) }}</td>
                                     <td>{{ group.group_metrics.group_size }}</td>
                                     <td class="{{ group.group_metrics.effectiveness_class }}"><strong>{{ "%+.1f"|format(group.group_metrics.tls_effectiveness) }}%</strong></td>
                                     <td>{{ "%.1f"|format(group.group_metrics.win_rate) }}%</td>
@@ -715,8 +673,8 @@
                                             <span class="param-group">Trail: {{ similar.tls_trail }}%</span>
                                         </div>
                                     </td>
-                                    <td class="{{ similar.pnl_class }}">{{ "%.2f"|format(similar.pnl_pct) }}%</td>
-                                    <td class="text-muted">{{ "%.2f"|format(similar.pnl_pct) }}%</td>
+                                   <td class="{{ similar.pnl_class }}">{{ "%.2f"|format(similar.avg_pnl_pct) }}%</td>
+                                    <td class="text-muted">{{ "%.3f"|format(similar.total_pnl_sol) }}</td>
                                     <td class="text-muted">{{ similar.group_size }}</td>
                                     <td class="{{ similar.effectiveness_class }}">{{ "%+.1f"|format(similar.tls_effectiveness) }}%</td>
                                     <td class="text-muted">{{ "%.1f"|format(similar.win_rate) }}%</td>

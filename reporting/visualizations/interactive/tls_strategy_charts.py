@@ -260,16 +260,17 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                         name=f"{strategy_id}_range"
                     ))
                 
-                # Best TLS result (green highlight) - use argmax for safe indexing
-                if len(strategy_results) > 0 and len(strategy_pnl_pct) > 0:  # Safety check
-                    best_tls_iloc_pos = strategy_results['simulated_pnl'].argmax()  # Use argmax instead of idxmax
-                    best_tls_result = strategy_results.iloc[best_tls_iloc_pos]  # Use iloc instead of loc
+                # Best TLS result (green highlight) - use average-based calculation
+                if len(strategy_results) > 0:  # Safety check
+                    best_tls_iloc_pos = strategy_results['simulated_pnl'].argmax()
+                    best_tls_result = strategy_results.iloc[best_tls_iloc_pos]
                     
-                    # Safe bounds checking for percentage array access
-                    if best_tls_iloc_pos < len(strategy_pnl_pct):
-                        best_tls_pnl_pct = strategy_pnl_pct.iloc[best_tls_iloc_pos]
-                    else:
-                        best_tls_pnl_pct = 0
+                    # AIDEV-NOTE-CLAUDE: Calculate best TLS % using average investment
+                    # This is a single position result, so use avg_invested directly
+                    best_tls_pnl_pct = calculate_strategy_roi_percentage(
+                        best_tls_result['simulated_pnl'], 
+                        avg_invested
+                    )
                     
                     fig.add_trace(go.Scatter(
                         x=[strategy_id],

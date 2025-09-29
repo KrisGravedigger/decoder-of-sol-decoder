@@ -116,13 +116,16 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
                 'sl_level': best_row['sl_level'],
                 'tls_activation': best_row['tls_activation'],
                 'tls_trail': best_row['tls_trail'],
-                'representative_pnl': pnl_pct,
-                'representative_raw_pnl': best_row['simulated_pnl'],
-                'baseline_pnl': baseline_pnl_pct,
-                'tls_effectiveness': tls_effectiveness,
+                'avg_pnl_pct': pnl_pct,  # AIDEV-NOTE-CLAUDE: Changed to avg_pnl_pct for clarity
+                'total_pnl_sol': best_row['simulated_pnl'],  # Total PnL in SOL
+                'avg_pnl_sol': avg_pnl,  # Average PnL per position in SOL
+                'baseline_pnl_pct': baseline_pnl_pct,
+                'tls_effectiveness': tls_effectiveness,  # Now compares avg % vs baseline avg %
                 'win_rate': win_rate,
                 'group_size': len(combo_data),
-                'total_invested': total_invested
+                'total_invested': total_invested,
+                'position_count': position_count,
+                'avg_invested': avg_invested
             }
         
         # Step 2: Sort by performance and create groups
@@ -274,15 +277,18 @@ def prepare_grouped_ranking_data(grouped_data: List[Dict[str, Any]]) -> List[Dic
             rep = group['representative']
             metrics = group['group_metrics']
             
-            # Prepare representative data
+            # Prepare representative data with new metrics
+            # AIDEV-NOTE-CLAUDE: Using average-based metrics for consistency
             representative_data = {
                 'strategy_id': rep['strategy_id'],
                 'tp_level': rep['tp_level'],
                 'sl_level': rep['sl_level'],
                 'tls_activation': rep['tls_activation'],
                 'tls_trail': rep['tls_trail'],
-                'pnl_pct': rep['representative_pnl'],
-                'pnl_class': 'positive' if rep['representative_pnl'] >= 0 else 'negative',
+                'avg_pnl_pct': rep.get('avg_pnl_pct', 0),  # Average PnL %
+                'total_pnl_sol': rep.get('total_pnl_sol', 0),  # Total PnL in SOL
+                'avg_pnl_sol': rep.get('avg_pnl_sol', 0),  # Average PnL per position in SOL
+                'pnl_class': 'positive' if rep.get('avg_pnl_pct', 0) >= 0 else 'negative',
             }
             
             # Prepare group metrics data
