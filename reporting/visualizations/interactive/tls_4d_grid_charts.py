@@ -153,14 +153,9 @@ def calculate_global_color_scale(tls_results_df: pd.DataFrame, strategy_instance
         logger.info(f"Global color scale calculated - Range: [{symmetric_min:.2f}%, {symmetric_max:.2f}%], "
                    f"Actual data range: [{global_min_pnl:.2f}%, {global_max_pnl:.2f}%]")
         
-        # Create diverging color scale
-        color_scale = [
-            [0.0,  '#d73027'],  # Dark Red
-            [0.25, '#fc8d59'],  # Light Red/Orange  
-            [0.5,  '#fee08b'],  # Saturated Yellow (for zero)
-            [0.75, '#91cf60'],  # Light Green
-            [1.0,  '#1a9850']   # Dark Green
-        ]
+        # AIDEV-NOTE-CLAUDE: Use the standard 'RdYlGn' diverging color scale for more detail,
+        # matching the professional heatmap in strategy_charts.py.
+        color_scale = 'RdYlGn'
         
         return {
             'global_min_pnl': symmetric_min,

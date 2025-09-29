@@ -211,15 +211,16 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
             all_group_combos = [group['representative']] + group['similar_combinations']
             
             group_pnl_values = [combo['avg_pnl_pct'] for combo in all_group_combos]
+            baseline_pnl_values = [combo['baseline_pnl_pct'] for combo in all_group_combos]
             total_positions = sum(combo['group_size'] for combo in all_group_combos)
             
             # Group metrics calculations
             group['group_metrics'] = {
-                'avg_pnl': np.mean(group_pnl_values),
+                'avg_pnl': np.mean(group_pnl_values) if group_pnl_values else 0,
                 'group_size': total_positions,
                 'tls_effectiveness': group['representative']['tls_effectiveness'],
                 'win_rate': group['representative']['win_rate'],
-                'baseline_pnl_pct': group['representative']['baseline_pnl_pct'],
+                'baseline_pnl_pct': np.mean(baseline_pnl_values) if baseline_pnl_values else 0,
                 'num_combinations': len(all_group_combos),
                 'actual_similar_count': total_similar_available,  # Show total available, not just displayed
                 'parameter_spread': {

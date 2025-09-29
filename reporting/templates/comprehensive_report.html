@@ -568,7 +568,7 @@
                 <div class="tls-grouped-ranking-section" id="tls-grouped-ranking-section" style="margin-top: 40px;">
                     <h4>🏅 4D Parameter Grouping & Ranking (Phase 4)</h4>
                     <div class="grouped-description" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                        <p><strong>Sophisticated Parameter Grouping:</strong> Similar TLS combinations grouped by 4-point combined distance tolerance. 
+                        <p><strong>Sophisticated Parameter Grouping:</strong> Similar TLS combinations grouped by 2-point combined distance tolerance. 
                            Each group shows the best representative with expandable similar alternatives.</p>
                         <p><strong>Focus:</strong> Best representatives prioritized for actionable insights, weaker similar combinations available for reference.</p>
                     </div>
@@ -609,7 +609,7 @@
                     <!-- Expandable Grouped Ranking Table -->
                     <div class="grouped-ranking-table-container">
                         <div class="table-header">
-                            <h4>🏆 Top TLS Parameter Groups - Grouped by Similarity (Max 4-Point Distance)</h4>
+                            <h4>🏆 Top TLS Parameter Groups - Grouped by Similarity (Max 2-Point Distance)</h4>
                             <p class="table-description">
                                 Groups show best representative combination with expandable similar alternatives. 
                                 Click (+) to expand group details.
@@ -650,7 +650,7 @@
                                             <span class="param-group">Trail: {{ group.representative.tls_trail }}%</span>
                                         </div>
                                     </td>
-                                    <td class="{{ group.representative.pnl_class }}"><strong>{{ "%.2f"|format(group.representative.avg_pnl_pct) }}%</strong></td>
+                                    <td class="{{ group.group_metrics.avg_pnl_class }}"><strong>{{ "%.2f"|format(group.group_metrics.avg_pnl) }}%</strong></td>
                                     <td class="{{ group.representative.pnl_class }}">{{ "%.3f"|format(group.representative.total_pnl_sol) }}</td>
                                     <td>{{ group.group_metrics.group_size }}</td>
                                     <td class="{{ group.group_metrics.effectiveness_class }}"><strong>{{ "%+.1f"|format(group.group_metrics.tls_effectiveness) }}%</strong></td>
