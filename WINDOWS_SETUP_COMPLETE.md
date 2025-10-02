@@ -39,7 +39,7 @@ The following Python packages have been installed via pip:
 
 ```powershell
 # Navigate to the project directory
-cd "c:\Users\krzys\Desktop\Decoder of SOL Decoder v3"
+cd "c:\Users\user\Desktop\Decoder of SOL Decoder v3"
 
 # Run the main application
 python main.py

@@ -347,6 +347,8 @@ def create_strategy_overview_scatter(tls_results_df: pd.DataFrame, baseline_data
                     avg_invested_baseline = 1.0  # Default fallback
                     if os.path.exists("strategy_instances.csv"):
                         strategy_instances_df = pd.read_csv("strategy_instances.csv")
+                        # AIDEV-NOTE-CLAUDE: Filter out strategies with 0 analyzed positions
+                        strategy_instances_df = strategy_instances_df[strategy_instances_df['analyzed_position_count'] > 0]
                         strategy_row = strategy_instances_df[strategy_instances_df['strategy_instance_id'] == strategy_id]
                         if not strategy_row.empty:
                             total_invested = strategy_row.iloc[0]['total_invested']

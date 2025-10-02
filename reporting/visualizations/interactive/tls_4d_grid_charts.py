@@ -250,7 +250,16 @@ def create_mini_heatmap(tls_activation: float, tls_trail: float,
 
         # AIDEV-NOTE-CLAUDE: 'best_performance_pct' is the local maximum for this specific
         # heatmap. This value is used to color the cell's header in the final grid.
-        best_performance_pct = np.nanmax(z_matrix_pct) if np.any(z_matrix_pct) else 0.0
+        # Handle all-NaN arrays gracefully
+        try:
+            # Check if there are any non-NaN values in the matrix
+            z_matrix_array = np.array(z_matrix_pct, dtype=float)
+            if np.any(~np.isnan(z_matrix_array)):
+                best_performance_pct = np.nanmax(z_matrix_array)
+            else:
+                best_performance_pct = 0.0
+        except (ValueError, RuntimeWarning):
+            best_performance_pct = 0.0
 
         fig = go.Figure(data=go.Heatmap(
             z=z_matrix_pct,

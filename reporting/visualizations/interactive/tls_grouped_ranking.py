@@ -65,6 +65,11 @@ def group_4d_combinations(tls_results_df: pd.DataFrame, baseline_data: Dict[str,
         for strategy_id in [str(x) for x in tls_results_df['strategy_instance_id'].unique()]:
             strategy_data = tls_results_df[tls_results_df['strategy_instance_id'] == strategy_id]
             
+            # AIDEV-NOTE-CLAUDE: Skip strategies with no valid TLS results (all NaN)
+            if strategy_data.empty or strategy_data['simulated_pnl'].isna().all():
+                logger.warning(f"Strategy {strategy_id} has no valid TLS results, skipping")
+                continue
+            
             # Get investment data for this strategy
             total_invested = 1.0  # Default fallback
             position_count = 1    # Default fallback

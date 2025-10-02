@@ -15,6 +15,7 @@ strategy_mergers:
       - "Bid-Ask (1-Sided) UNKNOWN_TP6_SL9_2025-09-10_4c8801"
       - "Bid-Ask (1-Sided) SIXTYNINE_TP6_SL9_2025-08-08_731d9f"
       - "Bid-Ask (1-Sided) SIXTYNINE_TP3_SL9_2025-08-01_9ebb8d"
+      - "Bid-Ask (1-Sided) UNKNOWN_TP4_SL6_2025-09-21_676877"
 
 # Optional merge logic configuration (reserved for future use)
 merge_logic:

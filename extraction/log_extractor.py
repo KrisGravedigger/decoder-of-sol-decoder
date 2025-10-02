@@ -291,6 +291,8 @@ class LogParser:
         self.config = self._load_config()
         self.active_positions: Dict[str, Position] = {}
         self.finalized_positions: List[Position] = []
+        # AIDEV-NOTE-CLAUDE: Mapping pool_address -> token_pair for handling pool-address-based close events
+        self.pool_to_pair_mapping: Dict[str, str] = {}
         self.debug_analyzer = DebugAnalyzer(
             debug_enabled=DEBUG_ENABLED,
             context_export_enabled=CONTEXT_EXPORT_ENABLED
@@ -376,6 +378,10 @@ class LogParser:
         pos.max_bin_price = max_price
         
         self.active_positions[token_pair] = pos
+        
+        # AIDEV-NOTE-CLAUDE: Store pool_address -> token_pair mapping for pool-based close detection
+        if pos.pool_address:
+            self.pool_to_pair_mapping[pos.pool_address] = token_pair
                 
         self.strategy_diagnostic.detect_missing_step_size(
             pos.actual_strategy, index, pos.initial_investment
@@ -433,6 +439,10 @@ class LogParser:
         pos.initial_investment = details.get('initial_investment')
         
         self.active_positions[token_pair] = pos
+        
+        # AIDEV-NOTE-CLAUDE: Store pool_address -> token_pair mapping for pool-based close detection
+        if pos.pool_address:
+            self.pool_to_pair_mapping[pos.pool_address] = token_pair
 
         if DETAILED_POSITION_LOGGING:
             logger.info(
@@ -477,6 +487,37 @@ class LogParser:
                     closed_pair = remove_match.group(1).strip()
                     break
 
+        # AIDEV-NOTE-CLAUDE: If no TOKEN-SOL format found, try to detect pool address and map to token_pair
+        if not closed_pair:
+            # Try to detect pool address pattern (32-44 character Base58 string)
+            pool_address_match = re.search(r'Closed\s+([A-Za-z0-9]{32,44})\s+position', trigger_line, re.IGNORECASE)
+            if pool_address_match:
+                pool_address = pool_address_match.group(1)
+                # Check if we have this pool address in our mapping
+                if pool_address in self.pool_to_pair_mapping:
+                    closed_pair = self.pool_to_pair_mapping[pool_address]
+                    if DEBUG_ENABLED and DEBUG_LEVEL == "DEBUG":
+                        logger.debug(f"Mapped pool address {pool_address[:8]}... to token pair {closed_pair} at line {index+1}")
+                else:
+                    # AIDEV-NOTE-CLAUDE: Orphaned close event - position opened outside analyzed logs
+                    # Check for bot memory loss indicators in context
+                    context_check_range = 20
+                    has_no_matching_data = False
+                    for i in range(max(0, index - context_check_range), min(len(self.all_lines), index + context_check_range)):
+                        if "No matching position data found" in self.all_lines[i]:
+                            has_no_matching_data = True
+                            break
+                    
+                    if has_no_matching_data:
+                        # This is an orphaned close - bot lost position data (restart/RPC issues)
+                        if DEBUG_ENABLED:
+                            logger.debug(
+                                f"Ignoring orphaned close event at line {index+1} - "
+                                f"pool {pool_address[:8]}... opened outside analyzed logs"
+                            )
+                        return  # Exit early - we can't analyze positions without open data
+                    # If no "No matching position data" found, continue to regular warning
+        
         if not closed_pair:
             wallet_id, source_file = self._get_file_info_for_line(index)
             line_content = clean_ansi(self.all_lines[index])

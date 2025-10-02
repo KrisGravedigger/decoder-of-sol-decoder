@@ -165,6 +165,27 @@ class TlsRangeSimulator:
         """
         if 'strategy_instance_id' not in positions_df.columns:
             raise ValueError("positions_df must contain strategy_instance_id column. Run strategy detection first.")
+        
+        # AIDEV-NOTE-CLAUDE: Filter out strategies with no positions before analysis starts
+        # This prevents empty strategies from causing NaN cascades throughout the pipeline
+        initial_count = len(positions_df)
+        positions_df = positions_df[positions_df['strategy_instance_id'].notna()].copy()
+        
+        # Count positions per strategy and filter out empty ones
+        strategy_position_counts = positions_df.groupby('strategy_instance_id').size()
+        valid_strategies = strategy_position_counts[strategy_position_counts > 0].index
+        positions_df = positions_df[positions_df['strategy_instance_id'].isin(valid_strategies)]
+        
+        filtered_count = initial_count - len(positions_df)
+        if filtered_count > 0:
+            logger.info(f"Filtered out {filtered_count} positions from strategies with 0 analyzed positions")
+        
+        if positions_df.empty:
+            logger.warning("No valid positions remaining after filtering empty strategies")
+            return {
+                'detailed_results': pd.DataFrame(),
+                'baseline_comparison': pd.DataFrame()
+            }
 
         from simulations.baseline_comparator import StrategyBaselineComparator
         baseline_comparator = StrategyBaselineComparator()

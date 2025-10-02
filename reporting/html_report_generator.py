@@ -577,13 +577,28 @@ class HTMLReportGenerator:
             return {}
 
         try:
-            strategy_instances_df = pd.read_csv("strategy_instances.csv") if os.path.exists("strategy_instances.csv") else None
+            # AIDEV-NOTE-CLAUDE: Filter out strategies with 0 analyzed positions
+            strategy_instances_df = None
+            if os.path.exists("strategy_instances.csv"):
+                strategy_instances_df = pd.read_csv("strategy_instances.csv")
+                strategy_instances_df = strategy_instances_df[strategy_instances_df['analyzed_position_count'] > 0]
+                logger.info(f"Filtered strategy instances: {len(strategy_instances_df)} strategies with analyzed positions")
+            
             baseline_data = None
             if os.path.exists("reporting/output/range_test_aggregated.csv"):
                 agg_df = pd.read_csv("reporting/output/range_test_aggregated.csv")
                 optimal_df = agg_df.loc[agg_df.groupby('strategy_instance_id')['total_pnl'].idxmax()]
                 baseline_data = optimal_df.set_index('strategy_instance_id')['total_pnl'].to_dict()
 
+            # AIDEV-NOTE-CLAUDE: Filter TLS results to only include valid strategies
+            if strategy_instances_df is not None and not strategy_instances_df.empty:
+                valid_strategy_ids = set(strategy_instances_df['strategy_instance_id'].tolist())
+                original_count = len(tls_detailed_results)
+                tls_detailed_results = tls_detailed_results[tls_detailed_results['strategy_instance_id'].isin(valid_strategy_ids)]
+                filtered_count = original_count - len(tls_detailed_results)
+                if filtered_count > 0:
+                    logger.info(f"Filtered out {filtered_count} TLS results for strategies with 0 analyzed positions")
+            
             # 1. AIDEV-FIX-CLAUDE: Calculate a single, global, diverging color scale for ALL charts.
             logger.info("Calculating global diverging color scale for all TLS data...")
             global_color_config = calculate_global_color_scale(
@@ -723,6 +738,25 @@ class HTMLReportGenerator:
             strategy_instances_df = None
             if os.path.exists("strategy_instances.csv"):
                 strategy_instances_df = pd.read_csv("strategy_instances.csv")
+                # AIDEV-NOTE-CLAUDE: Filter out strategies with 0 analyzed positions
+                strategy_instances_df = strategy_instances_df[strategy_instances_df['analyzed_position_count'] > 0]
+                logger.info(f"Grouped ranking using {len(strategy_instances_df)} valid strategies")
+                
+                # AIDEV-NOTE-CLAUDE: Filter TLS results to match valid strategies
+                if not tls_detailed_results.empty:
+                    valid_strategy_ids = set(strategy_instances_df['strategy_instance_id'].tolist())
+                    original_tls_count = len(tls_detailed_results)
+                    tls_detailed_results = tls_detailed_results[tls_detailed_results['strategy_instance_id'].isin(valid_strategy_ids)]
+                    filtered_tls_count = original_tls_count - len(tls_detailed_results)
+                    if filtered_tls_count > 0:
+                        logger.info(f"Grouped ranking: filtered out {filtered_tls_count} TLS results for invalid strategies")
+                # Filter out strategies with no analyzed positions
+                strategy_instances_df = strategy_instances_df[strategy_instances_df['analyzed_position_count'] > 0]
+            
+            # AIDEV-NOTE-CLAUDE: Verify we have data to group
+            if tls_detailed_results.empty:
+                logger.warning("No TLS results available for grouped ranking after filtering")
+                return {}
             
             # Generate 4D groupings
             grouped_combinations = group_4d_combinations(

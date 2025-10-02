@@ -184,8 +184,18 @@ class StrategyBaselineComparator:
                 lambda x: self.calculate_tls_benefit(x, baseline_pnl)
             )
             
-            # Find best TLS performance
-            best_tls_idx = strategy_results['simulated_pnl'].idxmax()
+            # AIDEV-NOTE-CLAUDE: Handle strategies with no valid TLS results (all NaN)
+            # This happens when strategy has 0 analyzed positions (all filtered out)
+            valid_results = strategy_results['simulated_pnl'].notna()
+            if not valid_results.any():
+                logger.warning(
+                    f"Strategy {strategy_id} has no valid TLS simulation results (all NaN). "
+                    f"Likely has 0 analyzed positions. Skipping TLS analysis."
+                )
+                continue
+            
+            # Find best TLS performance (only among valid results)
+            best_tls_idx = strategy_results.loc[valid_results, 'simulated_pnl'].idxmax()
             best_tls_result = strategy_results.loc[best_tls_idx]
             
             # Calculate effectiveness metrics

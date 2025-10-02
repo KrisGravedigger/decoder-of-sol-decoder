@@ -238,7 +238,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             cache_file = os.path.join(base_dir, month_str, f"{pool_address}.json")
             if os.path.exists(cache_file):
                 try:
-                    with open(cache_file, 'r') as f:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         all_data.extend(data if isinstance(data, list) else [])
                 except Exception as e:
@@ -338,7 +338,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             full_month_data_map = {}
             if os.path.exists(cache_file):
                 try:
-                    with open(cache_file, 'r') as f:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
                         disk_data = json.load(f)
                         if isinstance(disk_data, list):
                             for point in disk_data:
@@ -353,7 +353,7 @@ class EnhancedPriceCacheManager(PriceCacheManager):
             # 3. Save the complete, merged data back to the file
             sorted_points = sorted(full_month_data_map.values(), key=lambda x: x['timestamp'])
             try:
-                with open(cache_file, 'w') as f:
+                with open(cache_file, 'w', encoding='utf-8') as f:
                     json.dump(sorted_points, f, indent=2)
             except Exception as e:
                 logger.error(f"Failed to save cache file {cache_file}: {e}")
